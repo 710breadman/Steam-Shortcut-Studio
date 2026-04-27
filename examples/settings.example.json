@@ -1,0 +1,42 @@
+{
+  "steam_path": "C:\\Program Files (x86)\\Steam",
+  "active_user_id": "123456789",
+  "collection_root": "D:\\Games",
+  "steamgriddb_api_key": "paste-your-api-key-here",
+  "rawg_api_key": "",
+  "sgdboop_path": "",
+  "cache_dir": "%LOCALAPPDATA%\\SteamShortcutStudio\\cache",
+  "update_existing_shortcuts": true,
+  "dark_mode": false,
+  "theme_name": "Follow System",
+  "view_filter": "All",
+  "sort_preset": "Title A-Z",
+  "artwork_preview_limit": 16,
+  "artwork_sources": {
+    "steam": true,
+    "steamgriddb": true,
+    "wikimedia": true,
+    "rawg": false
+  },
+  "visible_game_columns": [
+    "add",
+    "title",
+    "exe",
+    "confidence",
+    "artwork",
+    "existing"
+  ],
+  "game_column_order": [
+    "add",
+    "title",
+    "exe",
+    "confidence",
+    "artwork",
+    "existing"
+  ],
+  "default_tags": [
+    "Non Steam",
+    "Imported"
+  ],
+  "last_export_dir": ""
+}

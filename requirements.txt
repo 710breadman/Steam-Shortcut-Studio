@@ -1,0 +1,3 @@
+# Steam Shortcut Studio is intentionally standard-library-first.
+# Pillow is optional, but enables JPEG/WebP artwork previews in the GUI.
+Pillow>=10.0
