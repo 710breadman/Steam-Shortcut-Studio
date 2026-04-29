@@ -127,3 +127,114 @@ def dump_binary_vdf(mapping: MutableMapping[str, Any]) -> bytes:
 
 def save_binary_vdf(path: Path, mapping: MutableMapping[str, Any]) -> None:
     path.write_bytes(dump_binary_vdf(mapping))
+
+
+def _text_vdf_tokens(text: str) -> list[str]:
+    tokens: list[str] = []
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char.isspace():
+            index += 1
+            continue
+        if char == "/" and index + 1 < length and text[index + 1] == "/":
+            index = text.find("\n", index)
+            if index < 0:
+                break
+            continue
+        if char in "{}":
+            tokens.append(char)
+            index += 1
+            continue
+        if char == '"':
+            index += 1
+            value: list[str] = []
+            while index < length:
+                char = text[index]
+                if char == "\\" and index + 1 < length:
+                    escape = text[index + 1]
+                    value.append({"n": "\n", "r": "\r", "t": "\t"}.get(escape, escape))
+                    index += 2
+                    continue
+                if char == '"':
+                    index += 1
+                    break
+                value.append(char)
+                index += 1
+            else:
+                raise VdfParseError("Unterminated quoted string in text VDF.")
+            tokens.append("".join(value))
+            continue
+        start = index
+        while index < length and not text[index].isspace() and text[index] not in "{}":
+            index += 1
+        tokens.append(text[start:index])
+    return tokens
+
+
+class TextVdfReader:
+    def __init__(self, text: str) -> None:
+        self.tokens = _text_vdf_tokens(text)
+        self.index = 0
+
+    def read(self) -> OrderedDict[str, Any]:
+        mapping = self._read_mapping(root=True)
+        if self.index != len(self.tokens):
+            raise VdfParseError("Unexpected trailing token in text VDF.")
+        return mapping
+
+    def _next(self) -> str:
+        if self.index >= len(self.tokens):
+            raise VdfParseError("Unexpected end of text VDF.")
+        token = self.tokens[self.index]
+        self.index += 1
+        return token
+
+    def _read_mapping(self, root: bool = False) -> OrderedDict[str, Any]:
+        mapping: OrderedDict[str, Any] = OrderedDict()
+        while self.index < len(self.tokens):
+            key = self._next()
+            if key == "}":
+                if root:
+                    raise VdfParseError("Unexpected closing brace in text VDF.")
+                return mapping
+            if key == "{":
+                raise VdfParseError("Unexpected opening brace in text VDF.")
+            value = self._next()
+            if value == "{":
+                mapping[key] = self._read_mapping()
+            elif value == "}":
+                raise VdfParseError(f"Missing value for text VDF key {key!r}.")
+            else:
+                mapping[key] = value
+        if not root:
+            raise VdfParseError("Unexpected end of text VDF object.")
+        return mapping
+
+
+def _escape_text_vdf(value: object) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _write_text_mapping(lines: list[str], mapping: MutableMapping[str, Any], indent: int) -> None:
+    prefix = "\t" * indent
+    for key, value in mapping.items():
+        escaped_key = _escape_text_vdf(key)
+        if isinstance(value, MutableMapping):
+            lines.append(f'{prefix}"{escaped_key}"')
+            lines.append(f"{prefix}{{")
+            _write_text_mapping(lines, value, indent + 1)
+            lines.append(f"{prefix}}}")
+        else:
+            lines.append(f'{prefix}"{escaped_key}"\t\t"{_escape_text_vdf(value)}"')
+
+
+def load_text_vdf(path: Path) -> OrderedDict[str, Any]:
+    return TextVdfReader(path.read_text(encoding="utf-8", errors="replace")).read()
+
+
+def dump_text_vdf(mapping: MutableMapping[str, Any]) -> str:
+    lines: list[str] = []
+    _write_text_mapping(lines, mapping, 0)
+    return "\n".join(lines) + "\n"

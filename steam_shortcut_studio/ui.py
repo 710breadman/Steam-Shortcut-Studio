@@ -40,6 +40,7 @@ from .scanner import GameScanner, clean_display_title, is_specific_title_match, 
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
 from .steam_detection import detect_steam_install, find_steam_profiles, is_steam_running, is_valid_steam_path, reopen_steam, shutdown_steam_for_write
+from .steam_compat import CompatToolWriteResult, write_compat_tool_mappings
 from .steam_library import games_from_nonsteam_shortcuts, scan_installed_steam_games
 from .steam_notes import write_metadata_notes
 from .steam_store import find_steam_app, get_steam_app_details, official_steam_assets, steam_store_media_assets
@@ -84,10 +85,19 @@ SORT_PRESETS = [
 
 ARTWORK_KINDS = ("grid", "wide", "hero", "logo", "icon")
 ARTWORK_SEARCH_CACHE_VERSION = 3
-STEAMGRIDDB_API_URL = "https://www.steamgriddb.com/profile/preferences/api"
+STEAMGRIDDB_API_URL = "https://www.steamgriddb.com/profile/preferences"
 RAWG_API_URL = "https://rawg.io/apidocs"
 APP_ICON_PNG = "sss.png"
 APP_ICON_ICO = "sss.ico"
+DEFAULT_COMPAT_TOOL_LABEL = "Steam default (clear forced tool)"
+COMPAT_TOOL_CHOICES = {
+    DEFAULT_COMPAT_TOOL_LABEL: "",
+    "Proton Experimental": "proton_experimental",
+    "Proton Hotfix": "proton_hotfix",
+    "Proton 9.0": "proton_9",
+    "Proton 8.0": "proton_8",
+}
+COMPAT_TOOL_LABELS_BY_VALUE = {value: label for label, value in COMPAT_TOOL_CHOICES.items()}
 
 
 def normalized_artwork_cache_key(title: str) -> str:
@@ -1001,6 +1011,17 @@ class MainWindow(tk.Tk):
         self.logger.addHandler(file_handler)
         self.logger.info("Logging to %s", self.log_path)
 
+    def compat_tool_display_name(self, value: str | None) -> str:
+        return COMPAT_TOOL_LABELS_BY_VALUE.get(str(value or "").strip(), str(value or "").strip() or DEFAULT_COMPAT_TOOL_LABEL)
+
+    def selected_compat_tool_name(self) -> str:
+        text = self.compat_tool_var.get().strip()
+        if text in COMPAT_TOOL_CHOICES:
+            return COMPAT_TOOL_CHOICES[text]
+        if text.casefold().startswith("steam default"):
+            return ""
+        return text
+
     def _build_vars(self) -> None:
         self.steam_path_var = tk.StringVar(value=normalize_windows_path_text(self.settings.steam_path))
         self.collection_path_var = tk.StringVar(value=normalize_windows_path_text(self.settings.collection_root))
@@ -1014,6 +1035,7 @@ class MainWindow(tk.Tk):
         self.cache_location_var = tk.StringVar(value=str(Path(self.settings.cache_dir)))
         self.update_existing_var = tk.BooleanVar(value=self.settings.update_existing_shortcuts)
         self.default_tags_var = tk.StringVar(value=", ".join(self.settings.default_tags))
+        self.compat_tool_var = tk.StringVar(value=self.compat_tool_display_name(self.settings.steam_play_compat_tool))
         self.artwork_kind_var = tk.StringVar(value="all")
         self.artwork_search_var = tk.StringVar()
         initial_theme = self.normalized_theme_name(self.settings.theme_name)
@@ -1367,6 +1389,7 @@ class MainWindow(tk.Tk):
         self.sgdboop_path_var.set(normalize_windows_path_text(self.settings.sgdboop_path))
         self.update_existing_var.set(self.settings.update_existing_shortcuts)
         self.default_tags_var.set(", ".join(self.settings.default_tags))
+        self.compat_tool_var.set(self.compat_tool_display_name(self.settings.steam_play_compat_tool))
         theme = self.normalized_theme_name(self.settings.theme_name)
         self.theme_var.set(theme)
         self.dark_mode_var.set(self.theme_is_dark(theme))
@@ -1515,7 +1538,16 @@ class MainWindow(tk.Tk):
         ttk.Combobox(general, textvariable=self.view_filter_var, values=VIEW_FILTERS, state="readonly").grid(row=4, column=1, sticky="ew", pady=4)
         ttk.Label(general, text="Default sort").grid(row=5, column=0, sticky="w", padx=(0, 8), pady=4)
         ttk.Combobox(general, textvariable=self.sort_preset_var, values=SORT_PRESETS, state="readonly").grid(row=5, column=1, sticky="ew", pady=4)
-        ttk.Button(general, text="Reset Table Columns", command=self.reset_game_columns).grid(row=6, column=1, sticky="w", pady=(8, 0))
+        ttk.Label(general, text="Steam Play compatibility").grid(row=6, column=0, sticky="w", padx=(0, 8), pady=4)
+        compat_combo = ttk.Combobox(general, textvariable=self.compat_tool_var, values=list(COMPAT_TOOL_CHOICES), state="normal")
+        compat_combo.grid(row=6, column=1, sticky="ew", pady=4)
+        ttk.Label(
+            general,
+            text="Linux only. Pick a Proton option or type the exact Steam compatibility tool id.",
+            style="Subtle.TLabel",
+            wraplength=470,
+        ).grid(row=7, column=1, sticky="w", pady=(0, 8))
+        ttk.Button(general, text="Reset Table Columns", command=self.reset_game_columns).grid(row=8, column=1, sticky="w", pady=(8, 0))
 
         artwork.columnconfigure(1, weight=1)
         ttk.Label(artwork, text="SteamGridDB API key").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
@@ -1561,7 +1593,7 @@ class MainWindow(tk.Tk):
         ttk.Button(maintenance_actions, text="Delete Cached Artwork", command=self.delete_cached_artwork).grid(row=0, column=0, sticky="w", pady=4)
         ttk.Label(maintenance_actions, text="Removes downloaded artwork previews and artwork search caches.", style="Subtle.TLabel").grid(row=0, column=1, sticky="w", padx=(10, 0), pady=4)
         ttk.Button(maintenance_actions, text="Reset Settings to Defaults", command=self.reset_settings_to_defaults).grid(row=1, column=0, sticky="w", pady=4)
-        ttk.Label(maintenance_actions, text="Restores paths, keys, theme, filters, source toggles, and columns.", style="Subtle.TLabel").grid(row=1, column=1, sticky="w", padx=(10, 0), pady=4)
+        ttk.Label(maintenance_actions, text="Restores paths, keys, Steam Play choice, theme, filters, source toggles, and columns.", style="Subtle.TLabel").grid(row=1, column=1, sticky="w", padx=(10, 0), pady=4)
 
         buttons = ttk.Frame(window, padding=(12, 0, 12, 12))
         buttons.grid(row=1, column=0, sticky="ew")
@@ -2149,6 +2181,7 @@ class MainWindow(tk.Tk):
         self.settings.sgdboop_path = self.sgdboop_path_var.get().strip()
         self.settings.update_existing_shortcuts = self.update_existing_var.get()
         self.settings.default_tags = [tag.strip() for tag in self.default_tags_var.get().split(",") if tag.strip()]
+        self.settings.steam_play_compat_tool = self.selected_compat_tool_name()
         self.settings.theme_name = self.normalized_theme_name(self.theme_var.get())
         self.settings.dark_mode = self.theme_is_dark(self.settings.theme_name)
         self.settings.view_filter = self.view_filter_var.get() if self.view_filter_var.get() in VIEW_FILTERS else "All"
@@ -2169,15 +2202,35 @@ class MainWindow(tk.Tk):
             self.logger.info("Settings saved to %s", self.settings_store.settings_path)
 
     def open_external_url(self, url: str) -> None:
+        opened = False
         try:
-            opened = webbrowser.open(url)
+            if sys.platform.startswith("linux"):
+                for command in ("xdg-open", "gio"):
+                    executable = shutil.which(command)
+                    if not executable:
+                        continue
+                    args = [executable, "open", url] if command == "gio" else [executable, url]
+                    subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    opened = True
+                    break
+            if not opened:
+                opened = webbrowser.open(url, new=2)
         except Exception as exc:
             self.logger.warning("Could not open browser link %s: %s", url, exc)
-            messagebox.showerror(__app_name__, f"Could not open the browser link:\n\n{url}")
+            self.copy_link_to_clipboard(url)
+            messagebox.showerror(__app_name__, f"Could not open the browser link.\n\nThe link was copied instead:\n{url}")
             return
         if not opened:
             self.logger.warning("Browser did not accept link: %s", url)
-            messagebox.showerror(__app_name__, f"Could not open the browser link:\n\n{url}")
+            self.copy_link_to_clipboard(url)
+            messagebox.showerror(__app_name__, f"Could not open the browser link.\n\nThe link was copied instead:\n{url}")
+
+    def copy_link_to_clipboard(self, url: str) -> None:
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(url)
+        except tk.TclError:
+            self.logger.warning("Could not copy browser link to clipboard: %s", url)
 
     def detect_sgdboop(self) -> None:
         def done(detected: Path | None) -> None:
@@ -4059,12 +4112,15 @@ class MainWindow(tk.Tk):
         if not profile:
             messagebox.showwarning(__app_name__, "Choose a Steam profile first.")
             return
+        compat_tool = self.selected_compat_tool_name()
+        compat_for_preview = compat_tool if (os.name != "nt" or compat_tool) else None
         try:
             text = preview_changes(
                 profile,
                 self.games,
                 self.update_existing_var.get(),
                 default_tags=[tag.strip() for tag in self.default_tags_var.get().split(",") if tag.strip()],
+                compat_tool=compat_for_preview,
             )
         except VdfParseError as exc:
             messagebox.showerror(__app_name__, f"Steam shortcuts.vdf could not be parsed safely:\n\n{exc}")
@@ -4109,17 +4165,21 @@ class MainWindow(tk.Tk):
             return
         self.logger.info("Write requested for %s selected writable game(s).", len(selected))
         steam_path = Path(self.steam_path_var.get().strip())
+        compat_tool = self.selected_compat_tool_name()
+        compat_label = self.compat_tool_display_name(compat_tool)
+        manage_compat_tool = os.name != "nt" or bool(compat_tool)
 
-        def task() -> tuple[int, int, Path | None, int, int, bool, bool]:
+        def task() -> tuple[int, int, Path | None, int, int, CompatToolWriteResult | None, bool, bool]:
             steam_closed = False
             steam_reopened = False
             added = 0
             updated = 0
             backup: Path | None = None
+            compat_result: CompatToolWriteResult | None = None
             copied_count = 0
             notes_count = 0
             try:
-                self.set_task_progress("Closing Steam for a clean write, only if it is running...", 0, 5)
+                self.set_task_progress("Closing Steam for a clean write, only if it is running...", 0, 6)
                 self.raise_if_cancelled()
                 if is_valid_steam_path(steam_path):
                     steam_closed = shutdown_steam_for_write(steam_path)
@@ -4128,7 +4188,7 @@ class MainWindow(tk.Tk):
                 if steam_closed:
                     self.logger.info("Steam was closed before writing and will be reopened afterward.")
                 shortcut_games = [game for game in selected if game.selected_exe and not game.is_native_steam_game]
-                self.set_task_progress(f"Writing {len(shortcut_games)} non-Steam shortcut(s) safely...", 1, 5)
+                self.set_task_progress(f"Writing {len(shortcut_games)} non-Steam shortcut(s) safely...", 1, 6)
                 self.raise_if_cancelled()
                 if shortcut_games:
                     added, updated, backup = upsert_games(
@@ -4137,14 +4197,35 @@ class MainWindow(tk.Tk):
                         update_existing=self.update_existing_var.get(),
                         default_tags=[tag.strip() for tag in self.default_tags_var.get().split(",") if tag.strip()],
                     )
-                self.set_task_progress("Copying selected artwork into Steam's grid folder...", 2, 5)
+                self.set_task_progress(f"Applying Steam Play compatibility: {compat_label}...", 2, 6)
+                self.raise_if_cancelled()
+                if shortcut_games and manage_compat_tool:
+                    written_records = load_shortcuts(profile.shortcuts_path) if profile.shortcuts_path.exists() else []
+                    compat_records = [record for game in shortcut_games if (record := matching_record_for_game(written_records, game))]
+                    compat_result = write_compat_tool_mappings(profile, compat_records, compat_tool)
+                    if compat_result.tool:
+                        self.logger.info(
+                            "Steam Play compatibility set to %s for %s shortcut(s) in %s.",
+                            compat_result.tool,
+                            compat_result.applied,
+                            compat_result.config_path,
+                        )
+                    else:
+                        self.logger.info(
+                            "Steam Play compatibility cleared for %s shortcut(s) in %s.",
+                            compat_result.cleared,
+                            compat_result.config_path,
+                        )
+                elif shortcut_games:
+                    self.logger.info("Steam Play compatibility was left unchanged on Windows because no tool was selected.")
+                self.set_task_progress("Copying selected artwork into Steam's grid folder...", 3, 6)
                 self.raise_if_cancelled()
                 try:
                     copied = copy_all_artwork_to_steam(self.games, profile)
                 except Exception as exc:
                     copied = []
                     self.logger.warning("Shortcut write succeeded, but artwork copy failed: %s", exc)
-                self.set_task_progress("Writing release notes and Big Picture-visible shortcut tags...", 3, 5)
+                self.set_task_progress("Writing release notes and Big Picture-visible shortcut tags...", 4, 6)
                 self.raise_if_cancelled()
                 try:
                     for game in self.games:
@@ -4162,10 +4243,10 @@ class MainWindow(tk.Tk):
                 copied_count = len(copied)
                 notes_count = len(notes)
                 if steam_closed:
-                    self.set_task_progress("Reopening Steam because this app closed it...", 4, 5)
+                    self.set_task_progress("Reopening Steam because this app closed it...", 5, 6)
                     steam_reopened = reopen_steam(steam_path)
-                self.set_task_progress("Steam write finished; backups and logs are ready.", 5, 5)
-                return added, updated, backup, copied_count, notes_count, steam_closed, steam_reopened
+                self.set_task_progress("Steam write finished; backups and logs are ready.", 6, 6)
+                return added, updated, backup, copied_count, notes_count, compat_result, steam_closed, steam_reopened
             except Exception:
                 if steam_closed:
                     try:
@@ -4174,8 +4255,8 @@ class MainWindow(tk.Tk):
                         self.logger.warning("Steam was closed for writing but could not be reopened after an error: %s", exc)
                 raise
 
-        def done(result: tuple[int, int, Path | None, int, int, bool, bool]) -> None:
-            added, updated, backup, copied_count, notes_count, steam_closed, steam_reopened = result
+        def done(result: tuple[int, int, Path | None, int, int, CompatToolWriteResult | None, bool, bool]) -> None:
+            added, updated, backup, copied_count, notes_count, compat_result, steam_closed, steam_reopened = result
             profile_records = load_shortcuts(profile.shortcuts_path)
             mark_existing_shortcuts(self.games, profile_records)
             self.apply_existing_shortcut_choices(self.games, profile_records)
@@ -4184,9 +4265,19 @@ class MainWindow(tk.Tk):
             steam_text = ""
             if steam_closed:
                 steam_text = "\nSteam was closed automatically and reopened." if steam_reopened else "\nSteam was closed automatically, but could not be reopened."
+            compat_text = ""
+            if compat_result:
+                if compat_result.tool:
+                    compat_text = f"\nSteam Play compatibility: {self.compat_tool_display_name(compat_result.tool)} for {compat_result.applied} shortcut(s)."
+                elif compat_result.cleared:
+                    compat_text = f"\nSteam Play compatibility: forced tools cleared for {compat_result.cleared} shortcut(s)."
+                else:
+                    compat_text = "\nSteam Play compatibility: Steam default; no forced mappings needed clearing."
+                if compat_result.backup:
+                    compat_text += f"\nCompatibility config backup: {compat_result.backup}"
             messagebox.showinfo(
                 __app_name__,
-                f"Steam shortcuts written.\n\nAdded: {added}\nUpdated: {updated}\nArtwork files copied: {copied_count}\nSteam notes written: {notes_count}\n\nBackup: {backup_text}{steam_text}",
+                f"Steam shortcuts written.\n\nAdded: {added}\nUpdated: {updated}\nArtwork files copied: {copied_count}\nSteam notes written: {notes_count}{compat_text}\n\nBackup: {backup_text}{steam_text}",
             )
 
         self.run_background("Writing Steam shortcuts", task, done, exclusive=True)

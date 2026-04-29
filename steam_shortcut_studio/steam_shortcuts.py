@@ -368,6 +368,7 @@ def preview_changes(
     games: list[DetectedGame],
     update_existing: bool,
     default_tags: list[str] | None = None,
+    compat_tool: str | None = None,
 ) -> str:
     warning = ""
     try:
@@ -419,6 +420,9 @@ def preview_changes(
             lines.append(f"  Existing AppID: {existing_record.unsigned_appid}")
         else:
             lines.append(f"  New AppID: {record.unsigned_appid}")
+        if compat_tool is not None:
+            compat_text = compat_tool or "Steam default (clear forced tool)"
+            lines.append(f"  Steam Play compatibility: {compat_text}")
         note_body = game.metadata.notes or build_metadata_notes(game)
         if note_body:
             lines.append("  Notes preview:")

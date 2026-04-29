@@ -42,6 +42,7 @@ class AppSettings:
     steamgriddb_api_key: str = ""
     rawg_api_key: str = ""
     sgdboop_path: str = ""
+    steam_play_compat_tool: str = ""
     cache_dir: str = field(default_factory=lambda: str(_local_cache_dir()))
     update_existing_shortcuts: bool = True
     default_tags: list[str] = field(default_factory=lambda: ["Non Steam", "Imported"])
@@ -77,6 +78,7 @@ class AppSettings:
             settings.artwork_preview_limit = 80
         if not settings.theme_name:
             settings.theme_name = "Midnight" if settings.dark_mode else "Follow System"
+        settings.steam_play_compat_tool = str(settings.steam_play_compat_tool or "").strip()
         if not isinstance(settings.artwork_sources, dict):
             settings.artwork_sources = dict(DEFAULT_ARTWORK_SOURCES)
         else:

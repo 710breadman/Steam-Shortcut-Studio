@@ -16,6 +16,7 @@ from steam_shortcut_studio.models import ArtworkAsset, DetectedGame, ExecutableC
 from steam_shortcut_studio.scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
 from steam_shortcut_studio.settings_store import AppSettings, SettingsStore
 from steam_shortcut_studio.steam_detection import is_valid_steam_path
+from steam_shortcut_studio.steam_compat import write_compat_tool_mappings
 from steam_shortcut_studio.steam_library import games_from_nonsteam_shortcuts
 from steam_shortcut_studio.steam_notes import write_metadata_notes
 from steam_shortcut_studio.steam_shortcuts import (
@@ -44,6 +45,7 @@ from steam_shortcut_studio.ui import (
     release_year_from_text,
 )
 from steam_shortcut_studio.steam_store import find_steam_app, official_steam_assets, steam_store_media_assets
+from steam_shortcut_studio.vdf import load_text_vdf
 
 
 def write_fake_exe(path: Path, size: int = 1024 * 1024) -> None:
@@ -222,6 +224,37 @@ def test_upsert_and_duplicate_marking() -> None:
         assert updated_record.launch_options == "-manual-option"
         assert updated_record.allow_overlay == 0
         assert updated_record.tags == ["ManualTag", "Non Steam", "Imported", "Action"]
+
+
+def test_steam_play_compat_tool_mapping_writes_linux_config() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        steam_root = Path(tmp) / "Steam"
+        profile = SteamProfile(
+            user_id="123",
+            config_dir=steam_root / "userdata" / "123" / "config",
+            shortcuts_path=steam_root / "userdata" / "123" / "config" / "shortcuts.vdf",
+            grid_dir=steam_root / "userdata" / "123" / "config" / "grid",
+        )
+        exe = Path(tmp) / "Games" / "Example" / "Example.exe"
+        write_fake_exe(exe)
+        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe, selected=True)
+        upsert_games(profile, [game], update_existing=True, default_tags=[])
+        records = load_shortcuts(profile.shortcuts_path)
+        appid = str(records[0].unsigned_appid)
+
+        result = write_compat_tool_mappings(profile, records, "proton_experimental")
+        assert result.config_path == steam_root / "config" / "config.vdf"
+        assert result.applied == 1
+        root = load_text_vdf(result.config_path)
+        mapping = root["InstallConfigStore"]["Software"]["Valve"]["Steam"]["CompatToolMapping"]
+        assert mapping[appid]["name"] == "proton_experimental"
+        assert mapping[appid]["priority"] == "250"
+
+        cleared = write_compat_tool_mappings(profile, records, "")
+        assert cleared.cleared == 1
+        root = load_text_vdf(cleared.config_path)
+        mapping = root["InstallConfigStore"]["Software"]["Valve"]["Steam"]["CompatToolMapping"]
+        assert appid not in mapping
 
 
 def test_malformed_shortcuts_vdf_is_backed_up_and_replaced() -> None:
@@ -443,6 +476,8 @@ def test_preview_shows_exact_notes_payload() -> None:
         assert "Notes preview:" in text
         assert "Exact reviewed notes." in text
         assert "Line two." in text
+        compat_text = preview_changes(profile, [game], update_existing=True, default_tags=[], compat_tool="proton_experimental")
+        assert "Steam Play compatibility: proton_experimental" in compat_text
 
 
 def test_selected_executable_is_written_to_shortcut() -> None:
@@ -667,6 +702,7 @@ def test_settings_roundtrip_includes_view_and_metadata_options() -> None:
             artwork_preview_limit=24,
             theme_name="Glacier Blue",
             rawg_api_key="rawg-test-key",
+            steam_play_compat_tool="proton_experimental",
             artwork_sources={"steam": True, "steamgriddb": False, "wikimedia": True, "rawg": True},
             metadata_sources={"executable": True, "steamgriddb": False, "steam": True, "pcgamingwiki": False, "wikipedia": True},
         )
@@ -677,6 +713,7 @@ def test_settings_roundtrip_includes_view_and_metadata_options() -> None:
         assert loaded.artwork_preview_limit == 24
         assert loaded.theme_name == "Glacier Blue"
         assert loaded.rawg_api_key == "rawg-test-key"
+        assert loaded.steam_play_compat_tool == "proton_experimental"
         assert loaded.artwork_sources["rawg"] is True
         assert loaded.artwork_sources["steamgriddb"] is False
         assert loaded.metadata_sources["steamgriddb"] is False
@@ -902,7 +939,7 @@ def test_path_and_store_media_fallbacks_are_stable() -> None:
 
 def test_artwork_cache_key_and_api_links_are_stable() -> None:
     assert normalized_artwork_cache_key("  God   of WAR  ") == "god of war"
-    assert STEAMGRIDDB_API_URL == "https://www.steamgriddb.com/profile/preferences/api"
+    assert STEAMGRIDDB_API_URL == "https://www.steamgriddb.com/profile/preferences"
     assert RAWG_API_URL.startswith("https://rawg.io/")
 
 
@@ -917,6 +954,7 @@ if __name__ == "__main__":
     test_scanner_detects_native_linux_launch_candidates()
     test_linux_steam_path_can_be_validated()
     test_upsert_and_duplicate_marking()
+    test_steam_play_compat_tool_mapping_writes_linux_config()
     test_malformed_shortcuts_vdf_is_backed_up_and_replaced()
     test_combined_scan_keeps_folder_row_writable_when_shortcut_exists()
     test_combined_scan_merges_existing_shortcut_when_scan_picks_different_exe()

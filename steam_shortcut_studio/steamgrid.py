@@ -5,10 +5,10 @@ import logging
 import time
 import urllib.error
 import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any
 
+from .http_client import open_url, request_with_headers
 from .models import ArtworkAsset
 
 LOGGER = logging.getLogger(__name__)
@@ -48,16 +48,15 @@ class SteamGridDbClient:
         if not self.api_key:
             raise SteamGridDbError("SteamGridDB API key is not configured.")
         url = f"{self.BASE_URL}{endpoint}"
-        request = urllib.request.Request(
+        request = request_with_headers(
             url,
             headers={
                 "Authorization": f"Bearer {self.api_key}",
-                "User-Agent": "SteamShortcutStudio/0.1",
                 "Accept": "application/json",
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=25) as response:
+            with open_url(request, timeout=25) as response:
                 charset = response.headers.get_content_charset() or "utf-8"
                 return json.loads(response.read().decode(charset, errors="replace"))
         except urllib.error.HTTPError as exc:

@@ -4,11 +4,11 @@ import mimetypes
 import shutil
 import urllib.error
 import urllib.parse
-import urllib.request
 from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
+from .http_client import open_url, request_with_headers
 from .models import ArtworkAsset, DetectedGame, SteamProfile
 from .steam_shortcuts import grid_appid, shortcut_from_game
 
@@ -40,10 +40,25 @@ def download_asset(asset: ArtworkAsset, cache_dir: Path) -> Path:
     if destination.exists() and destination.stat().st_size > 0:
         asset.local_path = destination
         return destination
-    request = urllib.request.Request(asset.url, headers={"User-Agent": "SteamShortcutStudio/0.1"})
+    request = request_with_headers(
+        asset.url,
+        headers={
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Referer": "https://www.steamgriddb.com/",
+        },
+    )
     try:
-        with urllib.request.urlopen(request, timeout=45) as response:
-            destination.write_bytes(response.read())
+        with open_url(request, timeout=45) as response:
+            data = response.read()
+            content_type = response.headers.get("Content-Type", "")
+            if not data:
+                raise RuntimeError("Downloaded artwork was empty.")
+            if "text/html" in content_type.casefold():
+                raise RuntimeError(f"Artwork URL returned HTML instead of an image: {content_type}")
+            destination.write_bytes(data)
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:240]
+        raise RuntimeError(f"Could not download artwork: HTTP {exc.code} {detail}") from exc
     except urllib.error.URLError as exc:
         raise RuntimeError(f"Could not download artwork: {exc}") from exc
     asset.local_path = destination

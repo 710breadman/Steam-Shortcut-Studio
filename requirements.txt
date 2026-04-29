@@ -1,3 +1,6 @@
 # Steam Shortcut Studio is intentionally standard-library-first.
 # Pillow is optional, but enables JPEG/WebP artwork previews in the GUI.
 Pillow>=10.0
+# Bundled Linux builds use certifi so HTTPS artwork/API calls do not depend on
+# a distro-specific CA bundle being visible from the PyInstaller runtime.
+certifi>=2024.8.30

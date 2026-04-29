@@ -51,6 +51,7 @@ jobs:
           --add-data "steam_shortcut_studio/assets/sss.png:steam_shortcut_studio/assets"
           --add-data "steam_shortcut_studio/assets/sss.ico:steam_shortcut_studio/assets"
           --collect-all PIL
+          --collect-all certifi
           main.py
 
       - name: Mark Linux binary executable

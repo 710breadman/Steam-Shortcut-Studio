@@ -27,6 +27,18 @@ class SteamProfile:
             label += " (most recent)"
         return label
 
+    @property
+    def steam_root(self) -> Path:
+        if self.config_dir.name == "config" and self.config_dir.parent.name == self.user_id and self.config_dir.parent.parent.name == "userdata":
+            return self.config_dir.parent.parent.parent
+        if self.config_dir.name == "config":
+            return self.config_dir.parent
+        return self.config_dir
+
+    @property
+    def compatibility_config_path(self) -> Path:
+        return self.steam_root / "config" / "config.vdf"
+
 
 @dataclass(slots=True)
 class ExecutableCandidate:

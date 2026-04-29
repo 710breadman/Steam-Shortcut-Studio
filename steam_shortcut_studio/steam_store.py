@@ -2,13 +2,11 @@ from __future__ import annotations
 
 import json
 import urllib.parse
-import urllib.request
 from typing import Any
 
+from .http_client import open_url, request_with_headers
 from .models import ArtworkAsset
 from .scanner import is_specific_title_match, similarity
-
-USER_AGENT = "SteamShortcutStudio/0.1 (personal metadata and asset lookup)"
 
 
 def canonical_steam_app_for_title(term: str) -> dict[str, Any] | None:
@@ -21,8 +19,8 @@ def canonical_steam_app_for_title(term: str) -> dict[str, Any] | None:
 
 
 def get_json(url: str, timeout: int = 15) -> dict[str, Any]:
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-    with urllib.request.urlopen(request, timeout=timeout) as response:
+    request = request_with_headers(url, headers={"Accept": "application/json"})
+    with open_url(request, timeout=timeout) as response:
         return json.loads(response.read().decode("utf-8", errors="replace"))
 
 
