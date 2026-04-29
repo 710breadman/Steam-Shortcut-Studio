@@ -9,11 +9,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import steam_shortcut_studio.scanner as scanner_module
 from steam_shortcut_studio.artwork import asset_download_cache_path, artwork_assets_for_steam_slots, copy_all_artwork_to_steam
 from steam_shortcut_studio.metadata import MetadataService
 from steam_shortcut_studio.models import ArtworkAsset, DetectedGame, ExecutableCandidate, GameMetadata, SteamProfile
 from steam_shortcut_studio.scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
 from steam_shortcut_studio.settings_store import AppSettings, SettingsStore
+from steam_shortcut_studio.steam_detection import is_valid_steam_path
 from steam_shortcut_studio.steam_library import games_from_nonsteam_shortcuts
 from steam_shortcut_studio.steam_notes import write_metadata_notes
 from steam_shortcut_studio.steam_shortcuts import (
@@ -152,6 +154,35 @@ def test_scanner_detects_exes_but_leaves_games_unselected_by_default() -> None:
         assert len(games) == 1
         assert games[0].selected_exe is not None
         assert games[0].selected is False
+
+
+def test_scanner_detects_native_linux_launch_candidates() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        native_launcher = root / "Native Example" / "NativeExample.sh"
+        native_launcher.parent.mkdir(parents=True, exist_ok=True)
+        native_launcher.write_text("#!/usr/bin/env sh\nexec ./NativeExample\n", encoding="utf-8")
+
+        original = scanner_module.native_launch_candidates_enabled
+        scanner_module.native_launch_candidates_enabled = lambda: True
+        try:
+            games = GameScanner().scan(root)
+        finally:
+            scanner_module.native_launch_candidates_enabled = original
+
+        assert len(games) == 1
+        assert games[0].title == "Native Example"
+        assert games[0].selected_exe == native_launcher
+        assert any("Linux" in reason for reason in games[0].candidates[0].reasons)
+
+
+def test_linux_steam_path_can_be_validated() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        steam_root = Path(tmp) / "Steam"
+        (steam_root / "userdata").mkdir(parents=True)
+        (steam_root / "steamapps").mkdir()
+        (steam_root / "steam.sh").write_text("#!/usr/bin/env sh\n", encoding="utf-8")
+        assert is_valid_steam_path(steam_root)
 
 
 def test_upsert_and_duplicate_marking() -> None:
@@ -752,10 +783,15 @@ def test_list_artwork_search_clears_cache_for_selected_current_view_games() -> N
 
 def test_reset_settings_to_defaults_rewrites_settings_file() -> None:
     with tempfile.TemporaryDirectory() as tmp:
-        old_appdata = os.environ.get("APPDATA")
-        old_localappdata = os.environ.get("LOCALAPPDATA")
-        os.environ["APPDATA"] = str(Path(tmp) / "Roaming")
-        os.environ["LOCALAPPDATA"] = str(Path(tmp) / "Local")
+        old_env = {key: os.environ.get(key) for key in ("APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME", "XDG_CACHE_HOME")}
+        if os.name == "nt":
+            os.environ["APPDATA"] = str(Path(tmp) / "Roaming")
+            os.environ["LOCALAPPDATA"] = str(Path(tmp) / "Local")
+            expected_cache = Path(tmp) / "Local" / "SteamShortcutStudio" / "cache"
+        else:
+            os.environ["XDG_CONFIG_HOME"] = str(Path(tmp) / "config")
+            os.environ["XDG_CACHE_HOME"] = str(Path(tmp) / "cache-root")
+            expected_cache = Path(tmp) / "cache-root" / "SteamShortcutStudio" / "cache"
         try:
             store = SettingsStore(Path(tmp) / "settings.json")
             store.save(
@@ -779,16 +815,13 @@ def test_reset_settings_to_defaults_rewrites_settings_file() -> None:
             assert loaded.rawg_api_key == ""
             assert loaded.theme_name == "Follow System"
             assert loaded.view_filter == "All"
-            assert Path(loaded.cache_dir) == Path(tmp) / "Local" / "SteamShortcutStudio" / "cache"
+            assert Path(loaded.cache_dir) == expected_cache
         finally:
-            if old_appdata is None:
-                os.environ.pop("APPDATA", None)
-            else:
-                os.environ["APPDATA"] = old_appdata
-            if old_localappdata is None:
-                os.environ.pop("LOCALAPPDATA", None)
-            else:
-                os.environ["LOCALAPPDATA"] = old_localappdata
+            for key, value in old_env.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
 
 
 def test_artwork_search_terms_prefer_folder_title_and_logical_aliases() -> None:
@@ -844,7 +877,8 @@ def test_artwork_candidate_score_prefers_matching_release_year() -> None:
 
 
 def test_path_and_store_media_fallbacks_are_stable() -> None:
-    assert normalize_windows_path_text("D:/pcgame") == r"D:\pcgame"
+    expected_path = r"D:\pcgame" if os.name == "nt" else "D:/pcgame"
+    assert normalize_windows_path_text("D:/pcgame") == expected_path
     assert find_steam_app("Ghost of Tsushima DC") == {"id": 2215430, "name": "Ghost of Tsushima DIRECTOR'S CUT"}
     official = official_steam_assets(2215430, "Ghost of Tsushima DIRECTOR'S CUT")
     assert any("store_item_assets" in asset.url for asset in official["wide"])
@@ -876,6 +910,8 @@ if __name__ == "__main__":
     test_scanner_prefers_root_title_exe_over_unrelated_shipping_codename()
     test_scanner_reports_games_as_they_are_ranked()
     test_scanner_detects_exes_but_leaves_games_unselected_by_default()
+    test_scanner_detects_native_linux_launch_candidates()
+    test_linux_steam_path_can_be_validated()
     test_upsert_and_duplicate_marking()
     test_malformed_shortcuts_vdf_is_backed_up_and_replaced()
     test_combined_scan_keeps_folder_row_writable_when_shortcut_exists()

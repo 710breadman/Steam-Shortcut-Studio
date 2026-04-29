@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Steam Shortcut Studio
+Comment=Manage Steam non-Steam shortcuts and artwork
+Exec=SteamShortcutStudio-Linux
+Icon=steam-shortcut-studio
+Terminal=false
+Categories=Game;Utility;

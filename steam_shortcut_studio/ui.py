@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 import json
+import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -98,7 +100,18 @@ def normalize_windows_path_text(path_text: str) -> str:
         return ""
     if "://" in text:
         return text
+    if os.name != "nt":
+        return text
     return str(PureWindowsPath(text))
+
+
+def launch_filetypes() -> list[tuple[str, str]]:
+    if os.name == "nt":
+        return [("Windows executables", "*.exe"), ("All files", "*.*")]
+    return [
+        ("Launch files", "*.exe *.sh *.AppImage *.appimage *.x86_64 *.x86 *.bin *.run"),
+        ("All files", "*.*"),
+    ]
 
 
 def app_asset_path(filename: str) -> Path | None:
@@ -1114,7 +1127,7 @@ class MainWindow(tk.Tk):
         ttk.Label(header, text="Steam Shortcut Studio", style="Header.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             header,
-            text="Scan Windows game folders, choose the right executable, fetch SteamGridDB art, and write safe non-Steam shortcuts.",
+            text="Scan game folders, choose the right launch file, fetch Steam-style art, and write safe non-Steam shortcuts.",
             style="Subtle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
         ttk.Label(header, textvariable=self.profile_status_var, style="Subtle.TLabel").grid(row=1, column=1, sticky="e", padx=(0, 12))
@@ -1146,20 +1159,20 @@ class MainWindow(tk.Tk):
         ttk.Label(setup, text="1. Steam").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=1)
         steam_entry = ttk.Entry(setup, textvariable=self.steam_path_var)
         steam_entry.grid(row=0, column=1, sticky="ew", pady=1)
-        ToolTip(steam_entry, "Steam install folder. The app looks for steam.exe and userdata here.")
+        ToolTip(steam_entry, "Steam install folder. The app looks for Steam's launcher and userdata here.")
         browse_steam_button = ttk.Button(setup, text="Browse", width=button_width, command=self.browse_steam)
         browse_steam_button.grid(row=0, column=2, padx=(8, 6), pady=1)
         ToolTip(browse_steam_button, "Manually choose the Steam folder if detection misses it.")
         detect_button = ttk.Button(setup, text="Detect", width=button_width, command=self.detect_steam)
         detect_button.grid(row=0, column=3, padx=(0, 6), pady=1)
-        ToolTip(detect_button, "Auto-detect Steam from the registry and common install folders.")
+        ToolTip(detect_button, "Auto-detect Steam from common install folders.")
         ttk.Label(setup, text="2. Games").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=1)
         collection_entry = ttk.Entry(setup, textvariable=self.collection_path_var)
         collection_entry.grid(row=1, column=1, sticky="ew", pady=1)
         ToolTip(collection_entry, "Root folder containing your non-Steam games. Each top-level child folder becomes the game title.")
         choose_button = ttk.Button(setup, text="Browse", width=button_width, command=self.browse_collection)
         choose_button.grid(row=1, column=2, padx=(8, 6), pady=1)
-        ToolTip(choose_button, "Pick the folder to scan recursively for .exe files.")
+        ToolTip(choose_button, "Pick the folder to scan recursively for launch files.")
         scan_button = ttk.Button(setup, text="Scan", width=button_width, style="Accent.TButton", command=self.scan_all_libraries)
         scan_button.grid(row=0, column=4, rowspan=2, sticky="nsew", padx=(6, 0), pady=1)
         ToolTip(scan_button, "Scan installed Steam games, existing non-Steam shortcuts, and the chosen game folder in one pass.")
@@ -2174,8 +2187,8 @@ class MainWindow(tk.Tk):
                 self.logger.info("Detected SGDBoop at %s", detected)
                 return
             path = filedialog.askopenfilename(
-                title="Choose SGDBoop.exe",
-                filetypes=[("SGDBoop", "SGDBoop.exe"), ("Executables", "*.exe"), ("All files", "*.*")],
+                title="Choose SGDBoop",
+                filetypes=[("SGDBoop", "SGDBoop.exe sgdboop SGDBoop"), ("Executables", "*.exe"), ("All files", "*.*")],
             )
             if path:
                 self.sgdboop_path_var.set(path)
@@ -2851,9 +2864,9 @@ class MainWindow(tk.Tk):
             return
         self.save_current_detail()
         path = filedialog.askopenfilename(
-            title=f"Choose executable for {game.title}",
+            title=f"Choose launch file for {game.title}",
             initialdir=str(game.root_path),
-            filetypes=[("Windows executables", "*.exe"), ("All files", "*.*")],
+            filetypes=launch_filetypes(),
         )
         if not path:
             return
@@ -3762,7 +3775,7 @@ class MainWindow(tk.Tk):
         )
         menu.add_separator()
         menu.add_command(
-            label="Edit in Paint",
+            label="Edit in Paint" if os.name == "nt" else "Open Image Externally",
             command=lambda: self.edit_selected_artwork_in_paint(kind),
             state=tk.NORMAL if has_path else tk.DISABLED,
         )
@@ -3865,13 +3878,29 @@ class MainWindow(tk.Tk):
         if not path:
             messagebox.showinfo(__app_name__, f"No {kind} artwork is selected.")
             return
+        if os.name == "nt":
+            command = ["mspaint.exe", str(path)]
+            app_name = "Paint"
+            popen_kwargs: dict[str, Any] = {}
+        else:
+            opener = shutil.which("xdg-open") or shutil.which("gio")
+            if not opener:
+                messagebox.showerror(__app_name__, "Could not find xdg-open or gio to open the image.")
+                return
+            command = [opener, "open", str(path)] if Path(opener).name == "gio" else [opener, str(path)]
+            app_name = "the default image app"
+            popen_kwargs = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "start_new_session": True}
         try:
-            process = subprocess.Popen(["mspaint.exe", str(path)])
+            process = subprocess.Popen(command, **popen_kwargs)
         except OSError as exc:
-            self.logger.warning("Could not open Paint for %s: %s", path, exc)
-            messagebox.showerror(__app_name__, f"Could not open Paint:\n\n{exc}")
+            self.logger.warning("Could not open external image editor for %s: %s", path, exc)
+            messagebox.showerror(__app_name__, f"Could not open {app_name}:\n\n{exc}")
             return
-        self.status_var.set(f"Opened {kind} artwork in Paint.")
+        self.status_var.set(f"Opened {kind} artwork in {app_name}.")
+
+        if os.name != "nt":
+            self.after(1500, lambda: self.refresh_artwork_after_external_edit(path, kind))
+            return
 
         def wait_for_paint() -> None:
             try:

@@ -14,6 +14,61 @@ LOGGER = logging.getLogger(__name__)
 STEAMID64_OFFSET = 76561197960265728
 
 
+def _is_windows() -> bool:
+    return os.name == "nt"
+
+
+def _normalize_steam_candidate(path: Path) -> Path:
+    path = path.expanduser()
+    if path.name.casefold() in {"steam.exe", "steam.sh", "steam"}:
+        return path.parent
+    return path
+
+
+def _linux_steam_candidates() -> list[Path]:
+    home = Path.home()
+    candidates: list[Path] = []
+    for env_name in ("STEAM_PATH", "STEAM_HOME"):
+        raw = os.environ.get(env_name)
+        if raw:
+            candidates.append(Path(raw))
+    candidates.extend(
+        [
+            home / ".local" / "share" / "Steam",
+            home / ".steam" / "steam",
+            home / ".steam" / "root",
+            home / ".var" / "app" / "com.valvesoftware.Steam" / ".local" / "share" / "Steam",
+            Path("/home/deck/.local/share/Steam"),
+        ]
+    )
+    return candidates
+
+
+def _windows_steam_candidates() -> list[Path]:
+    candidates: list[Path] = []
+    registry_checks = [
+        ("HKCU", r"Software\Valve\Steam", "SteamPath"),
+        ("HKCU", r"Software\Valve\Steam", "SteamExe"),
+        ("HKLM", r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+        ("HKLM", r"SOFTWARE\Valve\Steam", "InstallPath"),
+    ]
+    for root, key, value in registry_checks:
+        raw = _read_registry_value(root, key, value)
+        if not raw:
+            continue
+        candidates.append(Path(raw.replace("/", "\\")))
+
+    if os.environ.get("STEAM_PATH"):
+        candidates.append(Path(os.environ["STEAM_PATH"]))
+    candidates.extend(
+        [
+            Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Steam",
+            Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Steam",
+        ]
+    )
+    return candidates
+
+
 def _read_registry_value(root_name: str, key_path: str, value_name: str) -> str:
     try:
         import winreg
@@ -32,39 +87,26 @@ def _read_registry_value(root_name: str, key_path: str, value_name: str) -> str:
 
 
 def detect_steam_install() -> Path | None:
-    candidates: list[Path] = []
-    registry_checks = [
-        ("HKCU", r"Software\Valve\Steam", "SteamPath"),
-        ("HKCU", r"Software\Valve\Steam", "SteamExe"),
-        ("HKLM", r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
-        ("HKLM", r"SOFTWARE\Valve\Steam", "InstallPath"),
-    ]
-    for root, key, value in registry_checks:
-        raw = _read_registry_value(root, key, value)
-        if not raw:
-            continue
-        path = Path(raw.replace("/", "\\"))
-        if path.name.lower() == "steam.exe":
-            path = path.parent
-        candidates.append(path)
-
-    if os.environ.get("STEAM_PATH"):
-        candidates.append(Path(os.environ["STEAM_PATH"]))
-    candidates.extend(
-        [
-            Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Steam",
-            Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Steam",
-        ]
-    )
+    candidates = _windows_steam_candidates() if _is_windows() else _linux_steam_candidates()
 
     for candidate in candidates:
+        candidate = _normalize_steam_candidate(candidate)
         if is_valid_steam_path(candidate):
             return candidate.resolve()
     return None
 
 
 def is_valid_steam_path(path: Path) -> bool:
-    return path.exists() and path.is_dir() and (path / "steam.exe").exists() and (path / "userdata").exists()
+    path = path.expanduser()
+    if not path.exists() or not path.is_dir() or not (path / "userdata").exists():
+        return False
+    launchers = [
+        path / "steam.exe",
+        path / "steam.sh",
+        path / "steam",
+        path / "ubuntu12_32" / "steam",
+    ]
+    return any(launcher.exists() for launcher in launchers) or (path / "steamapps").exists()
 
 
 def _parse_login_users(steam_path: Path) -> dict[str, dict[str, str | bool]]:
@@ -149,7 +191,7 @@ def find_steam_profiles(steam_path: Path) -> list[SteamProfile]:
 
 
 def is_steam_running() -> bool:
-    if shutil.which("tasklist"):
+    if _is_windows() and shutil.which("tasklist"):
         try:
             output = subprocess.check_output(
                 ["tasklist", "/FI", "IMAGENAME eq steam.exe"],
@@ -160,6 +202,31 @@ def is_steam_running() -> bool:
             return "steam.exe" in output.lower()
         except Exception:
             return False
+    for process_name in ("steam", "steamwebhelper"):
+        if shutil.which("pgrep"):
+            try:
+                result = subprocess.run(
+                    ["pgrep", "-x", process_name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    return True
+            except Exception:
+                continue
+        if shutil.which("pidof"):
+            try:
+                result = subprocess.run(
+                    ["pidof", process_name],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    return True
+            except Exception:
+                continue
     return False
 
 
@@ -172,6 +239,34 @@ def wait_for_steam_exit(timeout_seconds: int = 30) -> bool:
     return not is_steam_running()
 
 
+def _popen_kwargs(detached: bool = False) -> dict[str, object]:
+    kwargs: dict[str, object] = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    if _is_windows():
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0
+    elif detached:
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
+def _steam_launcher_commands(steam_path: Path) -> list[list[str]]:
+    steam_path = steam_path.expanduser()
+    if _is_windows():
+        steam_exe = steam_path / "steam.exe"
+        return [[str(steam_exe)]] if steam_exe.exists() else []
+
+    commands: list[list[str]] = []
+    from_path = shutil.which("steam")
+    if from_path:
+        commands.append([from_path])
+    for candidate in [steam_path / "steam.sh", steam_path / "steam", steam_path / "ubuntu12_32" / "steam"]:
+        if candidate.exists():
+            commands.append([str(candidate)])
+    return commands
+
+
 def shutdown_steam_for_write(steam_path: Path, timeout_seconds: int = 30) -> bool:
     """Close Steam before writing shortcuts.
 
@@ -180,44 +275,50 @@ def shutdown_steam_for_write(steam_path: Path, timeout_seconds: int = 30) -> boo
     """
     if not is_steam_running():
         return False
-    steam_exe = steam_path / "steam.exe"
-    if steam_exe.exists():
+    for command in _steam_launcher_commands(steam_path):
         try:
-            subprocess.Popen(
-                [str(steam_exe), "-shutdown"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
-            )
+            subprocess.Popen([*command, "-shutdown"], **_popen_kwargs(detached=True))
+            break
         except Exception as exc:
             LOGGER.warning("Could not ask Steam to shut down gracefully: %s", exc)
     if wait_for_steam_exit(timeout_seconds):
         return True
 
-    try:
-        subprocess.run(
-            ["taskkill", "/IM", "steam.exe", "/F", "/T"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=10,
-            creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
-            check=False,
-        )
-    except Exception as exc:
-        LOGGER.warning("Could not force close Steam: %s", exc)
+    if _is_windows():
+        try:
+            subprocess.run(
+                ["taskkill", "/IM", "steam.exe", "/F", "/T"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=10,
+                creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
+                check=False,
+            )
+        except Exception as exc:
+            LOGGER.warning("Could not force close Steam: %s", exc)
+    elif shutil.which("pkill"):
+        for signal in ("-TERM", "-KILL"):
+            try:
+                subprocess.run(["pkill", signal, "-x", "steam"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, check=False)
+                subprocess.run(
+                    ["pkill", signal, "-x", "steamwebhelper"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=10,
+                    check=False,
+                )
+            except Exception as exc:
+                LOGGER.warning("Could not force close Steam: %s", exc)
+            if wait_for_steam_exit(5):
+                break
     if not wait_for_steam_exit(10):
         raise RuntimeError("Steam is still running, so shortcuts were not written.")
     return True
 
 
 def reopen_steam(steam_path: Path) -> bool:
-    steam_exe = steam_path / "steam.exe"
-    if not steam_exe.exists():
+    commands = _steam_launcher_commands(steam_path)
+    if not commands:
         return False
-    subprocess.Popen(
-        [str(steam_exe)],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        creationflags=subprocess.CREATE_NO_WINDOW if hasattr(subprocess, "CREATE_NO_WINDOW") else 0,
-    )
+    subprocess.Popen(commands[0], **_popen_kwargs(detached=True))
     return True

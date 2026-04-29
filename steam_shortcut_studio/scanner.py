@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import re
 from collections import defaultdict
 from difflib import SequenceMatcher
@@ -39,6 +40,7 @@ BAD_NAME_PARTS = {
     "settings",
     "editor",
     "server",
+    "steamerrorreporter",
 }
 
 BAD_PATH_PARTS = {
@@ -56,6 +58,7 @@ BAD_PATH_PARTS = {
     "prereqs",
     "crashreporter",
     "binaries/thirdparty",
+    "crashpad",
 }
 
 GOOD_PATH_PARTS = {
@@ -69,7 +72,41 @@ GOOD_PATH_PARTS = {
     "shipping",
     "game",
     "client",
+    "linux",
+    "linux64",
+    "x86_64",
 }
+
+LAUNCH_CANDIDATE_PATTERNS = ("*.exe",)
+NATIVE_LINUX_PATTERNS = (
+    "*.sh",
+    "*.AppImage",
+    "*.appimage",
+    "*.x86_64",
+    "*.x86",
+    "*.bin",
+    "*.run",
+)
+NATIVE_LINUX_SUFFIXES = {".sh", ".appimage", ".x86_64", ".x86", ".bin", ".run"}
+
+
+def native_launch_candidates_enabled() -> bool:
+    return os.name != "nt"
+
+
+def is_native_linux_launch_candidate(path: Path) -> bool:
+    suffix = path.suffix.casefold()
+    if suffix in NATIVE_LINUX_SUFFIXES:
+        return True
+    return not suffix and os.access(path, os.X_OK)
+
+
+def is_launch_candidate(path: Path) -> bool:
+    if not path.is_file():
+        return False
+    if path.suffix.casefold() == ".exe":
+        return True
+    return native_launch_candidates_enabled() and is_native_linux_launch_candidate(path)
 
 
 def canonical_gta_title(text: str) -> str:
@@ -181,7 +218,11 @@ def should_accept_matched_title(original_title: str, current_title: str, candida
 
 def executable_title_tokens(stem: str) -> set[str]:
     cleaned = strip_launcher_suffixes(stem)
-    cleaned = re.sub(r"(?i)\b(win64|win32|x64|x86|shipping|client|launcher|bootstrap|binary|binaries)\b", " ", cleaned)
+    cleaned = re.sub(
+        r"(?i)\b(win64|win32|linux64|linux|x64|x86|x86_64|shipping|client|launcher|bootstrap|binary|binaries|appimage)\b",
+        " ",
+        cleaned,
+    )
     return important_title_tokens(cleaned)
 
 
@@ -212,20 +253,43 @@ class GameScanner:
         if self.game_callback:
             self.game_callback(game)
 
+    def iter_launch_candidates(self, collection_root: Path) -> list[Path]:
+        patterns = list(LAUNCH_CANDIDATE_PATTERNS)
+        if native_launch_candidates_enabled():
+            patterns.extend(NATIVE_LINUX_PATTERNS)
+
+        seen: set[Path] = set()
+        candidates: list[Path] = []
+        for pattern in patterns:
+            for path in collection_root.rglob(pattern):
+                if path in seen or not is_launch_candidate(path):
+                    continue
+                seen.add(path)
+                candidates.append(path)
+
+        if native_launch_candidates_enabled():
+            for path in collection_root.rglob("*"):
+                if path in seen or path.suffix or not is_launch_candidate(path):
+                    continue
+                seen.add(path)
+                candidates.append(path)
+        candidates.sort(key=lambda item: str(item).casefold())
+        return candidates
+
     def scan(self, collection_root: Path) -> list[DetectedGame]:
         collection_root = collection_root.expanduser().resolve()
         if not collection_root.exists() or not collection_root.is_dir():
             raise ValueError(f"Game collection folder does not exist: {collection_root}")
 
-        self.logger.info("Scanning %s for Windows executables...", collection_root)
+        self.logger.info("Scanning %s for launch candidates...", collection_root)
         grouped: dict[Path, list[Path]] = defaultdict(list)
-        root_exes: list[Path] = []
+        root_candidates: list[Path] = []
         scanned_count = 0
-        for exe_path in collection_root.rglob("*.exe"):
+        for exe_path in self.iter_launch_candidates(collection_root):
             scanned_count += 1
             if scanned_count % 25 == 0:
                 self._cancel_if_requested()
-                self._progress(f"Found {scanned_count} executable candidate(s) so far...")
+                self._progress(f"Found {scanned_count} launch candidate(s) so far...")
             if not exe_path.is_file():
                 continue
             try:
@@ -234,7 +298,7 @@ class GameScanner:
                 continue
             parts = rel.parts
             if len(parts) == 1:
-                root_exes.append(exe_path)
+                root_candidates.append(exe_path)
                 continue
             grouped[collection_root / parts[0]].append(exe_path)
 
@@ -256,7 +320,7 @@ class GameScanner:
             )
             games.append(game)
             self._game_found(game)
-        for exe_path in sorted(root_exes, key=lambda item: item.name.lower()):
+        for exe_path in sorted(root_candidates, key=lambda item: item.name.lower()):
             self._cancel_if_requested()
             source_title = exe_path.stem
             title = clean_display_title(source_title)
@@ -273,7 +337,7 @@ class GameScanner:
             )
             games.append(game)
             self._game_found(game)
-        self.logger.info("Scan complete: %s game folders with executable candidates.", len(games))
+        self.logger.info("Scan complete: %s game folders with launch candidates.", len(games))
         return games
 
     def rank_candidates(self, title: str, game_root: Path, exe_paths: list[Path]) -> list[ExecutableCandidate]:
@@ -343,12 +407,25 @@ class GameScanner:
 
         stem = exe_path.stem
         stem_lower = stem.lower()
+        suffix = exe_path.suffix.casefold()
+        native_linux_candidate = native_launch_candidates_enabled() and is_native_linux_launch_candidate(exe_path)
         version_info: dict[str, str] = {}
         size = 0
         try:
             size = exe_path.stat().st_size
         except OSError:
             reasons.append("Could not read file size.")
+
+        if native_linux_candidate:
+            score += 20
+            if suffix == ".sh":
+                reasons.append("Native Linux launch script candidate.")
+            elif suffix == ".appimage":
+                reasons.append("Native Linux AppImage candidate.")
+            elif not suffix:
+                reasons.append("Executable Linux launch file candidate.")
+            else:
+                reasons.append("Native Linux launch binary candidate.")
 
         bad_hits = sorted(part for part in BAD_NAME_PARTS if part in stem_lower)
         if bad_hits:
@@ -403,32 +480,39 @@ class GameScanner:
                 score += 12
                 reasons.append(f"Moderate executable size ({size_mb:.1f} MB).")
             elif size_mb < 1:
-                score -= 16
-                reasons.append("Very small executable; may be a helper or bootstrapper.")
+                if native_linux_candidate and (suffix == ".sh" or not suffix):
+                    score += 4
+                    reasons.append("Small Linux launcher file; size is normal for scripts and wrapper launchers.")
+                else:
+                    score -= 16
+                    reasons.append("Very small executable; may be a helper or bootstrapper.")
             else:
                 score += max(0, math.log2(size_mb + 1) * 2)
 
-        try:
-            version_info = read_version_info(exe_path) if include_version_info else read_pe_summary(exe_path)
-        except Exception:
-            version_info = read_pe_summary(exe_path)
-        if version_info:
-            product = version_info.get("ProductName") or version_info.get("FileDescription") or ""
-            if product:
-                score += 10
-                reasons.append("Readable Windows version metadata was found.")
+        if suffix == ".exe":
+            try:
+                version_info = read_version_info(exe_path) if include_version_info else read_pe_summary(exe_path)
+            except Exception:
+                version_info = read_pe_summary(exe_path)
+            if version_info:
+                product = version_info.get("ProductName") or version_info.get("FileDescription") or ""
+                if product:
+                    score += 10
+                    reasons.append("Readable Windows version metadata was found.")
+                else:
+                    score += 5
+                    reasons.append("Valid Windows PE header was found.")
+                if product:
+                    ratio = similarity(title, product)
+                    if ratio >= 0.72:
+                        score += 16
+                        reasons.append(f"Version metadata title looks relevant: {product}.")
             else:
-                score += 5
-                reasons.append("Valid Windows PE header was found.")
-            if product:
-                ratio = similarity(title, product)
-                if ratio >= 0.72:
-                    score += 16
-                    reasons.append(f"Version metadata title looks relevant: {product}.")
+                reasons.append("No readable Windows version metadata.")
         else:
-            reasons.append("No readable Windows version metadata.")
+            reasons.append("No Windows version metadata expected for native Linux launch files.")
 
-        if "shipping" in stem_lower or "win64" in rel_lower or "binaries" in rel_lower:
+        if "shipping" in stem_lower or "win64" in rel_lower or "linux64" in rel_lower or "binaries" in rel_lower:
             score += 10
             reasons.append("Looks like an Unreal/Unity shipping binary.")
 

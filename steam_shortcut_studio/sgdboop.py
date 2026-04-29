@@ -26,7 +26,7 @@ def _registry_command() -> str:
 
 
 def detect_sgdboop() -> Path | None:
-    from_path = shutil.which("SGDBoop.exe") or shutil.which("sgdboop.exe")
+    from_path = shutil.which("SGDBoop.exe") or shutil.which("sgdboop.exe") or shutil.which("sgdboop") or shutil.which("SGDBoop")
     if from_path:
         return Path(from_path)
     command = _registry_command()
