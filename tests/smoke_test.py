@@ -58,6 +58,10 @@ def write_fake_exe(path: Path, size: int = 1024 * 1024) -> None:
     path.write_bytes(data)
 
 
+def same_path(left: Path | None, right: Path) -> bool:
+    return left is not None and left.resolve(strict=False) == right.resolve(strict=False)
+
+
 def test_vdf_roundtrip() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "shortcuts.vdf"
@@ -106,7 +110,7 @@ def test_scanner_uses_root_exe_title_instead_of_collection_name() -> None:
         assert len(games) == 1
         assert games[0].title == "Grand Theft Auto: The Trilogy - The Definitive Edition"
         assert games[0].source_title == "GTA - The Trilogy - DELauncher"
-        assert games[0].selected_exe == exe
+        assert same_path(games[0].selected_exe, exe)
 
 
 def test_scanner_prefers_root_title_exe_over_unrelated_shipping_codename() -> None:
@@ -172,7 +176,7 @@ def test_scanner_detects_native_linux_launch_candidates() -> None:
 
         assert len(games) == 1
         assert games[0].title == "Native Example"
-        assert games[0].selected_exe == native_launcher
+        assert same_path(games[0].selected_exe, native_launcher)
         assert any("Linux" in reason for reason in games[0].candidates[0].reasons)
 
 
@@ -306,7 +310,7 @@ def test_combined_scan_merges_existing_shortcut_when_scan_picks_different_exe() 
         merged = merge_detected_game_lists([shortcut_row], [folder_row])
         assert len(merged) == 1
         assert merged[0].source_type == "folder"
-        assert merged[0].selected_exe == old_exe
+        assert same_path(merged[0].selected_exe, old_exe)
         assert merged[0].existing_appid == existing_record.appid
         assert merged[0].existing_match == "shortcut"
         assert merged[0].launch_options == shortcut_row.launch_options
@@ -343,8 +347,8 @@ def test_rescan_title_match_remembers_existing_shortcut_exe() -> None:
         mark_existing_shortcuts([game], [record])
         window = object.__new__(MainWindow)
         window.apply_existing_shortcut_choices([game], [record])
-        assert game.selected_exe == remembered_exe
-        assert game.candidates[0].path == remembered_exe
+        assert same_path(game.selected_exe, remembered_exe)
+        assert same_path(game.candidates[0].path, remembered_exe)
         assert game.selected is False
 
 
