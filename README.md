@@ -1,3 +1,5 @@
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Z8Z71YMW54)
+
 # Steam Shortcut Studio
 
 Steam Shortcut Studio is a Windows desktop app for scanning PC game folders, choosing the right executable, finding Steam-style artwork, and safely writing non-Steam shortcuts into Steam.
