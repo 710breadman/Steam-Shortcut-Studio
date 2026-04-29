@@ -19,10 +19,6 @@ It is built for personal game libraries where many games live outside Steam, and
 - Write grid, wide, hero, logo, and icon artwork to Steam's grid folder.
 - Keep generated settings, API keys, cache files, logs, and builds out of source control.
 
-## Screenshot
-
-Add screenshots here before publishing if you want the GitHub page to show the app quickly.
-
 ## Requirements
 
 - Windows 10 or newer
@@ -59,7 +55,7 @@ or:
 8. Click `Preview`.
 9. Click `Write to Steam`.
 
-Installed Steam games are treated as protected reference rows. The app can search and edit artwork choices for them, but it does not rewrite their Steam shortcuts.
+Installed Steam game Artwork can also be edited.
 
 ## Settings And Cache
 
@@ -90,7 +86,7 @@ Artwork sources can be enabled or disabled in `Settings > Artwork`.
 
 SteamGridDB keys are created from your SteamGridDB account preferences. RAWG keys are created from RAWG's API docs page. Do not commit real API keys.
 
-## Steam Files Touched
+## Steam Files
 
 Non-Steam shortcuts live at:
 
@@ -105,28 +101,6 @@ Artwork is copied to:
 ```
 
 Before writing an existing `shortcuts.vdf`, the app creates a timestamped backup beside it.
-
-## Build A Standalone EXE
-
-Install PyInstaller:
-
-```powershell
-python -m pip install pyinstaller
-```
-
-Build:
-
-```powershell
-python -m PyInstaller --noconfirm --clean SteamShortcutStudio.spec
-```
-
-The standalone executable is written to:
-
-```text
-dist\SteamShortcutStudio.exe
-```
-
-`dist/` and `build/` are ignored by Git. For GitHub, publish the source repository first, then upload the built `.exe` as a GitHub Release asset if you want other people to download it directly.
 
 ## Tests
 
@@ -170,7 +144,5 @@ examples/
 ```
 
 ## Publishing Notes
-
-This repository does not include a license yet. Add one before publishing if you want to clearly allow other people to use, modify, or redistribute the code.
 
 This project is not affiliated with Valve, Steam, SteamGridDB, RAWG, Wikimedia, or PCGamingWiki.
