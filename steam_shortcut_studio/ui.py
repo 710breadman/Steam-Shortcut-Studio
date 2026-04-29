@@ -3,12 +3,15 @@ from __future__ import annotations
 import logging
 import json
 import queue
+import re
+import subprocess
+import sys
 import threading
 import tkinter as tk
 import webbrowser
 from dataclasses import replace
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
 
@@ -18,7 +21,7 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
     winreg = None
 
 from . import __app_name__, __version__
-from .artwork import copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
+from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_sources import ARTWORK_SOURCE_LABELS, rawg_artwork_assets, wikimedia_artwork_assets
 from .metadata import (
     build_metadata_notes,
@@ -37,17 +40,16 @@ from .sgdboop import detect_sgdboop
 from .steam_detection import detect_steam_install, find_steam_profiles, is_steam_running, is_valid_steam_path, reopen_steam, shutdown_steam_for_write
 from .steam_library import games_from_nonsteam_shortcuts, scan_installed_steam_games
 from .steam_notes import write_metadata_notes
-from .steam_store import find_steam_app, official_steam_assets
-from .steam_shortcuts import load_shortcuts, mark_existing_shortcuts, preview_changes, upsert_games
+from .steam_store import find_steam_app, get_steam_app_details, official_steam_assets, steam_store_media_assets
+from .steam_shortcuts import load_shortcuts, mark_existing_shortcuts, matching_record_for_game, preview_changes, upsert_games
 from .steamgrid import SteamGridDbClient, SteamGridDbError
 from .vdf import VdfParseError
 
-GAME_COLUMNS = ("add", "title", "exe", "confidence", "artwork", "existing")
+GAME_COLUMNS = ("add", "title", "exe", "artwork", "existing")
 GAME_COLUMN_LABELS = {
     "add": "Add",
     "title": "Game Title",
     "exe": "Detected Executable",
-    "confidence": "Confidence",
     "artwork": "Artwork",
     "existing": "Steam",
 }
@@ -55,7 +57,6 @@ GAME_COLUMN_WIDTHS = {
     "add": 56,
     "title": 180,
     "exe": 360,
-    "confidence": 88,
     "artwork": 110,
     "existing": 110,
 }
@@ -73,7 +74,6 @@ VIEW_FILTERS = [
 SORT_PRESETS = [
     "Title A-Z",
     "Selected first",
-    "Confidence high",
     "Needs artwork",
     "Steam status",
     "Installed Steam first",
@@ -81,22 +81,101 @@ SORT_PRESETS = [
 ]
 
 ARTWORK_KINDS = ("grid", "wide", "hero", "logo", "icon")
+ARTWORK_SEARCH_CACHE_VERSION = 3
 STEAMGRIDDB_API_URL = "https://www.steamgriddb.com/profile/preferences/api"
 RAWG_API_URL = "https://rawg.io/apidocs"
+APP_ICON_PNG = "sss.png"
+APP_ICON_ICO = "sss.ico"
 
 
 def normalized_artwork_cache_key(title: str) -> str:
     return " ".join(str(title or "").casefold().strip().split())
 
 
+def normalize_windows_path_text(path_text: str) -> str:
+    text = str(path_text or "").strip()
+    if not text:
+        return ""
+    if "://" in text:
+        return text
+    return str(PureWindowsPath(text))
+
+
+def app_asset_path(filename: str) -> Path | None:
+    candidates: list[Path] = []
+    bundled_root = Path(getattr(sys, "_MEIPASS", ""))
+    if bundled_root:
+        candidates.append(bundled_root / "steam_shortcut_studio" / "assets" / filename)
+    candidates.extend(
+        [
+            Path(__file__).resolve().parent / "assets" / filename,
+            Path.cwd() / "steam_shortcut_studio" / "assets" / filename,
+        ]
+    )
+    for path in candidates:
+        try:
+            if path.exists():
+                return path
+        except OSError:
+            continue
+    return None
+
+
+def artwork_title_aliases(title: str) -> list[str]:
+    cleaned = " ".join(str(title or "").replace("_", " ").split()).strip()
+    if not cleaned:
+        return []
+    aliases: list[str] = []
+    lowered = cleaned.casefold()
+    normalized = re.sub(r"[^a-z0-9]+", " ", lowered).strip()
+
+    def add(alias: str) -> None:
+        alias = " ".join(alias.split()).strip()
+        if alias and alias.casefold() != cleaned.casefold() and alias not in aliases:
+            aliases.append(alias)
+
+    if " - " in cleaned:
+        add(cleaned.replace(" - ", ": ", 1))
+    if normalized.endswith(" dc"):
+        base = cleaned[: -2].strip(" -_:")
+        add(f"{base} Director's Cut")
+        add(f"{base} DIRECTOR'S CUT")
+    if normalized.endswith(" directors cut") or normalized.endswith(" director s cut"):
+        base = re.sub(r"(?i)\s+director'?s?\s+cut$", "", cleaned).strip(" -_:")
+        add(f"{base} Director's Cut")
+        add(f"{base} DIRECTOR'S CUT")
+    subtitle_patterns = [
+        (" fallen feathers", "Fallen Feathers"),
+        (" legacy of thieves collection", "Legacy of Thieves Collection"),
+        (" rebrushed", "Rebrushed"),
+        (" mirage", "Mirage"),
+    ]
+    for suffix, subtitle in subtitle_patterns:
+        if normalized.endswith(suffix):
+            word_count = len(suffix.strip().split())
+            head = " ".join(cleaned.split()[: -word_count]).strip(" -_:")
+            if head:
+                add(f"{head}: {subtitle}")
+                if head.casefold().startswith("disney "):
+                    add(f"{head[7:]}: {subtitle}")
+    if cleaned.casefold().startswith("disney "):
+        add(cleaned[7:])
+    return aliases
+
+
 def build_artwork_search_terms(game: DetectedGame, preferred: str = "") -> list[str]:
     terms: list[str] = []
+    release_year = str(game.metadata.release_year or "").strip()
+    title_for_exe_match = game.display_title or game.title or game.source_title
+    exe_term = game.selected_exe.stem if game.selected_exe else ""
+    if exe_term and title_for_exe_match and similarity(title_for_exe_match, exe_term) < 0.45:
+        exe_term = ""
     raw_terms = [
-        game.source_title,
         preferred,
+        game.source_title,
         game.title,
         game.display_title,
-        game.selected_exe.stem if game.selected_exe else "",
+        exe_term,
     ]
     if not game.source_title and game.root_path:
         raw_terms.insert(0, game.root_path.name)
@@ -109,8 +188,13 @@ def build_artwork_search_terms(game: DetectedGame, preferred: str = "") -> list[
         logical = clean_display_title(cleaned)
         if logical:
             expanded.append(logical)
+            if release_year:
+                expanded.append(f"{logical} {release_year}")
+            expanded.extend(artwork_title_aliases(logical))
         if " - " in cleaned:
+            expanded.append(cleaned.replace(" - ", ": ", 1))
             expanded.append(clean_display_title(cleaned.split(" - ")[0]))
+        expanded.extend(artwork_title_aliases(cleaned))
     seen: set[str] = set()
     for term in expanded:
         cleaned = " ".join(term.split())
@@ -119,6 +203,50 @@ def build_artwork_search_terms(game: DetectedGame, preferred: str = "") -> list[
             terms.append(cleaned)
             seen.add(folded)
     return terms
+
+
+def release_year_from_text(value: object) -> str:
+    text = str(value or "")
+    for index in range(max(0, len(text) - 3)):
+        chunk = text[index : index + 4]
+        if chunk.isdigit() and 1970 <= int(chunk) <= 2100:
+            return chunk
+    return ""
+
+
+def artwork_candidate_score(game: DetectedGame, search_term: str, item: dict[str, Any]) -> float:
+    name = str(item.get("name") or "")
+    score = similarity(search_term, name)
+    clean_term = clean_display_title(search_term)
+    if clean_term and clean_term != search_term:
+        score = max(score, similarity(clean_term, name))
+    release_year = release_year_from_text(game.metadata.release_year)
+    if release_year:
+        candidate_year = (
+            release_year_from_text(item.get("release_date"))
+            or release_year_from_text(item.get("released"))
+            or release_year_from_text(item.get("year"))
+        )
+        if candidate_year == release_year:
+            score += 0.18
+        elif candidate_year:
+            score -= 0.08
+    return score
+
+
+def add_steamgriddb_assets_to_slots(assets_by_kind: dict[str, list[ArtworkAsset]], kind: str, fetched: list[ArtworkAsset]) -> None:
+    if kind == "grid":
+        for asset in fetched:
+            if asset.width and asset.height and asset.width >= asset.height:
+                assets_by_kind["wide"].append(replace(asset, kind="wide", asset_id=f"{asset.asset_id}-wide"))
+            else:
+                assets_by_kind["grid"].append(asset)
+        if not assets_by_kind["wide"]:
+            assets_by_kind["wide"].extend(replace(asset, kind="wide", asset_id=f"{asset.asset_id}-wide-fallback") for asset in fetched[:3])
+        if not assets_by_kind["grid"]:
+            assets_by_kind["grid"].extend(fetched[:3])
+    else:
+        assets_by_kind[kind].extend(fetched)
 
 
 def artwork_asset_is_ready(asset: ArtworkAsset | None) -> bool:
@@ -471,6 +599,8 @@ def game_identity_keys(game: DetectedGame) -> set[tuple[str, str]]:
     keys: set[tuple[str, str]] = set()
     if game.steam_appid:
         keys.add(("steam", str(game.steam_appid)))
+    if not game.is_native_steam_game and game.existing_appid is not None:
+        keys.add(("shortcut-appid", str(game.existing_appid)))
     if game.selected_exe:
         keys.add(("exe", str(game.selected_exe).casefold()))
     if not keys:
@@ -478,10 +608,43 @@ def game_identity_keys(game: DetectedGame) -> set[tuple[str, str]]:
     return keys
 
 
+def same_known_nonsteam_shortcut(existing: DetectedGame, incoming: DetectedGame) -> bool:
+    if existing.is_native_steam_game or incoming.is_native_steam_game:
+        return False
+    if existing.existing_appid is not None and existing.existing_appid == incoming.existing_appid:
+        return True
+    if existing.source_type != "shortcut" and incoming.source_type != "shortcut":
+        return False
+    existing_title = normalized_artwork_cache_key(existing.display_title)
+    incoming_title = normalized_artwork_cache_key(incoming.display_title)
+    return bool(existing_title and incoming_title and existing_title == incoming_title)
+
+
 def merge_shortcut_state(target: DetectedGame, shortcut_game: DetectedGame) -> DetectedGame:
     target.existing_appid = shortcut_game.existing_appid or target.existing_appid
     target.existing_match = shortcut_game.existing_match or target.existing_match or "shortcut"
     target.duplicate_action = shortcut_game.duplicate_action or target.duplicate_action
+    target.selected = target.selected or shortcut_game.selected
+    if shortcut_game.selected_exe:
+        shortcut_exe = shortcut_game.selected_exe
+        target.selected_exe = shortcut_exe
+        if not any(candidate.path == shortcut_exe for candidate in target.candidates):
+            try:
+                rel = shortcut_exe.relative_to(target.root_path)
+                depth = max(0, len(rel.parts) - 1)
+            except ValueError:
+                depth = 0
+            target.candidates.insert(
+                0,
+                ExecutableCandidate(
+                    path=shortcut_exe,
+                    score=100,
+                    confidence=100,
+                    size_bytes=shortcut_exe.stat().st_size if shortcut_exe.exists() else 0,
+                    depth=depth,
+                    reasons=["Remembered from the existing non-Steam shortcut."],
+                ),
+            )
     if not target.launch_options and shortcut_game.launch_options:
         target.launch_options = shortcut_game.launch_options
     for genre in shortcut_game.metadata.genres:
@@ -524,6 +687,12 @@ def merge_detected_game_lists(existing: list[DetectedGame], incoming: list[Detec
     for game in incoming:
         keys = game_identity_keys(game)
         duplicate_indices = [key_to_index[key] for key in keys if key in key_to_index]
+        if not duplicate_indices:
+            duplicate_indices = [
+                index
+                for index, existing_game in enumerate(merged)
+                if same_known_nonsteam_shortcut(existing_game, game)
+            ]
         if duplicate_indices:
             merge_index = duplicate_indices[0]
             merged[merge_index] = merge_duplicate_game(merged[merge_index], game)
@@ -543,6 +712,7 @@ class MainWindow(tk.Tk):
         self.title(f"{__app_name__} {__version__}")
         self.geometry("1320x850")
         self.minsize(1120, 700)
+        self.app_icon_image: tk.PhotoImage | None = None
 
         self.settings_store = SettingsStore()
         self.settings = self.settings_store.load()
@@ -586,6 +756,7 @@ class MainWindow(tk.Tk):
         self.logger.addHandler(QueueLogHandler(self.log_queue))
         self._add_file_log_handler()
         self.load_persistent_artwork_search_cache()
+        self.apply_app_icon()
 
         self._build_vars()
         self._build_style()
@@ -593,13 +764,29 @@ class MainWindow(tk.Tk):
         self.after(120, self._poll_logs)
         self.after(150, self._load_initial_state)
 
+    def apply_app_icon(self) -> None:
+        png_path = app_asset_path(APP_ICON_PNG)
+        ico_path = app_asset_path(APP_ICON_ICO)
+        if png_path:
+            try:
+                self.app_icon_image = tk.PhotoImage(file=str(png_path))
+                self.iconphoto(True, self.app_icon_image)
+            except tk.TclError as exc:
+                self.logger.warning("Could not load app PNG icon from %s: %s", png_path, exc)
+        if ico_path:
+            try:
+                self.iconbitmap(default=str(ico_path))
+            except tk.TclError as exc:
+                self.logger.warning("Could not load app ICO icon from %s: %s", ico_path, exc)
+
     def artwork_cache_key(self, game: DetectedGame | str) -> str:
         if isinstance(game, DetectedGame):
             return self.artwork_cache_keys(game)[0]
         return normalized_artwork_cache_key(game)
 
-    def artwork_cache_keys(self, game: DetectedGame) -> list[str]:
+    def artwork_cache_keys(self, game: DetectedGame, preferred: str = "") -> list[str]:
         raw_keys = [
+            preferred,
             game.source_title,
             game.title,
             game.display_title,
@@ -613,12 +800,110 @@ class MainWindow(tk.Tk):
                 keys.append(key)
         return keys or [normalized_artwork_cache_key(game.display_title)]
 
-    def cached_artwork_for_game(self, game: DetectedGame) -> dict[str, list[ArtworkAsset]] | None:
-        for key in self.artwork_cache_keys(game):
+    def cached_artwork_for_game(self, game: DetectedGame, preferred: str = "") -> dict[str, list[ArtworkAsset]] | None:
+        for key in self.artwork_cache_keys(game, preferred):
             cached = self.artwork_title_cache.get(key)
             if cached is not None:
                 return cached
         return None
+
+    def artwork_download_cache_root(self) -> Path:
+        return (Path(self.settings.cache_dir).expanduser() / "artwork").resolve(strict=False)
+
+    def cached_artwork_file_path(self, path: Path | None) -> Path | None:
+        if path is None:
+            return None
+        cache_root = self.artwork_download_cache_root()
+        resolved = Path(path).expanduser().resolve(strict=False)
+        try:
+            if not resolved.is_relative_to(cache_root):
+                return None
+        except ValueError:
+            return None
+        if not resolved.exists() and not resolved.is_symlink():
+            return None
+        return resolved
+
+    def cached_artwork_paths_for_game(self, game: DetectedGame, preferred: str = "", sgdb_game_id: int | None = None) -> set[Path]:
+        paths: set[Path] = set()
+        cache_dir = Path(self.settings.cache_dir)
+
+        def add_asset(asset: ArtworkAsset | None) -> None:
+            if not asset:
+                return
+            path = self.cached_artwork_file_path(asset.local_path)
+            if path is not None:
+                paths.add(path)
+            generated_path = self.cached_artwork_file_path(asset_download_cache_path(asset, cache_dir))
+            if generated_path is not None:
+                paths.add(generated_path)
+
+        for kind in game.artwork.slot_names():
+            add_asset(getattr(game.artwork, kind))
+
+        cached_sets: list[dict[str, list[ArtworkAsset]] | None] = []
+        game_index = self.game_index_for_object(game)
+        if game_index is not None:
+            cached_sets.append(self.artwork_search_cache.get(game_index))
+        cache_keys = set(self.artwork_cache_keys(game, preferred))
+        if preferred:
+            cache_keys.add(self.artwork_cache_key(preferred))
+        if sgdb_game_id:
+            cache_keys.add(f"sgdb:{sgdb_game_id}")
+        for cache_key in cache_keys:
+            cached_sets.append(self.artwork_title_cache.get(cache_key))
+
+        for cached in cached_sets:
+            if not cached:
+                continue
+            for assets in cached.values():
+                for asset in assets:
+                    add_asset(asset)
+        return paths
+
+    def delete_cached_artwork_files_for_game(self, game: DetectedGame, preferred: str = "", sgdb_game_id: int | None = None) -> int:
+        deleted = 0
+        for path in self.cached_artwork_paths_for_game(game, preferred, sgdb_game_id):
+            try:
+                path.unlink()
+                deleted += 1
+                try:
+                    path.parent.rmdir()
+                except OSError:
+                    pass
+            except OSError as exc:
+                self.logger.info("Could not delete cached artwork file %s: %s", path, exc)
+        return deleted
+
+    def clear_individual_artwork_cache(self, game: DetectedGame, preferred: str = "", sgdb_game_id: int | None = None) -> None:
+        deleted_files = self.delete_cached_artwork_files_for_game(game, preferred, sgdb_game_id)
+        game_index = self.game_index_for_object(game)
+        if game_index is not None:
+            self.artwork_search_cache.pop(game_index, None)
+        cache_keys = set(self.artwork_cache_keys(game, preferred))
+        if preferred:
+            cache_keys.add(self.artwork_cache_key(preferred))
+        if sgdb_game_id:
+            cache_keys.add(f"sgdb:{sgdb_game_id}")
+        for cache_key in cache_keys:
+            self.artwork_title_cache.pop(cache_key, None)
+        for kind in game.artwork.slot_names():
+            setattr(game.artwork, kind, None)
+            self.manual_artwork_slots.discard((id(game), kind))
+        if game_index is not None:
+            self.artwork_job_status[id(game)] = "Searching artwork"
+            self.refresh_game_row(game_index)
+        if self.current_game_index == game_index:
+            self.current_artwork_results.clear()
+            self.image_cache.clear()
+            self.update_artwork_previews()
+            self.populate_artwork_results([])
+        self.save_persistent_artwork_search_cache()
+        self.logger.info(
+            "Cleared cached artwork state and deleted %s cached artwork file(s) for %s before artwork search.",
+            deleted_files,
+            game.display_title,
+        )
 
     def asset_to_cache(self, asset: ArtworkAsset) -> dict[str, Any]:
         return {
@@ -662,9 +947,13 @@ class MainWindow(tk.Tk):
         except Exception as exc:
             self.logger.info("Artwork search cache could not be loaded: %s", exc)
             return
+        cache_entries = data.get("entries") if isinstance(data, dict) and data.get("__version") == ARTWORK_SEARCH_CACHE_VERSION else None
+        if cache_entries is None:
+            self.logger.info("Ignoring old artwork search cache after artwork matching logic changed.")
+            return
         cache: dict[str, dict[str, list[ArtworkAsset]]] = {}
-        if isinstance(data, dict):
-            for key, kinds in data.items():
+        if isinstance(cache_entries, dict):
+            for key, kinds in cache_entries.items():
                 if not isinstance(kinds, dict):
                     continue
                 cache[str(key)] = {}
@@ -679,11 +968,14 @@ class MainWindow(tk.Tk):
         try:
             self.artwork_cache_path.parent.mkdir(parents=True, exist_ok=True)
             data = {
-                key: {
-                    kind: [self.asset_to_cache(asset) for asset in assets[:80]]
-                    for kind, assets in kinds.items()
-                }
-                for key, kinds in self.artwork_title_cache.items()
+                "__version": ARTWORK_SEARCH_CACHE_VERSION,
+                "entries": {
+                    key: {
+                        kind: [self.asset_to_cache(asset) for asset in assets[:80]]
+                        for kind, assets in kinds.items()
+                    }
+                    for key, kinds in self.artwork_title_cache.items()
+                },
             }
             self.artwork_cache_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except Exception as exc:
@@ -697,14 +989,16 @@ class MainWindow(tk.Tk):
         self.logger.info("Logging to %s", self.log_path)
 
     def _build_vars(self) -> None:
-        self.steam_path_var = tk.StringVar(value=self.settings.steam_path)
-        self.collection_path_var = tk.StringVar(value=self.settings.collection_root)
+        self.steam_path_var = tk.StringVar(value=normalize_windows_path_text(self.settings.steam_path))
+        self.collection_path_var = tk.StringVar(value=normalize_windows_path_text(self.settings.collection_root))
         self.api_key_var = tk.StringVar(value=self.settings.steamgriddb_api_key)
         self.rawg_api_key_var = tk.StringVar(value=self.settings.rawg_api_key)
         self.sgdboop_path_var = tk.StringVar(value=self.settings.sgdboop_path)
         self.profile_var = tk.StringVar()
         self.profile_status_var = tk.StringVar(value="Profile: none")
         self.status_var = tk.StringVar(value="Ready.")
+        self.settings_location_var = tk.StringVar(value=str(self.settings_store.settings_path))
+        self.cache_location_var = tk.StringVar(value=str(Path(self.settings.cache_dir)))
         self.update_existing_var = tk.BooleanVar(value=self.settings.update_existing_shortcuts)
         self.default_tags_var = tk.StringVar(value=", ".join(self.settings.default_tags))
         self.artwork_kind_var = tk.StringVar(value="all")
@@ -809,10 +1103,12 @@ class MainWindow(tk.Tk):
 
     def _build_ui(self) -> None:
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(2, weight=1)
+        for row in range(5):
+            self.rowconfigure(row, weight=0)
+        self.rowconfigure(1, weight=1)
         self.build_menu_bar()
 
-        header = ttk.Frame(self, padding=(18, 14, 18, 8))
+        header = ttk.Frame(self, padding=(18, 10, 18, 4))
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
         ttk.Label(header, text="Steam Shortcut Studio", style="Header.TLabel").grid(row=0, column=0, sticky="w")
@@ -821,8 +1117,6 @@ class MainWindow(tk.Tk):
             text="Scan Windows game folders, choose the right executable, fetch SteamGridDB art, and write safe non-Steam shortcuts.",
             style="Subtle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
-        self.progress = ttk.Progressbar(header, mode="indeterminate", length=220)
-        self.progress.grid(row=0, column=1, sticky="e", padx=(0, 12))
         ttk.Label(header, textvariable=self.profile_status_var, style="Subtle.TLabel").grid(row=1, column=1, sticky="e", padx=(0, 12))
         ttk.Label(header, text="Theme", style="Subtle.TLabel").grid(row=0, column=2, sticky="e", padx=(0, 6))
         self.theme_combo = ttk.Combobox(header, textvariable=self.theme_var, values=THEMES, state="readonly", width=18)
@@ -830,62 +1124,76 @@ class MainWindow(tk.Tk):
         self.theme_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_theme_selection())
         ToolTip(self.theme_combo, "Pick a full app skin. Themes use stronger Steam-keyboard-inspired color identities and are saved in Settings.")
 
-        setup = ttk.LabelFrame(self, text="Guided Workflow", padding=12)
-        setup.grid(row=1, column=0, sticky="ew", padx=18, pady=(4, 10))
+        main = ttk.Frame(self)
+        main.grid(row=1, column=0, sticky="nsew", padx=18, pady=(2, 8))
+        main.columnconfigure(0, weight=1, uniform="main")
+        main.columnconfigure(1, weight=1, uniform="main")
+        main.rowconfigure(0, weight=1)
+        left_panel = ttk.Frame(main)
+        self.detail_frame = ttk.Frame(main)
+        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
+        self.detail_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        left_panel.columnconfigure(0, weight=1)
+        left_panel.rowconfigure(1, weight=1)
+
+        setup = ttk.LabelFrame(left_panel, text="Library Location", padding=(10, 6))
+        setup.grid(row=0, column=0, sticky="ew", pady=(0, 6))
         setup.columnconfigure(1, weight=1)
         for col in (2, 3, 4):
-            setup.columnconfigure(col, weight=0, minsize=106)
-        button_width = 13
+            setup.columnconfigure(col, weight=0, minsize=78)
+        button_width = 9
 
-        ttk.Label(setup, text="1. Steam").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=3)
+        ttk.Label(setup, text="1. Steam").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=1)
         steam_entry = ttk.Entry(setup, textvariable=self.steam_path_var)
-        steam_entry.grid(row=0, column=1, sticky="ew", pady=3)
+        steam_entry.grid(row=0, column=1, sticky="ew", pady=1)
         ToolTip(steam_entry, "Steam install folder. The app looks for steam.exe and userdata here.")
         browse_steam_button = ttk.Button(setup, text="Browse", width=button_width, command=self.browse_steam)
-        browse_steam_button.grid(row=0, column=2, padx=(8, 6), pady=3)
+        browse_steam_button.grid(row=0, column=2, padx=(8, 6), pady=1)
         ToolTip(browse_steam_button, "Manually choose the Steam folder if detection misses it.")
         detect_button = ttk.Button(setup, text="Detect", width=button_width, command=self.detect_steam)
-        detect_button.grid(row=0, column=3, padx=(0, 6), pady=3)
+        detect_button.grid(row=0, column=3, padx=(0, 6), pady=1)
         ToolTip(detect_button, "Auto-detect Steam from the registry and common install folders.")
-        ttk.Label(setup, text="2. Games").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=3)
+        ttk.Label(setup, text="2. Games").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=1)
         collection_entry = ttk.Entry(setup, textvariable=self.collection_path_var)
-        collection_entry.grid(row=1, column=1, sticky="ew", pady=3)
+        collection_entry.grid(row=1, column=1, sticky="ew", pady=1)
         ToolTip(collection_entry, "Root folder containing your non-Steam games. Each top-level child folder becomes the game title.")
         choose_button = ttk.Button(setup, text="Browse", width=button_width, command=self.browse_collection)
-        choose_button.grid(row=1, column=2, padx=(8, 6), pady=3)
+        choose_button.grid(row=1, column=2, padx=(8, 6), pady=1)
         ToolTip(choose_button, "Pick the folder to scan recursively for .exe files.")
         scan_button = ttk.Button(setup, text="Scan", width=button_width, style="Accent.TButton", command=self.scan_all_libraries)
-        scan_button.grid(row=0, column=4, rowspan=2, sticky="nsew", padx=(6, 0), pady=3)
+        scan_button.grid(row=0, column=4, rowspan=2, sticky="nsew", padx=(6, 0), pady=1)
         ToolTip(scan_button, "Scan installed Steam games, existing non-Steam shortcuts, and the chosen game folder in one pass.")
 
+        self.table_frame = ttk.Frame(left_panel)
+        self.table_frame.grid(row=1, column=0, sticky="nsew")
+        self._build_table(self.table_frame)
+        self._build_detail(self.detail_frame)
+
         actions = ttk.Frame(self, padding=(18, 0, 18, 8))
-        actions.grid(row=3, column=0, sticky="ew")
-        for col in range(6):
+        actions.grid(row=2, column=0, sticky="ew")
+        for col in (0, 1, 3, 4):
             actions.columnconfigure(col, weight=0)
-        actions.columnconfigure(5, weight=1)
+        actions.columnconfigure(2, weight=1)
         action_width = 16
-        match_button = ttk.Button(actions, text="Find Art", width=action_width, command=self.match_metadata_and_art_for_selected)
+        match_button = ttk.Button(actions, text="Search Art", width=action_width, command=lambda: self.match_metadata_and_art_for_selected(force_refresh=True))
         match_button.grid(row=0, column=0, padx=(0, 8))
-        ToolTip(match_button, "For every checked non-Steam game, find artwork and refresh simple Steam notes with release info and description.")
+        ToolTip(match_button, "Rerun artwork search for checked games in the current view only.")
         preview_button = ttk.Button(actions, text="Preview", width=action_width, command=self.preview_write)
         preview_button.grid(row=0, column=1, padx=(0, 8))
         ToolTip(preview_button, "Show exactly what will be added or updated before touching Steam files.")
         write_button = ttk.Button(actions, text="Write to Steam", width=action_width, style="Accent.TButton", command=self.write_to_steam)
-        write_button.grid(row=0, column=2, padx=(0, 8))
+        write_button.grid(row=0, column=3, sticky="e", padx=(8, 8))
         ToolTip(write_button, "Closes running Steam when needed, writes shortcuts, artwork, and simple notes with backups, then reopens Steam only if this app closed it.")
-        self.cancel_button = ttk.Button(actions, text="Cancel", width=12, command=self.cancel_current_job, state=tk.DISABLED)
-        self.cancel_button.grid(row=0, column=3, padx=(0, 18))
+        self.cancel_button = ttk.Button(actions, text="Cancel Operations", width=18, command=self.cancel_current_job, state=tk.DISABLED)
+        self.cancel_button.grid(row=0, column=4, sticky="e")
         ToolTip(self.cancel_button, "Ask the current scan, notes, or artwork job to stop as soon as it reaches a safe checkpoint.")
-        ttk.Label(actions, textvariable=self.status_var, style="Subtle.TLabel").grid(row=0, column=5, sticky="e")
 
-        body = ttk.PanedWindow(self, orient=tk.HORIZONTAL)
-        body.grid(row=2, column=0, sticky="nsew", padx=18, pady=(0, 8))
-        self.table_frame = ttk.Frame(body)
-        self.detail_frame = ttk.Frame(body)
-        body.add(self.table_frame, weight=3)
-        body.add(self.detail_frame, weight=2)
-        self._build_table(self.table_frame)
-        self._build_detail(self.detail_frame)
+        progress_frame = ttk.Frame(self, padding=(18, 0, 18, 8))
+        progress_frame.grid(row=3, column=0, sticky="ew")
+        progress_frame.columnconfigure(0, weight=1)
+        ttk.Label(progress_frame, textvariable=self.status_var, style="Subtle.TLabel").grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        self.progress = ttk.Progressbar(progress_frame, mode="indeterminate")
+        self.progress.grid(row=1, column=0, sticky="ew")
 
         log_frame = ttk.LabelFrame(self, text="Log", padding=8)
         log_frame.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 14))
@@ -925,6 +1233,8 @@ class MainWindow(tk.Tk):
         if hasattr(self, "preview_labels"):
             for label in self.preview_labels.values():
                 label.configure(bg=palette["canvas"], fg=palette["muted"])
+        if hasattr(self, "games_tree"):
+            self.configure_game_tree_tags()
         for text_widget_name in ("log_text", "description_text", "reason_text"):
             if hasattr(self, text_widget_name):
                 widget = getattr(self, text_widget_name)
@@ -974,21 +1284,6 @@ class MainWindow(tk.Tk):
         self.settings_menu.add_command(label="Clear Log", command=self.clear_log)
         menubar.add_cascade(label="Settings", menu=self.settings_menu)
 
-        actions_menu = tk.Menu(menubar, tearoff=False, **menu_config)
-        actions_menu.add_command(label="Search Artwork for Highlighted Game", command=self.search_artwork)
-        actions_menu.add_command(label="Find Artwork for Checked", command=self.fetch_artwork_for_all)
-        menubar.add_cascade(label="Actions", menu=actions_menu)
-
-        view_menu = tk.Menu(menubar, tearoff=False, **menu_config)
-        view_menu.add_command(label="Apply View Filter", command=self.apply_view_filter)
-        view_menu.add_command(label="Apply Sort Preset", command=self.apply_sort_preset)
-        view_menu.add_command(label="Reset Columns", command=self.reset_game_columns)
-        theme_menu = tk.Menu(view_menu, tearoff=False, **menu_config)
-        for theme in THEMES:
-            theme_menu.add_radiobutton(label=theme, variable=self.theme_var, value=theme, command=self.apply_theme_selection)
-        view_menu.add_cascade(label="Theme", menu=theme_menu)
-        menubar.add_cascade(label="View", menu=view_menu)
-
         self.configure(menu=menubar)
         self.rebuild_profile_menu()
 
@@ -1020,7 +1315,7 @@ class MainWindow(tk.Tk):
 
     def reset_game_columns(self) -> None:
         self.settings.game_column_order = list(GAME_COLUMNS)
-        self.settings.visible_game_columns = ["add", "title", "exe", "confidence", "artwork", "existing"]
+        self.settings.visible_game_columns = list(GAME_COLUMNS)
         self.apply_game_columns()
         self.save_settings_from_ui(log=False)
 
@@ -1051,6 +1346,108 @@ class MainWindow(tk.Tk):
     def show_log_file_path(self) -> None:
         messagebox.showinfo(__app_name__, f"Log file:\n\n{self.log_path}")
 
+    def apply_settings_to_ui(self) -> None:
+        self.steam_path_var.set(normalize_windows_path_text(self.settings.steam_path))
+        self.collection_path_var.set(normalize_windows_path_text(self.settings.collection_root))
+        self.api_key_var.set(self.settings.steamgriddb_api_key)
+        self.rawg_api_key_var.set(self.settings.rawg_api_key)
+        self.sgdboop_path_var.set(normalize_windows_path_text(self.settings.sgdboop_path))
+        self.update_existing_var.set(self.settings.update_existing_shortcuts)
+        self.default_tags_var.set(", ".join(self.settings.default_tags))
+        theme = self.normalized_theme_name(self.settings.theme_name)
+        self.theme_var.set(theme)
+        self.dark_mode_var.set(self.theme_is_dark(theme))
+        self.view_filter_var.set(self.settings.view_filter if self.settings.view_filter in VIEW_FILTERS else "All")
+        self.sort_preset_var.set(self.settings.sort_preset if self.settings.sort_preset in SORT_PRESETS else "Title A-Z")
+        self.preview_limit_var.set(self.settings.artwork_preview_limit)
+        for key, var in self.artwork_source_vars.items():
+            var.set(bool(self.settings.artwork_sources.get(key, True)))
+        for key, var in self.metadata_source_vars.items():
+            var.set(bool(self.settings.metadata_sources.get(key, True)))
+        self.artwork_cache_path = Path(self.settings.cache_dir) / "artwork_search_cache.json"
+        self.settings_location_var.set(str(self.settings_store.settings_path))
+        self.cache_location_var.set(str(Path(self.settings.cache_dir)))
+
+    def path_is_inside(self, path: Path, parent: Path) -> bool:
+        try:
+            return path.expanduser().resolve(strict=False).is_relative_to(parent.expanduser().resolve(strict=False))
+        except OSError:
+            return False
+
+    def clear_cached_artwork_references(self, cache_dir: Path) -> int:
+        cleared = 0
+        for game in self.games:
+            for kind in ARTWORK_KINDS:
+                asset = getattr(game.artwork, kind)
+                if not asset or not asset.local_path:
+                    continue
+                if self.path_is_inside(asset.local_path, cache_dir) or not asset.local_path.exists():
+                    setattr(game.artwork, kind, None)
+                    self.manual_artwork_slots.discard((id(game), kind))
+                    cleared += 1
+        return cleared
+
+    def delete_cached_artwork(self) -> None:
+        cache_dir = Path(self.settings.cache_dir)
+        confirmed = messagebox.askyesno(
+            __app_name__,
+            f"Delete cached artwork downloads and artwork search caches?\n\n{cache_dir}\n\nSteam artwork already written to Steam will not be removed.",
+        )
+        if not confirmed:
+            return
+        try:
+            result = self.settings_store.clear_cached_artwork(self.settings)
+        except Exception as exc:
+            self.logger.exception("Could not delete cached artwork: %s", exc)
+            messagebox.showerror(__app_name__, f"Could not delete cached artwork:\n\n{exc}")
+            return
+        self.artwork_search_cache.clear()
+        self.artwork_title_cache.clear()
+        self.current_artwork_results.clear()
+        self.image_cache.clear()
+        cleared_slots = self.clear_cached_artwork_references(cache_dir)
+        if self.games:
+            self.refresh_game_table(select_index=self.current_game_index)
+        if self.current_game_index is not None:
+            self.update_artwork_previews()
+            self.populate_artwork_results([])
+        self.cache_location_var.set(str(Path(self.settings.cache_dir)))
+        self.status_var.set("Cached artwork deleted.")
+        self.logger.info(
+            "Deleted cached artwork from %s: %s file(s), %s byte(s), %s active slot(s) cleared.",
+            cache_dir,
+            result.files_deleted,
+            result.bytes_deleted,
+            cleared_slots,
+        )
+        messagebox.showinfo(
+            __app_name__,
+            f"Cached artwork deleted.\n\nFiles deleted: {result.files_deleted}\nActive artwork slots cleared: {cleared_slots}",
+        )
+
+    def reset_settings_to_defaults(self) -> None:
+        confirmed = messagebox.askyesno(
+            __app_name__,
+            "Reset all app settings to defaults?\n\nThis clears saved paths, API keys, source toggles, filters, theme, profile choice, and column layout. Cached artwork and Steam files are not deleted.",
+        )
+        if not confirmed:
+            return
+        self.settings = self.settings_store.reset_to_defaults()
+        self.apply_settings_to_ui()
+        self.artwork_search_cache.clear()
+        self.artwork_title_cache.clear()
+        self.load_persistent_artwork_search_cache()
+        self.refresh_profiles()
+        self.apply_game_columns()
+        self.apply_sort_preset()
+        self.apply_view_filter()
+        self._build_style()
+        self.build_menu_bar()
+        self.apply_widget_theme()
+        self.status_var.set("Settings reset to defaults.")
+        self.logger.info("Settings reset to defaults at %s", self.settings_store.settings_path)
+        messagebox.showinfo(__app_name__, "Settings were reset to defaults.")
+
     def open_settings_dialog(self) -> None:
         window = tk.Toplevel(self)
         window.title("Steam Shortcut Studio Settings")
@@ -1065,8 +1462,10 @@ class MainWindow(tk.Tk):
 
         general = ttk.Frame(notebook, padding=12)
         artwork = ttk.Frame(notebook, padding=12)
+        maintenance = ttk.Frame(notebook, padding=12)
         notebook.add(general, text="General")
         notebook.add(artwork, text="Artwork")
+        notebook.add(maintenance, text="Maintenance")
 
         general.columnconfigure(1, weight=1)
         ttk.Label(general, text="Steam profile").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
@@ -1137,6 +1536,20 @@ class MainWindow(tk.Tk):
             wraplength=560,
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(12, 0))
 
+        maintenance.columnconfigure(1, weight=1)
+        ttk.Label(maintenance, text="Settings file").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Label(maintenance, textvariable=self.settings_location_var, style="Subtle.TLabel", wraplength=470).grid(row=0, column=1, sticky="ew", pady=4)
+        ttk.Label(maintenance, text="Cache folder").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=4)
+        ttk.Label(maintenance, textvariable=self.cache_location_var, style="Subtle.TLabel", wraplength=470).grid(row=1, column=1, sticky="ew", pady=4)
+
+        maintenance_actions = ttk.LabelFrame(maintenance, text="App Data", padding=10)
+        maintenance_actions.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(14, 0))
+        maintenance_actions.columnconfigure(1, weight=1)
+        ttk.Button(maintenance_actions, text="Delete Cached Artwork", command=self.delete_cached_artwork).grid(row=0, column=0, sticky="w", pady=4)
+        ttk.Label(maintenance_actions, text="Removes downloaded artwork previews and artwork search caches.", style="Subtle.TLabel").grid(row=0, column=1, sticky="w", padx=(10, 0), pady=4)
+        ttk.Button(maintenance_actions, text="Reset Settings to Defaults", command=self.reset_settings_to_defaults).grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Label(maintenance_actions, text="Restores paths, keys, theme, filters, source toggles, and columns.", style="Subtle.TLabel").grid(row=1, column=1, sticky="w", padx=(10, 0), pady=4)
+
         buttons = ttk.Frame(window, padding=(12, 0, 12, 12))
         buttons.grid(row=1, column=0, sticky="ew")
         buttons.columnconfigure(0, weight=1)
@@ -1198,6 +1611,7 @@ class MainWindow(tk.Tk):
         for column in GAME_COLUMNS:
             self.games_tree.heading(column, text=GAME_COLUMN_LABELS[column], command=lambda selected=column: self.sort_games_by_column(selected))
             self.games_tree.column(column, width=GAME_COLUMN_WIDTHS[column], minwidth=40, anchor=tk.W)
+        self.configure_game_tree_tags()
         self.apply_game_columns()
         self.games_tree.grid(row=1, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.games_tree.yview)
@@ -1206,6 +1620,15 @@ class MainWindow(tk.Tk):
         self.games_tree.bind("<<TreeviewSelect>>", self.on_game_selected)
         self.games_tree.bind("<ButtonRelease-1>", self.on_game_table_click)
         self.games_tree.bind("<Button-3>", self.show_column_context_menu)
+
+    def configure_game_tree_tags(self) -> None:
+        if not hasattr(self, "games_tree"):
+            return
+        palette = self.palette()
+        self.games_tree.tag_configure("unselected", foreground=palette["muted"])
+
+    def game_row_tags(self, game: DetectedGame) -> tuple[str, ...]:
+        return () if game.selected else ("unselected",)
 
     def normalized_column_order(self) -> list[str]:
         order = [column for column in self.settings.game_column_order if column in GAME_COLUMNS]
@@ -1322,16 +1745,16 @@ class MainWindow(tk.Tk):
         notebook = ttk.Notebook(parent)
         notebook.grid(row=0, column=0, sticky="nsew")
 
-        artwork = ttk.Frame(notebook, padding=10)
         review = ttk.Frame(notebook, padding=10)
-        notebook.add(artwork, text="Artwork")
+        artwork = ttk.Frame(notebook, padding=10)
         notebook.add(review, text="Shortcut")
+        notebook.add(artwork, text="Artwork")
         self._build_review_tab(review)
         self._build_artwork_tab(artwork)
 
     def _build_review_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(1, weight=1)
-        parent.rowconfigure(9, weight=1)
+        parent.rowconfigure(5, weight=1)
         labels = [
             ("Title", "title_entry"),
             ("Launch options", "launch_entry"),
@@ -1347,46 +1770,44 @@ class MainWindow(tk.Tk):
             entry = ttk.Entry(parent, textvariable=var)
             entry.grid(row=row, column=1, sticky="ew", pady=3)
             self.detail_entries[name] = entry
-        ttk.Label(parent, text="Executable").grid(row=6, column=0, sticky="w", pady=3, padx=(0, 8))
+        ttk.Label(parent, text="Executable").grid(row=3, column=0, sticky="w", pady=3, padx=(0, 8))
         exe_row = ttk.Frame(parent)
-        exe_row.grid(row=6, column=1, sticky="ew", pady=3)
+        exe_row.grid(row=3, column=1, sticky="ew", pady=3)
         exe_row.columnconfigure(0, weight=1)
         self.selected_exe_var = tk.StringVar()
         self.selected_exe_entry = ttk.Entry(exe_row, textvariable=self.selected_exe_var, state="readonly")
         self.selected_exe_entry.grid(row=0, column=0, sticky="ew")
-        ttk.Button(exe_row, text="Use Highlighted", command=self.use_selected_candidate, width=15).grid(row=0, column=1, padx=(6, 0))
-        ttk.Button(exe_row, text="Browse EXE", command=self.choose_manual_exe, width=12).grid(row=0, column=2, padx=(6, 0))
-        self.notes_label = ttk.Label(parent, text="Notes")
-        self.notes_label.grid(row=7, column=0, sticky="nw", pady=3, padx=(0, 8))
-        self.description_text = tk.Text(parent, height=5, wrap="word", font=("Segoe UI", 9), relief="solid", borderwidth=1)
-        self.description_text.grid(row=7, column=1, sticky="ew", pady=3)
-        self.description_text.bind("<<Modified>>", self.on_notes_modified)
+        ttk.Button(exe_row, text="Use Highlighted", command=self.use_selected_candidate, width=14).grid(row=0, column=1, padx=(6, 0))
+        ttk.Button(exe_row, text="Browse EXE", command=self.choose_manual_exe, width=11).grid(row=0, column=2, padx=(6, 0))
         self.save_edits_button = ttk.Button(parent, text="Save Edits", command=self.save_current_detail)
-        self.save_edits_button.configure(command=lambda: self.save_current_detail(force_notes=True))
-        self.save_edits_button.grid(row=8, column=1, sticky="e", pady=(4, 8))
+        self.save_edits_button.grid(row=4, column=1, sticky="e", pady=(2, 6))
+
+        hidden_detail_state = ttk.Frame(parent)
+        self.description_text = tk.Text(hidden_detail_state, height=1, wrap="word", font=("Segoe UI", 9), relief="flat", borderwidth=0)
+        self.description_text.bind("<<Modified>>", self.on_notes_modified)
+        self.reason_text = tk.Text(hidden_detail_state, height=1, wrap="word", font=("Segoe UI", 9), relief="flat", borderwidth=0)
 
         candidate_frame = ttk.LabelFrame(parent, text="Executable Candidates", padding=8)
-        candidate_frame.grid(row=9, column=0, columnspan=2, sticky="nsew")
+        candidate_frame.grid(row=5, column=0, columnspan=2, sticky="nsew")
         candidate_frame.columnconfigure(0, weight=1)
         candidate_frame.rowconfigure(0, weight=1)
-        self.candidate_tree = ttk.Treeview(candidate_frame, columns=("score", "path"), show="headings", height=7)
+        self.candidate_tree = ttk.Treeview(candidate_frame, columns=("score", "path"), show="headings", height=12)
         self.candidate_tree.heading("score", text="Score")
         self.candidate_tree.heading("path", text="Path")
         self.candidate_tree.column("score", width=62, minwidth=50)
-        self.candidate_tree.column("path", width=430)
+        self.candidate_tree.column("path", width=620)
         self.candidate_tree.grid(row=0, column=0, sticky="nsew")
         self.candidate_tree.bind("<Double-1>", self.use_selected_candidate)
         candidate_scroll = ttk.Scrollbar(candidate_frame, orient=tk.VERTICAL, command=self.candidate_tree.yview)
         candidate_scroll.grid(row=0, column=1, sticky="ns")
-        self.candidate_tree.configure(yscrollcommand=candidate_scroll.set)
-        ttk.Button(candidate_frame, text="Use Highlighted", command=self.use_selected_candidate).grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Button(candidate_frame, text="Choose Different EXE", command=self.choose_manual_exe).grid(row=1, column=0, sticky="e", pady=(6, 0))
-
-        reason_frame = ttk.LabelFrame(parent, text="Why This Executable", padding=8)
-        reason_frame.grid(row=10, column=0, columnspan=2, sticky="ew", pady=(8, 0))
-        reason_frame.columnconfigure(0, weight=1)
-        self.reason_text = tk.Text(reason_frame, height=5, wrap="word", font=("Segoe UI", 9), relief="flat", bg="#ffffff")
-        self.reason_text.grid(row=0, column=0, sticky="ew")
+        candidate_xscroll = ttk.Scrollbar(candidate_frame, orient=tk.HORIZONTAL, command=self.candidate_tree.xview)
+        candidate_xscroll.grid(row=1, column=0, sticky="ew")
+        self.candidate_tree.configure(yscrollcommand=candidate_scroll.set, xscrollcommand=candidate_xscroll.set)
+        candidate_buttons = ttk.Frame(candidate_frame)
+        candidate_buttons.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        candidate_buttons.columnconfigure(1, weight=1)
+        ttk.Button(candidate_buttons, text="Use Highlighted", command=self.use_selected_candidate).grid(row=0, column=0, sticky="w")
+        ttk.Button(candidate_buttons, text="Choose Different EXE", command=self.choose_manual_exe).grid(row=0, column=2, sticky="e")
 
     def _build_artwork_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -1409,13 +1830,11 @@ class MainWindow(tk.Tk):
         ttk.Label(search, text="Search").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=(6, 0))
         artwork_search_entry = ttk.Entry(search, textvariable=self.artwork_search_var)
         artwork_search_entry.grid(row=1, column=1, sticky="ew", pady=(6, 0))
-        ToolTip(artwork_search_entry, "Search once per game. Results are cached across every artwork type for this scan row.")
-        search_button = ttk.Button(search, text="Find Art", command=self.find_art_for_current)
+        artwork_search_entry.bind("<Return>", lambda _event: self.find_art_for_current(force_refresh=True))
+        ToolTip(artwork_search_entry, "Type the exact game title to search for this selected row. Press Enter or Search Art.")
+        search_button = ttk.Button(search, text="Search Art", command=lambda: self.find_art_for_current(force_refresh=True))
         search_button.grid(row=1, column=2, padx=(8, 0), pady=(6, 0))
-        ToolTip(search_button, "Run the same Find Art pipeline for this game and cache/download visible artwork previews.")
-        refresh_button = ttk.Button(search, text="Refresh Art", command=lambda: self.find_art_for_current(force_refresh=True))
-        refresh_button.grid(row=1, column=3, padx=(6, 0), pady=(6, 0))
-        ToolTip(refresh_button, "Ignore cached search metadata, rerun Find Art, and refresh the collected artwork grid.")
+        ToolTip(search_button, "Rerun artwork search for this game and refresh the collected artwork grid.")
 
         self.artwork_tree = ttk.Treeview(parent, columns=("kind", "dimensions", "score", "style", "url"), show="headings", height=7)
         for column, width in [("kind", 58), ("dimensions", 94), ("score", 64), ("style", 90), ("url", 360)]:
@@ -1427,7 +1846,7 @@ class MainWindow(tk.Tk):
         results_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 8))
         results_frame.columnconfigure(0, weight=1)
         results_frame.rowconfigure(0, weight=1)
-        self.artwork_canvas = tk.Canvas(results_frame, height=360, bg=self.palette()["canvas"], highlightthickness=0)
+        self.artwork_canvas = tk.Canvas(results_frame, height=260, bg=self.palette()["canvas"], highlightthickness=0)
         self.artwork_canvas.grid(row=0, column=0, sticky="nsew")
         artwork_scroll = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, command=self.artwork_canvas.yview)
         artwork_scroll.grid(row=0, column=1, sticky="ns")
@@ -1439,6 +1858,7 @@ class MainWindow(tk.Tk):
 
         preview_frame = ttk.LabelFrame(parent, text="Selected Artwork Preview", padding=8)
         preview_frame.grid(row=2, column=0, sticky="ew")
+        preview_frame.rowconfigure(0, weight=1)
         for col in range(5):
             preview_frame.columnconfigure(col, weight=1)
         self.preview_labels: dict[str, tk.Label] = {}
@@ -1454,6 +1874,7 @@ class MainWindow(tk.Tk):
                 bg=self.palette()["canvas"],
                 highlightthickness=1,
                 highlightbackground=self.palette()["border"],
+                cursor="hand2",
             )
             box.grid(row=1, column=0)
             box.grid_propagate(False)
@@ -1466,8 +1887,14 @@ class MainWindow(tk.Tk):
                 fg=self.palette()["muted"],
                 wraplength=154,
                 font=("Segoe UI", 8),
+                cursor="hand2",
             )
             label.place(relx=0.5, rely=0.5, anchor=tk.CENTER)
+            box.bind("<Double-1>", lambda _event, artwork_kind=kind: self.open_selected_artwork_preview(artwork_kind))
+            label.bind("<Double-1>", lambda _event, artwork_kind=kind: self.open_selected_artwork_preview(artwork_kind))
+            box.bind("<Button-3>", lambda event, artwork_kind=kind: self.show_artwork_preview_menu(event, artwork_kind))
+            label.bind("<Button-3>", lambda event, artwork_kind=kind: self.show_artwork_preview_menu(event, artwork_kind))
+            ToolTip(label, "Double-click to open a larger preview. Right-click for artwork options.")
             self.preview_boxes[kind] = box
             self.preview_labels[kind] = label
 
@@ -1487,7 +1914,7 @@ class MainWindow(tk.Tk):
         def done(result: tuple[Path | None, list[SteamProfile], Path | None]) -> None:
             steam_path, profiles, boop_path = result
             if steam_path:
-                self.steam_path_var.set(str(steam_path))
+                self.steam_path_var.set(normalize_windows_path_text(str(steam_path)))
                 self.logger.info("Detected Steam at %s", steam_path)
             self.set_profiles(profiles)
             if boop_path:
@@ -1637,7 +2064,7 @@ class MainWindow(tk.Tk):
             if not detected:
                 messagebox.showwarning(__app_name__, "Steam was not found automatically. Choose the Steam folder manually.")
                 return
-            self.steam_path_var.set(str(detected))
+            self.steam_path_var.set(normalize_windows_path_text(str(detected)))
             self.logger.info("Detected Steam at %s", detected)
             self.set_profiles(profiles)
             self.save_settings_from_ui()
@@ -1648,7 +2075,7 @@ class MainWindow(tk.Tk):
         initial = self.steam_path_var.get() or str(Path.home())
         folder = filedialog.askdirectory(title="Choose Steam installation folder", initialdir=initial)
         if folder:
-            self.steam_path_var.set(folder)
+            self.steam_path_var.set(normalize_windows_path_text(folder))
             self.refresh_profiles()
             self.save_settings_from_ui()
 
@@ -1656,7 +2083,7 @@ class MainWindow(tk.Tk):
         initial = self.collection_path_var.get() or str(Path.home())
         folder = filedialog.askdirectory(title="Choose non-Steam game collection folder", initialdir=initial)
         if folder:
-            self.collection_path_var.set(folder)
+            self.collection_path_var.set(normalize_windows_path_text(folder))
             self.save_settings_from_ui()
 
     def refresh_profiles(self) -> None:
@@ -1698,8 +2125,12 @@ class MainWindow(tk.Tk):
         return None
 
     def save_settings_from_ui(self, log: bool = True) -> None:
-        self.settings.steam_path = self.steam_path_var.get().strip()
-        self.settings.collection_root = self.collection_path_var.get().strip()
+        normalized_steam = normalize_windows_path_text(self.steam_path_var.get())
+        normalized_collection = normalize_windows_path_text(self.collection_path_var.get())
+        self.steam_path_var.set(normalized_steam)
+        self.collection_path_var.set(normalized_collection)
+        self.settings.steam_path = normalized_steam
+        self.settings.collection_root = normalized_collection
         self.settings.steamgriddb_api_key = self.api_key_var.get().strip()
         self.settings.rawg_api_key = self.rawg_api_key_var.get().strip()
         self.settings.sgdboop_path = self.sgdboop_path_var.get().strip()
@@ -1765,6 +2196,7 @@ class MainWindow(tk.Tk):
             messagebox.showwarning(__app_name__, "Choose a valid Steam folder, a game collection folder, or both before scanning.")
             return
         profile = self.current_profile()
+        self.replace_live_scan_games([], "Scanning Steam and folders...")
 
         def task() -> tuple[list[DetectedGame], int, int, int]:
             games: list[DetectedGame] = []
@@ -1788,12 +2220,14 @@ class MainWindow(tk.Tk):
                         shortcut_count = len(nonsteam_games)
                         steam_games = self.merge_game_lists(steam_games, nonsteam_games)
                         mark_existing_shortcuts(steam_games, records)
+                        self.apply_existing_shortcut_choices(steam_games, records)
                         loaded = load_existing_artwork_for_games(steam_games, profile)
                         if loaded:
                             self.logger.info("Loaded %s existing Steam artwork file(s) while scanning Steam.", loaded)
                     except Exception as exc:
                         self.logger.warning("Could not read existing shortcuts/artwork while scanning Steam: %s", exc)
                 games = self.merge_game_lists(games, steam_games)
+                self.post_ui(lambda data=list(games), count=steam_count: self.replace_live_scan_games(data, f"Found {count} installed Steam game(s)."))
                 step += 1
 
             if folder_ready and root is not None:
@@ -1802,6 +2236,7 @@ class MainWindow(tk.Tk):
                     self.logger,
                     cancel_check=self.raise_if_cancelled,
                     progress_callback=lambda message: self.set_task_progress(message),
+                    game_callback=lambda game: self.post_ui(lambda g=game: self.add_live_scan_game(g)),
                 )
                 folder_games = scanner.scan(root)
                 folder_count = len(folder_games)
@@ -1813,6 +2248,7 @@ class MainWindow(tk.Tk):
                         if records is None:
                             records = load_shortcuts(profile.shortcuts_path)
                         mark_existing_shortcuts(folder_games, records)
+                        self.apply_existing_shortcut_choices(folder_games, records)
                         loaded = load_existing_artwork_for_games(folder_games, profile)
                         if loaded:
                             self.logger.info("Loaded %s existing Steam artwork file(s) for folder games.", loaded)
@@ -1852,6 +2288,8 @@ class MainWindow(tk.Tk):
             return
         root = Path(root_text)
         profile = self.current_profile()
+        preserved_games = [game for game in self.games if game.source_type in {"steam", "shortcut"}]
+        self.replace_live_scan_games(preserved_games, "Scanning games...")
 
         def task() -> list[DetectedGame]:
             self.set_task_progress("Opening the folder shelves...", 0, 2)
@@ -1859,6 +2297,7 @@ class MainWindow(tk.Tk):
                 self.logger,
                 cancel_check=self.raise_if_cancelled,
                 progress_callback=lambda message: self.set_task_progress(message),
+                game_callback=lambda game: self.post_ui(lambda g=game: self.add_live_scan_game(g)),
             )
             games = scanner.scan(root)
             self.raise_if_cancelled()
@@ -1867,6 +2306,7 @@ class MainWindow(tk.Tk):
                 try:
                     records = load_shortcuts(profile.shortcuts_path)
                     mark_existing_shortcuts(games, records)
+                    self.apply_existing_shortcut_choices(games, records)
                     loaded = load_existing_artwork_for_games(games, profile)
                     if loaded:
                         self.logger.info("Loaded %s existing Steam artwork file(s) for scanned folder games.", loaded)
@@ -1876,8 +2316,7 @@ class MainWindow(tk.Tk):
             return games
 
         def done(games: list[DetectedGame]) -> None:
-            preserved = [game for game in self.games if game.source_type in {"steam", "shortcut"}]
-            self.games = self.merge_game_lists(preserved, games)
+            self.games = self.merge_game_lists(preserved_games, games)
             self.current_game_index = None
             if self.games:
                 self.refresh_game_table(select_index=0)
@@ -1907,6 +2346,7 @@ class MainWindow(tk.Tk):
             self.set_task_progress("Reading Steam's installed game shelves...", 0, 3)
             self.raise_if_cancelled()
             games = scan_installed_steam_games(steam_path)
+            self.post_ui(lambda data=list(games): self.replace_live_scan_games(self.merge_game_lists(self.games, data), f"Found {len(data)} installed Steam game(s)."))
             self.raise_if_cancelled()
             self.set_task_progress(f"Found {len(games)} installed Steam game(s); checking shortcuts and existing art...", 1, 3)
             if profile:
@@ -1915,6 +2355,7 @@ class MainWindow(tk.Tk):
                     nonsteam_games = games_from_nonsteam_shortcuts(records)
                     games = self.merge_game_lists(games, nonsteam_games)
                     mark_existing_shortcuts(games, records)
+                    self.apply_existing_shortcut_choices(games, records)
                     loaded = load_existing_artwork_for_games(games, profile)
                     if loaded:
                         self.logger.info("Loaded %s existing Steam artwork file(s) while scanning Steam library.", loaded)
@@ -1943,10 +2384,38 @@ class MainWindow(tk.Tk):
     def merge_game_lists(self, existing: list[DetectedGame], incoming: list[DetectedGame]) -> list[DetectedGame]:
         return merge_detected_game_lists(existing, incoming)
 
+    def apply_existing_shortcut_choices(self, games: list[DetectedGame], records: list[Any]) -> None:
+        for game in games:
+            if game.is_native_steam_game:
+                continue
+            record = matching_record_for_game(records, game)
+            if not record:
+                continue
+            shortcut_row = games_from_nonsteam_shortcuts([record])[0]
+            merge_shortcut_state(game, shortcut_row)
+
+    def replace_live_scan_games(self, games: list[DetectedGame], status: str = "") -> None:
+        self.games = list(games)
+        self.current_game_index = None
+        self.refresh_game_table(select_index=0 if self.games else None)
+        if self.displayed_game_indices:
+            self.load_game_detail(self.displayed_game_indices[0])
+        if status:
+            self.status_var.set(status)
+
+    def add_live_scan_game(self, game: DetectedGame) -> None:
+        current_game = self.games[self.current_game_index] if self.current_game_index is not None and 0 <= self.current_game_index < len(self.games) else None
+        self.games = self.merge_game_lists(self.games, [game])
+        new_index = self.game_index_for_object(game)
+        select_index = self.games.index(current_game) if current_game in self.games else new_index
+        self.refresh_game_table(select_index=select_index)
+        if self.current_game_index is None and new_index is not None and new_index in self.displayed_game_indices:
+            self.load_game_detail(new_index)
+
     def game_identity_keys(self, game: DetectedGame) -> set[tuple[str, str]]:
         return game_identity_keys(game)
 
-    def game_row_values(self, game: DetectedGame) -> tuple[str, str, str, str, str, str]:
+    def game_row_values(self, game: DetectedGame) -> tuple[str, str, str, str, str]:
         exe = str(game.selected_exe or "")
         if game.is_native_steam_game:
             exe = f"Steam AppID {game.steam_appid}"
@@ -1964,7 +2433,6 @@ class MainWindow(tk.Tk):
             "[x]" if game.selected else "[ ]",
             game.display_title,
             exe,
-            f"{game.confidence}%",
             self.artwork_job_status.get(id(game), game.artwork_status),
             existing,
         )
@@ -1987,7 +2455,7 @@ class MainWindow(tk.Tk):
         if selected_filter == "Checked":
             return game.selected
         if selected_filter == "Needs artwork":
-            return not game.is_native_steam_game and game.artwork.selected_count() < len(game.artwork.slot_names())
+            return game.artwork.selected_count() < len(game.artwork.slot_names())
         if selected_filter == "New non-Steam":
             return not game.is_native_steam_game and game.existing_appid is None
         if selected_filter == "Existing non-Steam":
@@ -2020,6 +2488,7 @@ class MainWindow(tk.Tk):
                 tk.END,
                 iid=str(index),
                 values=self.game_row_values(game),
+                tags=self.game_row_tags(game),
             )
         if select_index is not None and select_index not in self.displayed_game_indices:
             select_index = self.displayed_game_indices[0] if self.displayed_game_indices else None
@@ -2039,7 +2508,7 @@ class MainWindow(tk.Tk):
                 self.refresh_game_table(select_index=self.current_game_index)
             return
         if self.games_tree.exists(str(index)):
-            self.games_tree.item(str(index), values=self.game_row_values(self.games[index]))
+            self.games_tree.item(str(index), values=self.game_row_values(self.games[index]), tags=self.game_row_tags(self.games[index]))
         else:
             self.refresh_game_table(select_index=self.current_game_index)
 
@@ -2079,7 +2548,7 @@ class MainWindow(tk.Tk):
     def select_needing_artwork(self) -> None:
         count = 0
         for game in self.games:
-            game.selected = not game.is_native_steam_game and game.artwork.selected_count() < len(game.artwork.slot_names())
+            game.selected = game.artwork.selected_count() < len(game.artwork.slot_names())
             if game.selected:
                 count += 1
         self.refresh_all_game_rows()
@@ -2101,8 +2570,6 @@ class MainWindow(tk.Tk):
             return game.display_title.casefold()
         if column == "exe":
             return str(game.selected_exe or "").casefold()
-        if column == "confidence":
-            return game.confidence
         if column == "artwork":
             return game.artwork.selected_count()
         if column == "existing":
@@ -2120,7 +2587,7 @@ class MainWindow(tk.Tk):
             self.sort_reverse = not self.sort_reverse
         else:
             self.sort_column = column
-            self.sort_reverse = column in {"confidence", "artwork"}
+            self.sort_reverse = column == "artwork"
         self.games.sort(key=lambda game: self.sort_key_for_game(game, column), reverse=self.sort_reverse)
         select_index = self.games.index(current_game) if current_game in self.games else 0
         self.current_game_index = select_index
@@ -2136,9 +2603,6 @@ class MainWindow(tk.Tk):
         if preset == "Selected first":
             key = lambda game: (not game.selected, game.display_title.casefold())
             reverse = False
-        elif preset == "Confidence high":
-            key = lambda game: (game.confidence, game.display_title.casefold())
-            reverse = True
         elif preset == "Needs artwork":
             key = lambda game: (game.artwork.selected_count(), game.display_title.casefold())
             reverse = False
@@ -2337,7 +2801,7 @@ class MainWindow(tk.Tk):
                 "Installed Steam game.",
                 f"Steam AppID: {game.steam_appid}",
                 f"Install folder: {game.root_path}",
-                "Protected reference row: this app will not modify notes, artwork, categories, or shortcut data for owned Steam games.",
+                "Protected reference row: this app can replace local artwork, but will not modify notes, categories, or shortcut data for owned Steam games.",
             ]
             if game.existing_appid is not None:
                 lines.append(f"Matching non-Steam shortcut already exists by {game.existing_match or 'title'}.")
@@ -2434,10 +2898,10 @@ class MainWindow(tk.Tk):
         providers: list[Any] = []
         if sources.get("executable", True):
             providers.append(LocalExecutableMetadataProvider())
-        if client.configured and sources.get("steamgriddb", True):
-            providers.append(SteamGridDbMetadataProvider(client))
         if sources.get("steam", True):
             providers.append(SteamStoreMetadataProvider())
+        if client.configured and sources.get("steamgriddb", True):
+            providers.append(SteamGridDbMetadataProvider(client))
         if sources.get("pcgamingwiki", True):
             providers.append(PcGamingWikiMetadataProvider())
         if sources.get("wikipedia", True):
@@ -2449,6 +2913,9 @@ class MainWindow(tk.Tk):
         if not selected and self.current_game_index is not None:
             selected = [self.games[self.current_game_index]]
         return selected
+
+    def selected_games_in_current_view(self) -> list[DetectedGame]:
+        return [self.games[index] for index in self.displayed_game_indices if 0 <= index < len(self.games) and self.games[index].selected]
 
     def game_index_for_object(self, game: DetectedGame, fallback: int | None = None) -> int | None:
         if fallback is not None and 0 <= fallback < len(self.games) and self.games[fallback] is game:
@@ -2474,33 +2941,216 @@ class MainWindow(tk.Tk):
             return False
         return not artwork_asset_is_ready(getattr(game.artwork, kind))
 
+    def preferred_artwork_search_text(self, game: DetectedGame) -> str:
+        preferred = self.artwork_search_var.get().strip()
+        if not preferred:
+            return ""
+        default_terms = {normalized_artwork_cache_key(term) for term in (game.display_title, game.title, game.source_title, game.metadata.clean_title)}
+        if normalized_artwork_cache_key(preferred) in default_terms:
+            return ""
+        return preferred
+
+    def artwork_search_text_for_game(self, game: DetectedGame) -> str:
+        return self.artwork_search_var.get().strip() or game.display_title or game.title or game.source_title
+
+    def sgdb_match_picker_available(self) -> bool:
+        return bool(self.artwork_source_vars.get("steamgriddb") and self.artwork_source_vars["steamgriddb"].get() and self.api_key_var.get().strip())
+
     def find_art_for_current(self, force_refresh: bool = False) -> None:
         if self.current_game_index is None:
             messagebox.showwarning(__app_name__, "Select a game first.")
             return
         game = self.games[self.current_game_index]
-        if game.is_native_steam_game:
-            messagebox.showinfo(__app_name__, "Installed Steam games are protected. Artwork editing only applies to non-Steam shortcuts.")
-            return
         game.selected = True
         self.refresh_game_row(self.current_game_index)
-        self.match_metadata_and_art_for_games([game], force_refresh=force_refresh)
-
-    def match_metadata_and_art_for_selected(self) -> None:
-        selected = self.selected_or_current_games()
-        if not selected:
-            messagebox.showwarning(__app_name__, "Select at least one game.")
+        preferred = self.artwork_search_text_for_game(game)
+        cache_preferred = self.preferred_artwork_search_text(game)
+        if self.sgdb_match_picker_available():
+            self.search_sgdb_matches_for_current(game, preferred, cache_preferred, force_refresh=force_refresh)
             return
-        if (
-            not any(game.selected for game in self.games)
-            and self.current_game_index is not None
-            and not self.games[self.current_game_index].is_native_steam_game
-        ):
-            self.games[self.current_game_index].selected = True
-            self.refresh_game_row(self.current_game_index)
-        self.match_metadata_and_art_for_games(selected)
+        self.start_single_artwork_search(game, preferred=cache_preferred, force_refresh=force_refresh, artwork_only=True)
 
-    def match_metadata_and_art_for_games(self, selected: list[DetectedGame], force_refresh: bool = False) -> None:
+    def start_single_artwork_search(
+        self,
+        game: DetectedGame,
+        preferred: str = "",
+        force_refresh: bool = False,
+        sgdb_game_id: int | None = None,
+        artwork_only: bool = True,
+    ) -> None:
+        self.clear_individual_artwork_cache(game, preferred=preferred, sgdb_game_id=sgdb_game_id)
+        self.match_metadata_and_art_for_games(
+            [game],
+            force_refresh=force_refresh,
+            preferred_terms={id(game): preferred} if preferred else None,
+            selected_sgdb_ids={id(game): sgdb_game_id} if sgdb_game_id else None,
+            artwork_only=artwork_only,
+        )
+
+    def search_sgdb_matches_for_current(self, game: DetectedGame, search_text: str, cache_preferred: str, force_refresh: bool = False) -> None:
+        game_index = self.game_index_for_object(game)
+        client = self.make_sgdb_client()
+        if not client.configured:
+            self.start_single_artwork_search(game, preferred=cache_preferred, force_refresh=force_refresh, artwork_only=True)
+            return
+
+        def task() -> list[dict[str, Any]]:
+            return self.sgdb_match_candidates(game, search_text, client, use_cache=not force_refresh)
+
+        def done(candidates: list[dict[str, Any]]) -> None:
+            if game_index is not None and self.game_index_for_object(game, game_index) is None:
+                return
+            chosen = self.choose_sgdb_artwork_match(game, candidates)
+            if chosen is None:
+                self.status_var.set("Artwork search cancelled.")
+                return
+            sgdb_id = int(chosen.get("id") or 0)
+            chosen_name = str(chosen.get("name") or search_text).strip()
+            if chosen_name:
+                self.artwork_search_var.set(chosen_name)
+            self.start_single_artwork_search(
+                game,
+                preferred=chosen_name or cache_preferred,
+                force_refresh=force_refresh,
+                sgdb_game_id=sgdb_id or None,
+                artwork_only=True,
+            )
+
+        self.run_background("Searching SteamGridDB matches", task, done)
+
+    def sgdb_match_candidates(self, game: DetectedGame, search_text: str, client: SteamGridDbClient, use_cache: bool = True) -> list[dict[str, Any]]:
+        terms = self.artwork_search_terms(game, search_text)
+        if not terms:
+            terms = [search_text]
+        seen: dict[int, dict[str, Any]] = {}
+        for term in terms[:5]:
+            if not term:
+                continue
+            self.raise_if_cancelled()
+            try:
+                candidates = client.search_games(term, use_cache=use_cache)
+            except SteamGridDbError as exc:
+                self.logger.warning("SteamGridDB match search failed for %s: %s", term, exc)
+                continue
+            for candidate in candidates[:12]:
+                game_id = int(candidate.get("id") or 0)
+                if not game_id:
+                    continue
+                detail: dict[str, Any] = {}
+                try:
+                    detail = client.get_game(game_id)
+                except SteamGridDbError:
+                    detail = {}
+                merged = {**candidate, **detail} if isinstance(detail, dict) else dict(candidate)
+                score = artwork_candidate_score(game, term, merged)
+                merged["__score"] = score
+                merged["__matched_term"] = term
+                prior = seen.get(game_id)
+                if prior is None or score > float(prior.get("__score") or 0):
+                    seen[game_id] = merged
+        ranked = sorted(seen.values(), key=lambda item: (float(item.get("__score") or 0), str(item.get("name") or "")), reverse=True)
+        return ranked[:14]
+
+    def sgdb_candidate_year(self, candidate: dict[str, Any]) -> str:
+        for key in ("release_date", "released", "releaseDate"):
+            year = release_year_from_text(str(candidate.get(key) or ""))
+            if year:
+                return year
+        return ""
+
+    def choose_sgdb_artwork_match(self, game: DetectedGame, candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not candidates:
+            return {}
+        palette = self.palette()
+        window = tk.Toplevel(self)
+        window.title("Choose Artwork Match")
+        window.geometry("720x420")
+        window.transient(self)
+        window.grab_set()
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(0, weight=1)
+        result: dict[str, Any] | None = None
+
+        tree = ttk.Treeview(window, columns=("name", "year", "score", "id"), show="headings", selectmode="browse")
+        tree.heading("name", text="Name")
+        tree.heading("year", text="Year")
+        tree.heading("score", text="Match")
+        tree.heading("id", text="SGDB ID")
+        tree.column("name", width=410, anchor=tk.W)
+        tree.column("year", width=80, anchor=tk.W)
+        tree.column("score", width=80, anchor=tk.E)
+        tree.column("id", width=100, anchor=tk.E)
+        tree.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 4))
+        scrollbar = ttk.Scrollbar(window, orient=tk.VERTICAL, command=tree.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns", pady=(10, 4), padx=(0, 10))
+        tree.configure(yscrollcommand=scrollbar.set)
+        for index, candidate in enumerate(candidates):
+            score = int(round(float(candidate.get("__score") or 0) * 100))
+            tree.insert(
+                "",
+                tk.END,
+                iid=str(index),
+                values=(
+                    str(candidate.get("name") or ""),
+                    self.sgdb_candidate_year(candidate),
+                    f"{score}%",
+                    str(candidate.get("id") or ""),
+                ),
+            )
+        if candidates:
+            tree.selection_set("0")
+            tree.focus("0")
+
+        button_row = ttk.Frame(window, padding=(10, 4, 10, 10))
+        button_row.grid(row=1, column=0, columnspan=2, sticky="ew")
+        button_row.columnconfigure(0, weight=1)
+
+        def choose_selected() -> None:
+            nonlocal result
+            selection = tree.selection()
+            if not selection:
+                return
+            result = candidates[int(selection[0])]
+            window.destroy()
+
+        def skip_match() -> None:
+            nonlocal result
+            result = {}
+            window.destroy()
+
+        def cancel() -> None:
+            nonlocal result
+            result = None
+            window.destroy()
+
+        tree.bind("<Double-1>", lambda _event: choose_selected())
+        ttk.Label(button_row, text=game.display_title, style="Subtle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Button(button_row, text="Cancel", command=cancel).grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(button_row, text="Skip Match", command=skip_match).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(button_row, text="Use Selected", style="Accent.TButton", command=choose_selected).grid(row=0, column=3)
+        window.protocol("WM_DELETE_WINDOW", cancel)
+        self._theme_child(window, palette)
+        self.wait_window(window)
+        return result
+
+
+    def match_metadata_and_art_for_selected(self, force_refresh: bool = False) -> None:
+        selected = self.selected_games_in_current_view()
+        if not selected:
+            messagebox.showwarning(__app_name__, "Select at least one game in the current view.")
+            return
+        for game in selected:
+            self.clear_individual_artwork_cache(game)
+        self.match_metadata_and_art_for_games(selected, force_refresh=force_refresh)
+
+    def match_metadata_and_art_for_games(
+        self,
+        selected: list[DetectedGame],
+        force_refresh: bool = False,
+        preferred_terms: dict[int, str] | None = None,
+        selected_sgdb_ids: dict[int, int | None] | None = None,
+        artwork_only: bool = False,
+    ) -> None:
         client = self.make_sgdb_client()
         service = self.make_metadata_service(client)
         enabled_sources = self.active_artwork_sources()
@@ -2508,19 +3158,20 @@ class MainWindow(tk.Tk):
         rawg_api_key = self.rawg_api_key_var.get().strip()
         preview_limit_per_kind = max(4, min(80, int(self.preview_limit_var.get() or 16)))
         cache_dir = Path(self.settings.cache_dir)
+        preferred_terms = preferred_terms or {}
+        selected_sgdb_ids = selected_sgdb_ids or {}
         index_by_game_id = {id(game): index for index, game in enumerate(self.games)}
-        jobs: list[tuple[DetectedGame, str]] = []
+        jobs: list[tuple[DetectedGame, str, str, int | None]] = []
         for game in selected:
-            if game.is_native_steam_game:
-                self.logger.info("Skipping protected installed Steam game during artwork match: %s", game.display_title)
-                continue
-            key = self.artwork_cache_key(game)
+            preferred = preferred_terms.get(id(game), "").strip()
+            sgdb_game_id = selected_sgdb_ids.get(id(game))
+            key = f"sgdb:{sgdb_game_id}" if sgdb_game_id else (self.artwork_cache_key(preferred) if preferred else self.artwork_cache_key(game))
             if key in self.artwork_job_keys:
                 self.set_artwork_job_status(game, "Artwork search already running", index_by_game_id.get(id(game)))
                 continue
             self.artwork_job_keys.add(key)
             self.set_artwork_job_status(game, "Queued artwork search", index_by_game_id.get(id(game)))
-            jobs.append((game, key))
+            jobs.append((game, key, preferred, sgdb_game_id))
         if not jobs:
             self.status_var.set("No new artwork searches needed.")
             return
@@ -2531,32 +3182,36 @@ class MainWindow(tk.Tk):
             total_steps = max(len(jobs) * 2, 1)
             step = 0
             self.set_task_progress("Lining up titles, store pages, and cover art...", step, total_steps)
-            for number, (game, job_key) in enumerate(jobs, start=1):
+            for number, (game, job_key, preferred, sgdb_game_id) in enumerate(jobs, start=1):
                 game_index = index_by_game_id.get(id(game))
                 try:
                     self.raise_if_cancelled()
-                    title = game.source_title or game.title or game.display_title
-                    self.post_ui(lambda g=game, idx=game_index: self.set_artwork_job_status(g, "Reading store notes", idx))
-                    self.logger.info("Finding artwork and Steam notes for %s using folder term %s", game.display_title, title)
-                    self.set_task_progress(f"Reading store notes for {game.display_title} ({number}/{len(jobs)})", step, total_steps)
-                    try:
-                        service.enrich(game)
-                    except Exception as exc:
-                        self.logger.warning("Metadata lookup failed for %s: %s", game.display_title, exc)
-                    self.raise_if_cancelled()
-                    if not game.metadata.notes:
-                        game.metadata.notes = build_metadata_notes(game)
-                    self.logger.info("Prepared Steam notes for %s (%s chars).", game.display_title, len(game.metadata.notes))
-                    if game_index is not None:
-                        self.post_ui(lambda idx=game_index: self.refresh_notes_widget_if_current(idx))
-                    notes_count += 1
+                    title = preferred or game.source_title or game.title or game.display_title
+                    allow_metadata_updates = not artwork_only and not game.is_native_steam_game
+                    if allow_metadata_updates:
+                        self.post_ui(lambda g=game, idx=game_index: self.set_artwork_job_status(g, "Reading store notes", idx))
+                        self.logger.info("Finding artwork and Steam notes for %s using folder term %s", game.display_title, title)
+                        self.set_task_progress(f"Reading store notes for {game.display_title} ({number}/{len(jobs)})", step, total_steps)
+                        try:
+                            service.enrich(game)
+                        except Exception as exc:
+                            self.logger.warning("Metadata lookup failed for %s: %s", game.display_title, exc)
+                        self.raise_if_cancelled()
+                        if not game.metadata.notes:
+                            game.metadata.notes = build_metadata_notes(game)
+                        self.logger.info("Prepared Steam notes for %s (%s chars).", game.display_title, len(game.metadata.notes))
+                        if game_index is not None:
+                            self.post_ui(lambda idx=game_index: self.refresh_notes_widget_if_current(idx))
+                        notes_count += 1
+                    else:
+                        self.logger.info("Finding artwork only for %s using term %s", game.display_title, title)
                     step += 1
 
                     self.set_task_progress(f"Hanging artwork choices for {game.display_title} ({number}/{len(jobs)})", step, total_steps)
                     self.post_ui(lambda g=game, idx=game_index: self.set_artwork_job_status(g, "Searching artwork", idx))
-                    assets_by_kind = None if force_refresh else self.cached_artwork_for_game(game)
+                    assets_by_kind = None if force_refresh else self.cached_artwork_for_game(game, preferred)
                     if assets_by_kind is not None:
-                        self.logger.info("Using cached artwork search results for %s.", game.display_title)
+                        self.logger.info("Using cached artwork search results for %s.", preferred or game.display_title)
                     else:
                         assets_by_kind = self.collect_artwork_assets(
                             game,
@@ -2565,10 +3220,12 @@ class MainWindow(tk.Tk):
                             use_sgdb_cache=not force_refresh,
                             enabled_sources=enabled_sources,
                             rawg_api_key=rawg_api_key,
+                            sgdb_game_id=sgdb_game_id,
+                            allow_metadata_updates=allow_metadata_updates,
                         )
                     self.raise_if_cancelled()
                     if game_index is not None:
-                        self.post_ui(lambda idx=game_index, data=assets_by_kind: self.schedule_artwork_cache_refresh(idx, data, delay_ms=150))
+                        self.post_ui(lambda idx=game_index, data=assets_by_kind, term=preferred: self.schedule_artwork_cache_refresh(idx, data, preferred=term, delay_ms=150))
                     selected_this_game = 0
                     for kind, assets in assets_by_kind.items():
                         selected_asset: ArtworkAsset | None = None
@@ -2582,7 +3239,7 @@ class MainWindow(tk.Tk):
                             selected_asset = selected_asset or asset
                             artwork_count += 1
                             if game_index is not None and artwork_count % 3 == 0:
-                                self.post_ui(lambda idx=game_index, data=assets_by_kind: self.schedule_artwork_cache_refresh(idx, data, delay_ms=100))
+                                self.post_ui(lambda idx=game_index, data=assets_by_kind, term=preferred: self.schedule_artwork_cache_refresh(idx, data, preferred=term, delay_ms=100))
                         if selected_asset and self.can_auto_select_artwork(game, kind, force_refresh):
                             setattr(game.artwork, kind, selected_asset)
                             game.selected = True
@@ -2592,7 +3249,7 @@ class MainWindow(tk.Tk):
                             self.logger.info("Preserved existing/manual %s artwork for %s.", kind, game.display_title)
                     selected_this_game += self.fill_missing_artwork_slots(game)
                     if game_index is not None:
-                        self.post_ui(lambda idx=game_index, data=assets_by_kind: self.update_artwork_cache_and_display(idx, data))
+                        self.post_ui(lambda idx=game_index, data=assets_by_kind, term=preferred: self.update_artwork_cache_and_display(idx, data, preferred=term))
                         self.post_ui(lambda idx=game_index: self.refresh_game_row(idx))
                     status = "Artwork ready" if selected_this_game or game.artwork.selected_count() else "No confident artwork"
                     self.post_ui(lambda g=game, text=status, idx=game_index: self.set_artwork_job_status(g, text, idx))
@@ -2613,30 +3270,39 @@ class MainWindow(tk.Tk):
             notes_count, artwork_count = result
             self.refresh_all_game_rows()
             if self.current_game_index is not None:
+                preferred = preferred_terms.get(id(self.games[self.current_game_index]), "") if 0 <= self.current_game_index < len(self.games) else ""
                 self.load_game_detail(self.current_game_index)
-            self.status_var.set(f"Updated notes for {notes_count} game(s) and cached {artwork_count} artwork file(s).")
+                if preferred:
+                    self.artwork_search_var.set(preferred)
+            if artwork_only:
+                self.status_var.set(f"Cached {artwork_count} artwork file(s).")
+            else:
+                self.status_var.set(f"Updated notes for {notes_count} game(s) and cached {artwork_count} artwork file(s).")
 
-        self.run_background("Refreshing artwork and notes" if force_refresh else "Finding artwork and notes", task, done)
+        if artwork_only:
+            label = "Refreshing artwork" if force_refresh else "Finding artwork"
+        else:
+            label = "Refreshing artwork and notes" if force_refresh else "Finding artwork and notes"
+        self.run_background(label, task, done)
 
-    def fetch_artwork_for_selected(self) -> None:
+    def fetch_artwork_for_selected(self, force_refresh: bool = False) -> None:
         if self.current_game_index is None:
             messagebox.showwarning(__app_name__, "Select a game first.")
             return
-        self.fetch_artwork_for_games([self.games[self.current_game_index]])
+        self.fetch_artwork_for_games([self.games[self.current_game_index]], force_refresh=force_refresh)
 
-    def fetch_artwork_for_all(self) -> None:
+    def fetch_artwork_for_all(self, force_refresh: bool = False) -> None:
         selected = [game for game in self.games if game.selected]
         if not selected:
             messagebox.showwarning(__app_name__, "Select at least one game.")
             return
-        self.fetch_artwork_for_games(selected)
+        self.fetch_artwork_for_games(selected, force_refresh=force_refresh)
 
-    def fetch_artwork_for_games(self, games: list[DetectedGame]) -> None:
-        games = [game for game in games if not game.is_native_steam_game]
+    def fetch_artwork_for_games(self, games: list[DetectedGame], force_refresh: bool = False) -> None:
         if not games:
-            messagebox.showinfo(__app_name__, "Installed Steam games are protected. Artwork editing only applies to non-Steam shortcuts.")
+            messagebox.showwarning(__app_name__, "Select at least one game.")
             return
-        self.match_metadata_and_art_for_games(games)
+        self.match_metadata_and_art_for_games(games, force_refresh=force_refresh)
 
     def artwork_search_terms(self, game: DetectedGame, preferred: str = "") -> list[str]:
         return build_artwork_search_terms(game, preferred)
@@ -2702,19 +3368,19 @@ class MainWindow(tk.Tk):
     def search_artwork(self, force_refresh: bool = False) -> None:
         self.find_art_for_current(force_refresh=force_refresh)
 
-    def update_artwork_cache_and_display(self, game_index: int, assets_by_kind: dict[str, list[ArtworkAsset]]) -> None:
+    def update_artwork_cache_and_display(self, game_index: int, assets_by_kind: dict[str, list[ArtworkAsset]], preferred: str = "") -> None:
         self.artwork_search_cache[game_index] = assets_by_kind
         if 0 <= game_index < len(self.games):
-            for cache_key in self.artwork_cache_keys(self.games[game_index]):
+            for cache_key in self.artwork_cache_keys(self.games[game_index], preferred):
                 self.artwork_title_cache[cache_key] = assets_by_kind
             self.save_persistent_artwork_search_cache()
         if self.current_game_index == game_index:
             self.display_cached_artwork_kind()
 
-    def schedule_artwork_cache_refresh(self, game_index: int, assets_by_kind: dict[str, list[ArtworkAsset]], delay_ms: int = 350) -> None:
+    def schedule_artwork_cache_refresh(self, game_index: int, assets_by_kind: dict[str, list[ArtworkAsset]], preferred: str = "", delay_ms: int = 350) -> None:
         self.artwork_search_cache[game_index] = assets_by_kind
         if 0 <= game_index < len(self.games):
-            for cache_key in self.artwork_cache_keys(self.games[game_index]):
+            for cache_key in self.artwork_cache_keys(self.games[game_index], preferred):
                 self.artwork_title_cache[cache_key] = assets_by_kind
         after_id = self.artwork_refresh_after_ids.get(game_index)
         if after_id:
@@ -2724,7 +3390,7 @@ class MainWindow(tk.Tk):
                 pass
         self.artwork_refresh_after_ids[game_index] = self.after(
             delay_ms,
-            lambda: self.update_artwork_cache_and_display(game_index, assets_by_kind),
+            lambda: self.update_artwork_cache_and_display(game_index, assets_by_kind, preferred),
         )
 
     def collect_artwork_assets(
@@ -2736,11 +3402,10 @@ class MainWindow(tk.Tk):
         use_extended_sources: bool = True,
         enabled_sources: dict[str, bool] | None = None,
         rawg_api_key: str = "",
+        sgdb_game_id: int | None = None,
+        allow_metadata_updates: bool = True,
     ) -> dict[str, list[ArtworkAsset]]:
         assets_by_kind: dict[str, list[ArtworkAsset]] = {kind: [] for kind in ARTWORK_KINDS}
-        if game.is_native_steam_game:
-            self.logger.info("Artwork collection skipped for protected Steam game: %s", game.display_title)
-            return assets_by_kind
         enabled_sources = dict(enabled_sources or self.active_artwork_sources())
         if not use_extended_sources:
             enabled_sources = {**enabled_sources, "wikimedia": False, "rawg": False}
@@ -2749,7 +3414,10 @@ class MainWindow(tk.Tk):
         if not search_terms:
             return assets_by_kind
         broad_lookup_term = next((item for item in search_terms if "launcher" not in item.casefold()), search_terms[0])
-        if enabled_sources.get("steam", True) and not game.metadata.steam_appid:
+        release_year = release_year_from_text(game.metadata.release_year)
+        year_lookup_term = f"{broad_lookup_term} {release_year}".strip() if release_year and release_year not in broad_lookup_term else broad_lookup_term
+        steam_appid = game.steam_appid if game.is_native_steam_game and game.steam_appid else game.metadata.steam_appid
+        if enabled_sources.get("steam", True) and not steam_appid:
             steam_match = None
             for search_term in search_terms:
                 try:
@@ -2761,22 +3429,74 @@ class MainWindow(tk.Tk):
                     self.logger.info("Steam Store artwork match for %s using term %s.", game.display_title, search_term)
                     break
             if steam_match:
-                game.metadata.steam_appid = int(steam_match.get("id") or 0) or None
+                steam_appid = int(steam_match.get("id") or 0) or None
+                if allow_metadata_updates:
+                    game.metadata.steam_appid = steam_appid
                 steam_name = str(steam_match.get("name") or "")
-                if not game.metadata.title_locked and should_accept_matched_title(game.title, game.metadata.clean_title, steam_name):
+                if allow_metadata_updates and not game.metadata.title_locked and should_accept_matched_title(game.title, game.metadata.clean_title, steam_name):
                     game.metadata.clean_title = steam_name
-        if enabled_sources.get("steam", True) and game.metadata.steam_appid:
+        if enabled_sources.get("steam", True) and steam_appid:
             self.raise_if_cancelled()
-            official = official_steam_assets(game.metadata.steam_appid, game.display_title)
+            official = official_steam_assets(steam_appid, game.display_title)
             for kind, assets in official.items():
                 assets_by_kind[kind].extend(assets)
+            try:
+                steam_detail = get_steam_app_details(int(steam_appid))
+            except Exception as exc:
+                self.logger.info("Steam Store media lookup failed for %s: %s", game.display_title, exc)
+                steam_detail = {}
+            if steam_detail:
+                store_media = steam_store_media_assets(int(steam_appid), game.display_title, steam_detail)
+                for kind, assets in store_media.items():
+                    assets_by_kind[kind].extend(assets)
+
+        sgdb_direct_found = False
+        if enabled_sources.get("steamgriddb", True) and client.configured and sgdb_game_id:
+            direct_count = 0
+            for kind in ("grid", "hero", "logo", "icon"):
+                self.raise_if_cancelled()
+                try:
+                    fetched = client.get_assets(int(sgdb_game_id), kind)
+                except SteamGridDbError as exc:
+                    self.logger.info("SteamGridDB %s lookup by selected game ID %s failed: %s", kind, sgdb_game_id, exc)
+                    continue
+                direct_count += len(fetched)
+                add_steamgriddb_assets_to_slots(assets_by_kind, kind, fetched)
+            if direct_count:
+                sgdb_direct_found = True
+                if allow_metadata_updates:
+                    game.metadata.sgdb_id = int(sgdb_game_id)
+                self.logger.info("SteamGridDB artwork match for %s using selected game ID %s.", game.display_title, sgdb_game_id)
+
+        if enabled_sources.get("steamgriddb", True) and client.configured and steam_appid and not sgdb_direct_found:
+            steam_appid = int(steam_appid)
+            direct_count = 0
+            for kind in ("grid", "hero", "logo", "icon"):
+                self.raise_if_cancelled()
+                try:
+                    fetched = client.get_assets_by_platform("steam", steam_appid, kind)
+                except SteamGridDbError as exc:
+                    self.logger.info("SteamGridDB %s lookup by Steam AppID %s failed: %s", kind, steam_appid, exc)
+                    continue
+                direct_count += len(fetched)
+                add_steamgriddb_assets_to_slots(assets_by_kind, kind, fetched)
+            if direct_count:
+                sgdb_direct_found = True
+                self.logger.info("SteamGridDB artwork match for %s using Steam AppID %s.", game.display_title, steam_appid)
+                try:
+                    detail = client.get_game_by_steam_appid(steam_appid)
+                except SteamGridDbError:
+                    detail = {}
+                sgdb_id = int(detail.get("id") or 0) if isinstance(detail, dict) else 0
+                if sgdb_id and allow_metadata_updates:
+                    game.metadata.sgdb_id = sgdb_id
 
         if enabled_sources.get("wikimedia", True):
             self.raise_if_cancelled()
             try:
-                wikimedia = wikimedia_artwork_assets(broad_lookup_term)
+                wikimedia = wikimedia_artwork_assets(year_lookup_term)
             except Exception as exc:
-                self.logger.info("Wikipedia/Wikimedia artwork lookup failed for %s: %s", broad_lookup_term, exc)
+                self.logger.info("Wikipedia/Wikimedia artwork lookup failed for %s: %s", year_lookup_term, exc)
             else:
                 for kind, assets in wikimedia.items():
                     assets_by_kind[kind].extend(assets)
@@ -2784,14 +3504,14 @@ class MainWindow(tk.Tk):
         if enabled_sources.get("rawg", False):
             self.raise_if_cancelled()
             try:
-                rawg = rawg_artwork_assets(broad_lookup_term, rawg_api_key)
+                rawg = rawg_artwork_assets(broad_lookup_term, rawg_api_key, release_year=release_year)
             except Exception as exc:
                 self.logger.info("RAWG artwork lookup failed for %s: %s", broad_lookup_term, exc)
             else:
                 for kind, assets in rawg.items():
                     assets_by_kind[kind].extend(assets)
 
-        if enabled_sources.get("steamgriddb", True) and client.configured:
+        if enabled_sources.get("steamgriddb", True) and client.configured and not sgdb_direct_found:
             self.raise_if_cancelled()
             sgdb_games: list[dict[str, Any]] = []
             matched_term = search_terms[0]
@@ -2803,24 +3523,40 @@ class MainWindow(tk.Tk):
                     continue
                 if not candidates:
                     continue
-                best_candidate = max(candidates, key=lambda item: similarity(search_term, str(item.get("name") or "")))
+                detailed_candidates: list[dict[str, Any]] = []
+                for candidate in candidates[:8]:
+                    game_id = int(candidate.get("id") or 0)
+                    if not game_id:
+                        detailed_candidates.append(candidate)
+                        continue
+                    try:
+                        detail = client.get_game(game_id)
+                    except SteamGridDbError:
+                        detail = {}
+                    detailed_candidates.append({**candidate, **detail} if isinstance(detail, dict) else candidate)
+                ranked_candidates = detailed_candidates or candidates
+                best_candidate = max(ranked_candidates, key=lambda item: artwork_candidate_score(game, search_term, item))
                 best_candidate_name = str(best_candidate.get("name") or "")
-                if is_specific_title_match(search_term, best_candidate_name, minimum_similarity=0.52):
-                    sgdb_games = candidates
+                best_score = artwork_candidate_score(game, search_term, best_candidate)
+                title_match_term = search_term.replace(release_year, "").strip() if release_year else search_term
+                if best_score >= 0.52 and is_specific_title_match(title_match_term, best_candidate_name, minimum_similarity=0.52):
+                    sgdb_games = ranked_candidates
                     matched_term = search_term
                     self.logger.info("SteamGridDB artwork match for %s using term %s.", game.display_title, search_term)
                     break
                 self.logger.info("SteamGridDB candidate skipped for %s; best candidate was %s.", search_term, best_candidate_name or "(none)")
             if sgdb_games:
-                best = max(sgdb_games, key=lambda item: similarity(matched_term, str(item.get("name") or "")))
+                best = max(sgdb_games, key=lambda item: artwork_candidate_score(game, matched_term, item))
                 best_name = str(best.get("name") or "")
-                if not is_specific_title_match(matched_term, best_name, minimum_similarity=0.52):
+                title_match_term = matched_term.replace(release_year, "").strip() if release_year else matched_term
+                if artwork_candidate_score(game, matched_term, best) < 0.52 or not is_specific_title_match(title_match_term, best_name, minimum_similarity=0.52):
                     self.logger.info("SteamGridDB match skipped for %s; best candidate was %s.", matched_term, best_name or "(none)")
                     best = {}
                 game_id = int(best.get("id") or 0)
                 if game_id:
-                    game.metadata.sgdb_id = game.metadata.sgdb_id or game_id
-                    if not game.metadata.title_locked and should_accept_matched_title(game.title, game.metadata.clean_title, best_name):
+                    if allow_metadata_updates:
+                        game.metadata.sgdb_id = game.metadata.sgdb_id or game_id
+                    if allow_metadata_updates and not game.metadata.title_locked and should_accept_matched_title(game.title, game.metadata.clean_title, best_name):
                         game.metadata.clean_title = best_name
                     for kind in ("grid", "hero", "logo", "icon"):
                         self.raise_if_cancelled()
@@ -2829,18 +3565,7 @@ class MainWindow(tk.Tk):
                         except SteamGridDbError as exc:
                             self.logger.warning("SteamGridDB %s lookup failed for %s: %s", kind, matched_term, exc)
                             continue
-                        if kind == "grid":
-                            for asset in fetched:
-                                if asset.width and asset.height and asset.width >= asset.height:
-                                    assets_by_kind["wide"].append(replace(asset, kind="wide", asset_id=f"{asset.asset_id}-wide"))
-                                else:
-                                    assets_by_kind["grid"].append(asset)
-                            if not assets_by_kind["wide"]:
-                                assets_by_kind["wide"].extend(replace(asset, kind="wide", asset_id=f"{asset.asset_id}-wide-fallback") for asset in fetched[:3])
-                            if not assets_by_kind["grid"]:
-                                assets_by_kind["grid"].extend(fetched[:3])
-                        else:
-                            assets_by_kind[kind].extend(fetched)
+                        add_steamgriddb_assets_to_slots(assets_by_kind, kind, fetched)
 
         for kind, assets in assets_by_kind.items():
             seen: set[str] = set()
@@ -2915,7 +3640,7 @@ class MainWindow(tk.Tk):
         assets = source_assets if source_assets is not None else self.current_artwork_results
         display_assets = [asset for asset in assets if asset.local_path and asset.local_path.exists()]
         if not assets:
-            ttk.Label(self.artwork_thumb_frame, text="No collected artwork yet. Click Find Art.", style="Subtle.TLabel").grid(row=0, column=0, sticky="w")
+            ttk.Label(self.artwork_thumb_frame, text="No collected artwork yet. Click Search Art.", style="Subtle.TLabel").grid(row=0, column=0, sticky="w")
             return
         if not display_assets:
             ttk.Label(self.artwork_thumb_frame, text="Loading artwork previews...", style="Subtle.TLabel").grid(row=0, column=0, sticky="w")
@@ -2978,9 +3703,6 @@ class MainWindow(tk.Tk):
             return
         game_index = self.current_game_index
         game = self.games[game_index]
-        if game.is_native_steam_game:
-            messagebox.showinfo(__app_name__, "Installed Steam games are protected. Artwork editing only applies to non-Steam shortcuts.")
-            return
 
         def task() -> ArtworkAsset:
             download_asset(asset, Path(self.settings.cache_dir))
@@ -3007,6 +3729,222 @@ class MainWindow(tk.Tk):
             "logo": (150, 76),
             "icon": (92, 92),
         }.get(kind, (150, 95))
+
+    def selected_artwork_asset_for_kind(self, kind: str) -> ArtworkAsset | None:
+        if self.current_game_index is None:
+            return None
+        return getattr(self.games[self.current_game_index].artwork, kind, None)
+
+    def selected_artwork_path_for_kind(self, kind: str) -> Path | None:
+        asset = self.selected_artwork_asset_for_kind(kind)
+        path = Path(asset.local_path) if asset and asset.local_path else None
+        return path if path and path.exists() else None
+
+    def show_artwork_preview_menu(self, event: tk.Event[Any], kind: str) -> None:
+        has_game = self.current_game_index is not None
+        has_asset = self.selected_artwork_asset_for_kind(kind) is not None
+        has_path = self.selected_artwork_path_for_kind(kind) is not None
+        menu = tk.Menu(self, tearoff=False)
+        menu.add_command(
+            label="Preview",
+            command=lambda: self.open_selected_artwork_preview(kind),
+            state=tk.NORMAL if has_path else tk.DISABLED,
+        )
+        menu.add_command(
+            label="Choose Custom Image...",
+            command=lambda: self.choose_custom_artwork_image(kind),
+            state=tk.NORMAL if has_game else tk.DISABLED,
+        )
+        menu.add_command(
+            label="Clear Image",
+            command=lambda: self.clear_selected_artwork_image(kind),
+            state=tk.NORMAL if has_asset else tk.DISABLED,
+        )
+        menu.add_separator()
+        menu.add_command(
+            label="Edit in Paint",
+            command=lambda: self.edit_selected_artwork_in_paint(kind),
+            state=tk.NORMAL if has_path else tk.DISABLED,
+        )
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def image_dimensions_for_path(self, path: Path) -> tuple[int, int]:
+        if Image:
+            try:
+                with Image.open(path) as image:
+                    return image.size
+            except Exception:
+                return (0, 0)
+        if path.suffix.lower() != ".png":
+            return (0, 0)
+        try:
+            image = tk.PhotoImage(file=str(path))
+            return (image.width(), image.height())
+        except Exception:
+            return (0, 0)
+
+    def forget_preview_cache_for_path(self, path: Path) -> None:
+        path_text = str(path)
+        for key in list(self.image_cache):
+            if key[0] == path_text:
+                self.image_cache.pop(key, None)
+
+    def choose_custom_artwork_image(self, kind: str) -> None:
+        if self.current_game_index is None:
+            return
+        game = self.games[self.current_game_index]
+        initial_dir = str(game.root_path) if game.root_path.exists() else str(Path.home())
+        path_text = filedialog.askopenfilename(
+            title=f"Choose {kind.title()} Artwork",
+            initialdir=initial_dir,
+            filetypes=[("JPG or PNG images", "*.jpg *.png")],
+        )
+        if not path_text:
+            return
+        path = Path(path_text).expanduser().resolve(strict=False)
+        if path.suffix.lower() not in {".jpg", ".png"}:
+            messagebox.showerror(__app_name__, "Choose a .jpg or .png image.")
+            return
+        if not path.exists():
+            messagebox.showerror(__app_name__, f"Image file does not exist:\n\n{path}")
+            return
+        width, height = self.image_dimensions_for_path(path)
+        try:
+            url = path.as_uri()
+        except ValueError:
+            url = str(path)
+        asset = ArtworkAsset(
+            kind=kind,
+            asset_id=f"custom-{kind}-{path.stem}-{path.stat().st_mtime_ns}",
+            url=url,
+            thumb_url=url,
+            width=width,
+            height=height,
+            mime="image/png" if path.suffix.lower() == ".png" else "image/jpeg",
+            score=100,
+            style="custom",
+            local_path=path,
+            raw={"source": "Custom image"},
+        )
+        setattr(game.artwork, kind, asset)
+        self.manual_artwork_slots.add((id(game), kind))
+        game.selected = True
+        self.forget_preview_cache_for_path(path)
+        self.update_artwork_previews()
+        self.refresh_game_row(self.current_game_index)
+        self.status_var.set(f"Custom {kind} artwork selected for {game.display_title}.")
+        self.logger.info("Custom %s artwork selected for %s: %s", kind, game.display_title, path)
+
+    def clear_selected_artwork_image(self, kind: str) -> None:
+        if self.current_game_index is None:
+            return
+        game = self.games[self.current_game_index]
+        asset = getattr(game.artwork, kind, None)
+        if asset and asset.local_path:
+            self.forget_preview_cache_for_path(Path(asset.local_path))
+        setattr(game.artwork, kind, None)
+        self.manual_artwork_slots.discard((id(game), kind))
+        self.update_artwork_previews()
+        self.refresh_game_row(self.current_game_index)
+        self.status_var.set(f"Cleared {kind} artwork for {game.display_title}.")
+        self.logger.info("Cleared %s artwork for %s.", kind, game.display_title)
+
+    def refresh_artwork_after_external_edit(self, path: Path, kind: str) -> None:
+        self.forget_preview_cache_for_path(path)
+        self.update_artwork_previews()
+        if self.current_game_index is not None:
+            self.refresh_game_row(self.current_game_index)
+            game = self.games[self.current_game_index]
+            self.status_var.set(f"Refreshed {kind} artwork preview for {game.display_title}.")
+
+    def edit_selected_artwork_in_paint(self, kind: str) -> None:
+        path = self.selected_artwork_path_for_kind(kind)
+        if not path:
+            messagebox.showinfo(__app_name__, f"No {kind} artwork is selected.")
+            return
+        try:
+            process = subprocess.Popen(["mspaint.exe", str(path)])
+        except OSError as exc:
+            self.logger.warning("Could not open Paint for %s: %s", path, exc)
+            messagebox.showerror(__app_name__, f"Could not open Paint:\n\n{exc}")
+            return
+        self.status_var.set(f"Opened {kind} artwork in Paint.")
+
+        def wait_for_paint() -> None:
+            try:
+                process.wait()
+            except Exception:
+                pass
+            self.post_ui(lambda: self.refresh_artwork_after_external_edit(path, kind))
+
+        threading.Thread(target=wait_for_paint, daemon=True).start()
+
+    def open_selected_artwork_preview(self, kind: str) -> None:
+        if self.current_game_index is None:
+            return
+        game = self.games[self.current_game_index]
+        asset = getattr(game.artwork, kind, None)
+        path = Path(asset.local_path) if asset and asset.local_path else None
+        if not path or not path.exists():
+            messagebox.showinfo(__app_name__, f"No {kind} artwork is selected.")
+            return
+
+        screen_width = max(800, self.winfo_screenwidth())
+        screen_height = max(600, self.winfo_screenheight())
+        width = max(640, int(screen_width * 0.75))
+        height = max(480, int(screen_height * 0.75))
+        x = max(0, (screen_width - width) // 2)
+        y = max(0, (screen_height - height) // 2)
+
+        window = tk.Toplevel(self)
+        window.title(f"{game.display_title} - {kind.title()} Artwork")
+        window.geometry(f"{width}x{height}+{x}+{y}")
+        window.minsize(480, 360)
+        window.transient(self)
+        window.configure(bg=self.palette()["canvas"])
+        window.bind("<Escape>", lambda _event: window.destroy())
+
+        image_label = tk.Label(window, bg=self.palette()["canvas"], fg=self.palette()["text"])
+        image_label.pack(fill=tk.BOTH, expand=True, padx=12, pady=12)
+        footer = ttk.Label(window, text=path.name, style="Subtle.TLabel", anchor=tk.CENTER)
+        footer.pack(fill=tk.X, padx=12, pady=(0, 12))
+
+        if Image and ImageTk:
+            try:
+                with Image.open(path) as opened:
+                    original = opened.copy()
+            except Exception as exc:
+                image_label.configure(text=f"Could not open image:\n{exc}")
+                return
+
+            def render_large_preview(_event: tk.Event[Any] | None = None) -> None:
+                max_width = max(1, image_label.winfo_width())
+                max_height = max(1, image_label.winfo_height())
+                image = original.copy()
+                resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", 1)
+                image.thumbnail((max_width, max_height), resampling)
+                photo = ImageTk.PhotoImage(image)
+                image_label.configure(image=photo, text="")
+                image_label.image = photo
+
+            image_label.bind("<Configure>", render_large_preview)
+            window.after(80, render_large_preview)
+            return
+
+        if path.suffix.lower() not in {".png", ".gif"}:
+            image_label.configure(text="Large preview needs Pillow for this image type.")
+            return
+        try:
+            image = tk.PhotoImage(file=str(path))
+            while image.width() > width - 24 or image.height() > height - 60:
+                image = image.subsample(2, 2)
+            image_label.configure(image=image, text="")
+            image_label.image = image
+        except Exception as exc:
+            image_label.configure(text=f"Could not open image:\n{exc}")
 
     def update_artwork_previews(self) -> None:
         self.preview_images.clear()
@@ -3125,18 +4063,22 @@ class MainWindow(tk.Tk):
         if not profile:
             messagebox.showwarning(__app_name__, "Choose a Steam profile first.")
             return
-        selected = [game for game in self.games if game.selected and game.is_managed_non_steam]
+        selected = [
+            game
+            for game in self.games
+            if game.selected and (game.is_managed_non_steam or (game.is_native_steam_game and game.artwork.selected_count()))
+        ]
         if not selected and self.current_game_index is not None and 0 <= self.current_game_index < len(self.games):
             current = self.games[self.current_game_index]
-            if current.is_managed_non_steam:
+            if current.is_managed_non_steam or (current.is_native_steam_game and current.artwork.selected_count()):
                 current.selected = True
                 selected = [current]
                 self.refresh_game_row(self.current_game_index)
-                self.logger.info("No checked writable rows; using current non-Steam row for write: %s", current.display_title)
+                self.logger.info("No checked writable rows; using current row for write: %s", current.display_title)
         if not selected:
-            messagebox.showwarning(__app_name__, "No selected non-Steam games are ready to write.")
+            messagebox.showwarning(__app_name__, "No selected games have shortcuts or artwork ready to write.")
             return
-        self.logger.info("Write requested for %s selected writable non-Steam game(s).", len(selected))
+        self.logger.info("Write requested for %s selected writable game(s).", len(selected))
         steam_path = Path(self.steam_path_var.get().strip())
 
         def task() -> tuple[int, int, Path | None, int, int, bool, bool]:
@@ -3207,6 +4149,7 @@ class MainWindow(tk.Tk):
             added, updated, backup, copied_count, notes_count, steam_closed, steam_reopened = result
             profile_records = load_shortcuts(profile.shortcuts_path)
             mark_existing_shortcuts(self.games, profile_records)
+            self.apply_existing_shortcut_choices(self.games, profile_records)
             self.refresh_all_game_rows()
             backup_text = str(backup) if backup else "No prior shortcuts.vdf existed, so no backup file was needed."
             steam_text = ""
@@ -3258,23 +4201,10 @@ class MainWindow(tk.Tk):
         if not path:
             return
         self.settings = self.settings_store.import_from(Path(path))
-        self.steam_path_var.set(self.settings.steam_path)
-        self.collection_path_var.set(self.settings.collection_root)
-        self.api_key_var.set(self.settings.steamgriddb_api_key)
-        self.rawg_api_key_var.set(self.settings.rawg_api_key)
-        self.sgdboop_path_var.set(self.settings.sgdboop_path)
-        self.update_existing_var.set(self.settings.update_existing_shortcuts)
-        self.default_tags_var.set(", ".join(self.settings.default_tags))
-        theme = self.normalized_theme_name(self.settings.theme_name)
-        self.theme_var.set(theme)
-        self.dark_mode_var.set(self.theme_is_dark(theme))
-        self.view_filter_var.set(self.settings.view_filter if self.settings.view_filter in VIEW_FILTERS else "All")
-        self.sort_preset_var.set(self.settings.sort_preset if self.settings.sort_preset in SORT_PRESETS else "Title A-Z")
-        self.preview_limit_var.set(self.settings.artwork_preview_limit)
-        for key, var in self.artwork_source_vars.items():
-            var.set(bool(self.settings.artwork_sources.get(key, True)))
-        for key, var in self.metadata_source_vars.items():
-            var.set(bool(self.settings.metadata_sources.get(key, True)))
+        self.apply_settings_to_ui()
+        self.artwork_search_cache.clear()
+        self.artwork_title_cache.clear()
+        self.load_persistent_artwork_search_cache()
         self.settings_store.save(self.settings)
         self.refresh_profiles()
         self.apply_game_columns()

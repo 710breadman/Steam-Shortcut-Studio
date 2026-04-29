@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -21,6 +22,13 @@ def _local_cache_dir() -> Path:
 
 
 @dataclass(slots=True)
+class CacheDeletionResult:
+    files_deleted: int = 0
+    bytes_deleted: int = 0
+    paths_deleted: list[str] = field(default_factory=list)
+
+
+@dataclass(slots=True)
 class AppSettings:
     steam_path: str = ""
     active_user_id: str = ""
@@ -34,8 +42,8 @@ class AppSettings:
     last_export_dir: str = ""
     dark_mode: bool = False
     theme_name: str = "Follow System"
-    visible_game_columns: list[str] = field(default_factory=lambda: ["add", "title", "exe", "confidence", "artwork", "existing"])
-    game_column_order: list[str] = field(default_factory=lambda: ["add", "title", "exe", "confidence", "artwork", "existing"])
+    visible_game_columns: list[str] = field(default_factory=lambda: ["add", "title", "exe", "artwork", "existing"])
+    game_column_order: list[str] = field(default_factory=lambda: ["add", "title", "exe", "artwork", "existing"])
     view_filter: str = "All"
     sort_preset: str = "Title A-Z"
     artwork_preview_limit: int = 16
@@ -106,3 +114,58 @@ class SettingsStore:
     def import_from(self, source: Path) -> AppSettings:
         data = json.loads(source.read_text(encoding="utf-8"))
         return AppSettings.from_json(data)
+
+    def reset_to_defaults(self) -> AppSettings:
+        settings = AppSettings()
+        self.save(settings)
+        return settings
+
+    def clear_cached_artwork(self, settings: AppSettings) -> CacheDeletionResult:
+        return clear_cached_artwork(settings.cache_dir)
+
+
+def _cache_child(cache_dir: Path, name: str) -> Path:
+    cache_root = cache_dir.expanduser().resolve(strict=False)
+    child = (cache_root / name).resolve(strict=False)
+    if child == cache_root or not child.is_relative_to(cache_root):
+        raise ValueError(f"Refusing to clear cache path outside cache folder: {child}")
+    return child
+
+
+def _file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def _count_tree(path: Path) -> tuple[int, int]:
+    if path.is_symlink() or path.is_file():
+        return 1, _file_size(path)
+    files = 0
+    bytes_deleted = 0
+    if path.is_dir():
+        for child in path.rglob("*"):
+            if child.is_file() or child.is_symlink():
+                files += 1
+                bytes_deleted += _file_size(child)
+    return files, bytes_deleted
+
+
+def clear_cached_artwork(cache_dir: str | Path) -> CacheDeletionResult:
+    cache_root = Path(cache_dir).expanduser().resolve(strict=False)
+    result = CacheDeletionResult()
+    for name in ("artwork", "artwork_search_cache.json", "sgdb_search_cache.json"):
+        path = _cache_child(cache_root, name)
+        if not path.exists() and not path.is_symlink():
+            continue
+        files, bytes_deleted = _count_tree(path)
+        if path.is_dir() and not path.is_symlink():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        result.files_deleted += files
+        result.bytes_deleted += bytes_deleted
+        result.paths_deleted.append(str(path))
+    cache_root.mkdir(parents=True, exist_ok=True)
+    return result

@@ -90,18 +90,14 @@ class SteamGridDbClient:
             return payload[0] if payload else {}
         return payload if isinstance(payload, dict) else {}
 
-    def get_assets(self, game_id: int, kind: str) -> list[ArtworkAsset]:
-        kind = kind.lower()
-        endpoint_kind = {
-            "grid": "grids",
-            "hero": "heroes",
-            "logo": "logos",
-            "icon": "icons",
-        }.get(kind)
-        if not endpoint_kind:
-            raise ValueError(f"Unsupported artwork kind: {kind}")
-        data = self._request_json(f"/{endpoint_kind}/game/{int(game_id)}")
-        raw_assets = data.get("data", [])
+    def get_game_by_steam_appid(self, appid: int) -> dict[str, Any]:
+        data = self._request_json(f"/games/steam/{int(appid)}")
+        payload = data.get("data", data)
+        if isinstance(payload, list):
+            return payload[0] if payload else {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _assets_from_payload(self, raw_assets: Any, kind: str) -> list[ArtworkAsset]:
         if not isinstance(raw_assets, list):
             return []
         assets: list[ArtworkAsset] = []
@@ -127,3 +123,31 @@ class SteamGridDbClient:
             )
         assets.sort(key=lambda asset: (asset.score, asset.width * asset.height), reverse=True)
         return assets
+
+    def get_assets(self, game_id: int, kind: str) -> list[ArtworkAsset]:
+        kind = kind.lower()
+        endpoint_kind = {
+            "grid": "grids",
+            "hero": "heroes",
+            "logo": "logos",
+            "icon": "icons",
+        }.get(kind)
+        if not endpoint_kind:
+            raise ValueError(f"Unsupported artwork kind: {kind}")
+        data = self._request_json(f"/{endpoint_kind}/game/{int(game_id)}")
+        return self._assets_from_payload(data.get("data", []), kind)
+
+    def get_assets_by_platform(self, platform: str, external_id: int | str, kind: str) -> list[ArtworkAsset]:
+        kind = kind.lower()
+        endpoint_kind = {
+            "grid": "grids",
+            "hero": "heroes",
+            "logo": "logos",
+            "icon": "icons",
+        }.get(kind)
+        if not endpoint_kind:
+            raise ValueError(f"Unsupported artwork kind: {kind}")
+        platform = platform.strip().lower()
+        external = urllib.parse.quote(str(external_id).strip())
+        data = self._request_json(f"/{endpoint_kind}/{platform}/{external}")
+        return self._assets_from_payload(data.get("data", []), kind)

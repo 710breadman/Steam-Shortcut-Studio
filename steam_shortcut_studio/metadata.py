@@ -81,6 +81,26 @@ class SteamGridDbMetadataProvider:
     def enrich(self, game: DetectedGame) -> GameMetadata | None:
         if not self.client.configured:
             return None
+        steam_appid = game.metadata.steam_appid or game.steam_appid or 0
+        if steam_appid:
+            try:
+                detail = self.client.get_game_by_steam_appid(int(steam_appid))
+            except SteamGridDbError:
+                detail = {}
+            if isinstance(detail, dict) and detail:
+                name = str(detail.get("name") or game.title)
+                game_id = int(detail.get("id") or 0) or None
+                year = _year_from_value(detail.get("release_date") or detail.get("released") or detail.get("year"))
+                types = detail.get("types") or []
+                genres = [str(item).replace("_", " ").title() for item in types if isinstance(item, str)]
+                return GameMetadata(
+                    clean_title=clean_display_title(name),
+                    release_year=year,
+                    genres=genres,
+                    source=self.name,
+                    sgdb_id=game_id,
+                    steam_appid=int(steam_appid),
+                )
         try:
             query = game.display_title if game.metadata.title_locked else game.title
             results = self.client.search_games(query)
@@ -303,6 +323,7 @@ class MetadataService:
         if merged.source:
             sources.extend(part.strip() for part in merged.source.split(",") if part.strip())
         for provider in self.providers:
+            game.metadata = merged
             try:
                 metadata = provider.enrich(game)
             except Exception as exc:

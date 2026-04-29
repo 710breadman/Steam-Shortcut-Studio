@@ -179,6 +179,12 @@ def should_accept_matched_title(original_title: str, current_title: str, candida
     return is_specific_title_match(original_title, candidate_title, minimum_similarity=0.62)
 
 
+def executable_title_tokens(stem: str) -> set[str]:
+    cleaned = strip_launcher_suffixes(stem)
+    cleaned = re.sub(r"(?i)\b(win64|win32|x64|x86|shipping|client|launcher|bootstrap|binary|binaries)\b", " ", cleaned)
+    return important_title_tokens(cleaned)
+
+
 class GameScanner:
     def __init__(
         self,
@@ -186,11 +192,13 @@ class GameScanner:
         max_version_checks_per_game: int = 8,
         cancel_check: Callable[[], None] | None = None,
         progress_callback: Callable[[str], None] | None = None,
+        game_callback: Callable[[DetectedGame], None] | None = None,
     ) -> None:
         self.logger = logger or LOGGER
         self.max_version_checks_per_game = max_version_checks_per_game
         self.cancel_check = cancel_check
         self.progress_callback = progress_callback
+        self.game_callback = game_callback
 
     def _cancel_if_requested(self) -> None:
         if self.cancel_check:
@@ -199,6 +207,10 @@ class GameScanner:
     def _progress(self, message: str) -> None:
         if self.progress_callback:
             self.progress_callback(message)
+
+    def _game_found(self, game: DetectedGame) -> None:
+        if self.game_callback:
+            self.game_callback(game)
 
     def scan(self, collection_root: Path) -> list[DetectedGame]:
         collection_root = collection_root.expanduser().resolve()
@@ -234,16 +246,16 @@ class GameScanner:
             self._progress(f"Ranking candidates for {title}...")
             candidates = self.rank_candidates(title, game_root, grouped[game_root])
             selected = candidates[0].path if candidates else None
-            games.append(
-                DetectedGame(
-                    title=title,
-                    root_path=game_root,
-                    source_title=source_title,
-                    candidates=candidates,
-                    selected_exe=selected,
-                    selected=bool(selected and candidates and candidates[0].confidence >= 35),
-                )
+            game = DetectedGame(
+                title=title,
+                root_path=game_root,
+                source_title=source_title,
+                candidates=candidates,
+                selected_exe=selected,
+                selected=False,
             )
+            games.append(game)
+            self._game_found(game)
         for exe_path in sorted(root_exes, key=lambda item: item.name.lower()):
             self._cancel_if_requested()
             source_title = exe_path.stem
@@ -251,22 +263,23 @@ class GameScanner:
             self._progress(f"Ranking candidates for {title}...")
             candidates = self.rank_candidates(title, exe_path.parent, [exe_path])
             selected = candidates[0].path if candidates else exe_path
-            games.append(
-                DetectedGame(
-                    title=title,
-                    root_path=exe_path.parent,
-                    source_title=source_title,
-                    candidates=candidates,
-                    selected_exe=selected,
-                    selected=bool(selected and candidates and candidates[0].confidence >= 35),
-                )
+            game = DetectedGame(
+                title=title,
+                root_path=exe_path.parent,
+                source_title=source_title,
+                candidates=candidates,
+                selected_exe=selected,
+                selected=False,
             )
+            games.append(game)
+            self._game_found(game)
         self.logger.info("Scan complete: %s game folders with executable candidates.", len(games))
         return games
 
     def rank_candidates(self, title: str, game_root: Path, exe_paths: list[Path]) -> list[ExecutableCandidate]:
         self._cancel_if_requested()
         candidates = [self.score_candidate(title, game_root, exe_path, include_version_info=False) for exe_path in exe_paths]
+        self.rebalance_candidate_scores(title, game_root, candidates)
         candidates.sort(key=lambda candidate: candidate.score, reverse=True)
         if self.max_version_checks_per_game > 0:
             rescored: dict[Path, ExecutableCandidate] = {}
@@ -279,8 +292,37 @@ class GameScanner:
                     include_version_info=True,
                 )
             candidates = [rescored.get(candidate.path, candidate) for candidate in candidates]
+        self.rebalance_candidate_scores(title, game_root, candidates)
         candidates.sort(key=lambda candidate: candidate.score, reverse=True)
         return candidates
+
+    def rebalance_candidate_scores(self, title: str, game_root: Path, candidates: list[ExecutableCandidate]) -> None:
+        title_tokens = important_title_tokens(title)
+        if not title_tokens or len(candidates) < 2:
+            return
+        candidate_tokens = {candidate.path: executable_title_tokens(candidate.path.stem) for candidate in candidates}
+        has_near_root_title_match = any(
+            candidate.depth <= 1
+            and candidate_tokens[candidate.path] & title_tokens
+            and not any(part in candidate.path.stem.casefold() for part in BAD_NAME_PARTS)
+            for candidate in candidates
+        )
+        for candidate in candidates:
+            tokens = candidate_tokens[candidate.path]
+            overlap = tokens & title_tokens
+            stem_lower = candidate.path.stem.casefold()
+            try:
+                rel_lower = "/".join(part.casefold() for part in candidate.path.relative_to(game_root).parts)
+            except ValueError:
+                rel_lower = candidate.path.name.casefold()
+            if overlap and candidate.depth <= 1:
+                bonus = 18 + min(12, len(overlap) * 6)
+                candidate.score += bonus
+                candidate.reasons.append(f"Bonus for near-root executable name matching title token(s): {', '.join(sorted(overlap))}.")
+            if has_near_root_title_match and not overlap and candidate.depth >= 3 and ("shipping" in stem_lower or "binaries/win64" in rel_lower):
+                candidate.score -= 45
+                candidate.reasons.append("Penalized because this deep shipping binary uses a project codename while a near-root title-matching executable exists.")
+            candidate.confidence = max(0, min(100, round(candidate.score)))
 
     def score_candidate(
         self,

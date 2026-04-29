@@ -144,7 +144,7 @@ class DetectedGame:
     source_title: str = ""
     candidates: list[ExecutableCandidate] = field(default_factory=list)
     selected_exe: Path | None = None
-    selected: bool = True
+    selected: bool = False
     launch_options: str = ""
     metadata: GameMetadata = field(default_factory=GameMetadata)
     artwork: ArtworkSelection = field(default_factory=ArtworkSelection)

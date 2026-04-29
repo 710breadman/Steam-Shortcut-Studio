@@ -83,18 +83,20 @@ def wikimedia_artwork_assets(term: str, limit: int = 3) -> dict[str, list[Artwor
     return assets_by_kind
 
 
-def rawg_artwork_assets(term: str, api_key: str, limit: int = 3) -> dict[str, list[ArtworkAsset]]:
+def rawg_artwork_assets(term: str, api_key: str, limit: int = 3, release_year: str = "") -> dict[str, list[ArtworkAsset]]:
     api_key = api_key.strip()
     if not api_key:
         return {"grid": [], "wide": [], "hero": [], "logo": [], "icon": []}
-    query = urllib.parse.urlencode(
-        {
-            "key": api_key,
-            "search": term,
-            "page_size": str(limit),
-            "search_precise": "false",
-        }
-    )
+    params = {
+        "key": api_key,
+        "search": term,
+        "page_size": str(limit),
+        "search_precise": "false",
+    }
+    year = release_year.strip()
+    if len(year) == 4 and year.isdigit():
+        params["dates"] = f"{year}-01-01,{year}-12-31"
+    query = urllib.parse.urlencode(params)
     data = get_json(f"https://api.rawg.io/api/games?{query}", timeout=18)
     results = data.get("results", [])
     if not isinstance(results, list):

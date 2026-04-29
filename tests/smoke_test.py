@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import sys
 import json
+import logging
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from steam_shortcut_studio.artwork import artwork_assets_for_steam_slots, copy_all_artwork_to_steam
+from steam_shortcut_studio.artwork import asset_download_cache_path, artwork_assets_for_steam_slots, copy_all_artwork_to_steam
 from steam_shortcut_studio.metadata import MetadataService
-from steam_shortcut_studio.models import ArtworkAsset, DetectedGame, GameMetadata, SteamProfile
+from steam_shortcut_studio.models import ArtworkAsset, DetectedGame, ExecutableCandidate, GameMetadata, SteamProfile
 from steam_shortcut_studio.scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
 from steam_shortcut_studio.settings_store import AppSettings, SettingsStore
 from steam_shortcut_studio.steam_library import games_from_nonsteam_shortcuts
@@ -25,14 +27,21 @@ from steam_shortcut_studio.steam_shortcuts import (
     write_shortcuts_file,
 )
 from steam_shortcut_studio.ui import (
+    GAME_COLUMNS,
+    MainWindow,
     RAWG_API_URL,
+    SORT_PRESETS,
     STEAMGRIDDB_API_URL,
     THEME_PALETTES,
     THEMES,
+    artwork_candidate_score,
     build_artwork_search_terms,
     merge_detected_game_lists,
     normalized_artwork_cache_key,
+    normalize_windows_path_text,
+    release_year_from_text,
 )
+from steam_shortcut_studio.steam_store import find_steam_app, official_steam_assets, steam_store_media_assets
 
 
 def write_fake_exe(path: Path, size: int = 1024 * 1024) -> None:
@@ -98,6 +107,53 @@ def test_scanner_uses_root_exe_title_instead_of_collection_name() -> None:
         assert games[0].selected_exe == exe
 
 
+def test_scanner_prefers_root_title_exe_over_unrelated_shipping_codename() -> None:
+    root = Path(r"D:\pcgame\Disney Epic Mickey Rebrushed")
+    root_candidate = ExecutableCandidate(
+        path=root / "Rebrushed.exe",
+        score=54,
+        confidence=54,
+        size_bytes=768 * 1024,
+        depth=0,
+        reasons=[],
+    )
+    shipping_candidate = ExecutableCandidate(
+        path=root / "recolored" / "Binaries" / "Win64" / "recolored-Win64-Shipping.exe",
+        score=100,
+        confidence=100,
+        size_bytes=180 * 1024 * 1024,
+        depth=4,
+        reasons=[],
+    )
+    candidates = [shipping_candidate, root_candidate]
+    GameScanner().rebalance_candidate_scores("Disney Epic Mickey Rebrushed", root, candidates)
+    candidates.sort(key=lambda candidate: candidate.score, reverse=True)
+    assert candidates[0].path.name == "Rebrushed.exe"
+
+
+def test_scanner_reports_games_as_they_are_ranked() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_fake_exe(root / "Alpha Adventure" / "Alpha.exe", size=8 * 1024 * 1024)
+        write_fake_exe(root / "Beta Adventure" / "Beta.exe", size=8 * 1024 * 1024)
+        live_titles: list[str] = []
+
+        games = GameScanner(game_callback=lambda game: live_titles.append(game.title)).scan(root)
+
+        assert live_titles == [game.title for game in games]
+        assert live_titles == ["Alpha Adventure", "Beta Adventure"]
+
+
+def test_scanner_detects_exes_but_leaves_games_unselected_by_default() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        write_fake_exe(root / "Unchecked Example" / "UncheckedExample.exe", size=8 * 1024 * 1024)
+        games = GameScanner().scan(root)
+        assert len(games) == 1
+        assert games[0].selected_exe is not None
+        assert games[0].selected is False
+
+
 def test_upsert_and_duplicate_marking() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         steam_root = Path(tmp) / "SteamUser"
@@ -109,7 +165,7 @@ def test_upsert_and_duplicate_marking() -> None:
         )
         exe = Path(tmp) / "Games" / "Example" / "Example.exe"
         write_fake_exe(exe)
-        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe)
+        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe, selected=True)
         added, updated, backup = upsert_games(profile, [game], update_existing=True, default_tags=[])
         assert added == 1
         assert updated == 0
@@ -146,7 +202,7 @@ def test_malformed_shortcuts_vdf_is_backed_up_and_replaced() -> None:
         profile.shortcuts_path.write_bytes(b"\x00shortcuts\x00\x00broken")
         exe = root / "Games" / "Example" / "Example.exe"
         write_fake_exe(exe)
-        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe)
+        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe, selected=True)
         preview = preview_changes(profile, [game], update_existing=True, default_tags=[])
         assert "could not be parsed" in preview
         added, updated, backup = upsert_games(profile, [game], update_existing=True, default_tags=[])
@@ -192,6 +248,92 @@ def test_combined_scan_keeps_folder_row_writable_when_shortcut_exists() -> None:
         updated_record = load_shortcuts(profile.shortcuts_path)[0]
         assert updated_record.app_name == "Example"
         assert "Non Steam" in updated_record.tags
+
+
+def test_combined_scan_merges_existing_shortcut_when_scan_picks_different_exe() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        old_exe = root / "Games" / "Assassin's Creed Mirage" / "ACMirage.exe"
+        scanned_exe = root / "Games" / "Assassin's Creed Mirage" / "scimitar_engine_win64_vs2019.exe"
+        write_fake_exe(old_exe)
+        write_fake_exe(scanned_exe)
+        existing_record = ShortcutRecord(
+            appid=generate_appid(old_exe, "Assassin's Creed Mirage"),
+            app_name="Assassin's Creed Mirage",
+            exe=f'"{old_exe}"',
+            start_dir=f'"{old_exe.parent}"',
+            tags=["ManualTag"],
+        )
+        shortcut_row = games_from_nonsteam_shortcuts([existing_record])[0]
+        folder_row = DetectedGame(
+            title="Assassin's Creed Mirage",
+            root_path=scanned_exe.parent,
+            selected_exe=scanned_exe,
+            selected=True,
+            source_type="folder",
+        )
+        merged = merge_detected_game_lists([shortcut_row], [folder_row])
+        assert len(merged) == 1
+        assert merged[0].source_type == "folder"
+        assert merged[0].selected_exe == old_exe
+        assert merged[0].existing_appid == existing_record.appid
+        assert merged[0].existing_match == "shortcut"
+        assert merged[0].launch_options == shortcut_row.launch_options
+
+
+def test_rescan_title_match_remembers_existing_shortcut_exe() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        remembered_exe = root / "Games" / "Example" / "Remembered.exe"
+        scanned_exe = root / "Games" / "Example" / "Engine" / "Binaries" / "Win64" / "Project-Win64-Shipping.exe"
+        write_fake_exe(remembered_exe)
+        write_fake_exe(scanned_exe)
+        record = ShortcutRecord(
+            appid=generate_appid(remembered_exe, "Example"),
+            app_name="Example",
+            exe=f'"{remembered_exe}"',
+            start_dir=f'"{remembered_exe.parent}"',
+        )
+        game = DetectedGame(
+            title="Example",
+            root_path=remembered_exe.parent,
+            selected_exe=scanned_exe,
+            candidates=[
+                ExecutableCandidate(
+                    path=scanned_exe,
+                    score=100,
+                    confidence=100,
+                    size_bytes=scanned_exe.stat().st_size,
+                    depth=4,
+                )
+            ],
+            source_type="folder",
+        )
+        mark_existing_shortcuts([game], [record])
+        window = object.__new__(MainWindow)
+        window.apply_existing_shortcut_choices([game], [record])
+        assert game.selected_exe == remembered_exe
+        assert game.candidates[0].path == remembered_exe
+        assert game.selected is False
+
+
+def test_nonsteam_shortcut_title_merge_does_not_absorb_native_steam_game() -> None:
+    steam_game = DetectedGame(
+        title="Example",
+        root_path=Path(r"C:\Steam\steamapps\common\Example"),
+        selected=False,
+        source_type="steam",
+        steam_appid=123,
+    )
+    shortcut_row = DetectedGame(
+        title="Example",
+        root_path=Path(r"C:\Games\Example"),
+        selected_exe=Path(r"C:\Games\Example\Example.exe"),
+        source_type="shortcut",
+        existing_appid=-123,
+    )
+    merged = merge_detected_game_lists([steam_game], [shortcut_row])
+    assert len(merged) == 2
 
 
 class FakeMetadataProvider:
@@ -260,7 +402,7 @@ def test_preview_shows_exact_notes_payload() -> None:
         )
         exe = root / "Games" / "Example" / "Example.exe"
         write_fake_exe(exe)
-        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe)
+        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe, selected=True)
         game.metadata.notes = "Exact reviewed notes.\nLine two."
         text = preview_changes(profile, [game], update_existing=True, default_tags=[])
         assert "Notes preview:" in text
@@ -295,7 +437,7 @@ def test_manual_title_override_is_written_to_shortcut() -> None:
         )
         exe = root / "Games" / "God of War" / "GoW.exe"
         write_fake_exe(exe)
-        game = DetectedGame(title="God of War", root_path=exe.parent, selected_exe=exe)
+        game = DetectedGame(title="God of War", root_path=exe.parent, selected_exe=exe, selected=True)
         game.metadata.clean_title = "God of War Custom"
         game.metadata.title_locked = True
         added, updated, _backup = upsert_games(profile, [game], update_existing=True, default_tags=[])
@@ -316,7 +458,7 @@ def test_metadata_notes_are_marked_and_updated() -> None:
         )
         exe = Path(tmp) / "Games" / "Example" / "Example.exe"
         write_fake_exe(exe)
-        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe)
+        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe, selected=True)
         game.metadata.description = "A useful test description."
         paths = write_metadata_notes(profile, [game])
         assert len(paths) >= 2
@@ -353,7 +495,7 @@ def test_native_steam_game_notes_are_not_written() -> None:
         assert paths == []
 
 
-def test_native_steam_game_artwork_is_not_modified() -> None:
+def test_native_steam_game_artwork_can_be_replaced_without_shortcuts() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         profile = SteamProfile(
@@ -374,7 +516,9 @@ def test_native_steam_game_artwork_is_not_modified() -> None:
         game.artwork.hero = ArtworkAsset(kind="hero", asset_id="hero", url="https://example.invalid/hero.png", local_path=image)
         game.selected = True
         copied = copy_all_artwork_to_steam([game], profile)
-        assert copied == []
+        names = {path.name for path in copied}
+        assert names == {"424242.png", "424242_hero.png", "424242_icon.png"}
+        assert not profile.shortcuts_path.exists()
 
 
 def test_native_steam_game_shortcut_is_not_upserted() -> None:
@@ -418,6 +562,7 @@ def test_grid_artwork_writes_both_steam_grid_slots() -> None:
         game = DetectedGame(
             title="Native Example",
             root_path=root / "Steam" / "steamapps" / "common" / "Native Example",
+            selected=True,
             selected_exe=root / "Games" / "Native Example" / "NativeExample.exe",
             existing_appid=424242,
         )
@@ -442,7 +587,7 @@ def test_user_edited_notes_are_preserved_when_written() -> None:
         )
         exe = root / "Games" / "Example" / "Example.exe"
         write_fake_exe(exe)
-        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe)
+        game = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe, selected=True)
         game.metadata.description = "Scraped text that should not replace the edit."
         game.metadata.notes = "User edited note.\n\nKeep this wording."
         paths = write_metadata_notes(profile, [game])
@@ -502,6 +647,150 @@ def test_settings_roundtrip_includes_view_and_metadata_options() -> None:
         assert loaded.metadata_sources["steamgriddb"] is False
 
 
+def test_game_list_columns_remove_confidence_from_defaults() -> None:
+    assert "confidence" not in GAME_COLUMNS
+    assert "Confidence high" not in SORT_PRESETS
+    settings = AppSettings()
+    assert "confidence" not in settings.visible_game_columns
+    assert "confidence" not in settings.game_column_order
+
+
+def test_clear_cached_artwork_removes_downloads_and_search_cache_only() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = Path(tmp) / "cache"
+        artwork_file = cache / "artwork" / "grid" / "cover.png"
+        artwork_file.parent.mkdir(parents=True)
+        artwork_file.write_bytes(b"cover")
+        artwork_search = cache / "artwork_search_cache.json"
+        artwork_search.write_text("{}", encoding="utf-8")
+        sgdb_search = cache / "sgdb_search_cache.json"
+        sgdb_search.write_text("{}", encoding="utf-8")
+        keep = cache / "metadata_cache.json"
+        keep.write_text("keep", encoding="utf-8")
+
+        result = SettingsStore(Path(tmp) / "settings.json").clear_cached_artwork(AppSettings(cache_dir=str(cache)))
+
+        assert result.files_deleted == 3
+        assert not artwork_file.exists()
+        assert not artwork_search.exists()
+        assert not sgdb_search.exists()
+        assert not (cache / "artwork").exists()
+        assert keep.exists()
+        assert cache.exists()
+
+
+def test_individual_artwork_search_deletes_only_that_games_cached_files() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        cache = Path(tmp) / "cache"
+        cached_file = cache / "artwork" / "grid" / "old-cover.png"
+        other_cached_file = cache / "artwork" / "grid" / "other-cover.png"
+        steam_grid_file = Path(tmp) / "steam" / "userdata" / "grid" / "existing.png"
+        for path in (cached_file, other_cached_file, steam_grid_file):
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"image")
+
+        old_asset = ArtworkAsset("grid", "old-cover", "https://example.test/old.png", local_path=cached_file)
+        other_asset = ArtworkAsset("grid", "other-cover", "https://example.test/other.png", local_path=other_cached_file)
+        steam_grid_asset = ArtworkAsset("hero", "existing", steam_grid_file.as_uri(), local_path=steam_grid_file)
+        generated_asset = ArtworkAsset("wide", "generated-cover", "https://example.test/generated.jpg")
+        generated_file = asset_download_cache_path(generated_asset, cache)
+        generated_file.parent.mkdir(parents=True, exist_ok=True)
+        generated_file.write_bytes(b"generated")
+        game = DetectedGame(title="Test Game", source_title="Test Game", root_path=Path(r"C:\Games\Test Game"))
+        game.artwork.grid = old_asset
+        game.artwork.hero = steam_grid_asset
+
+        window = object.__new__(MainWindow)
+        window.settings = AppSettings(cache_dir=str(cache))
+        window.games = [game]
+        window.artwork_search_cache = {0: {"grid": [old_asset], "hero": [steam_grid_asset], "wide": [generated_asset]}}
+        window.artwork_title_cache = {
+            "test game": {"grid": [old_asset], "hero": [steam_grid_asset], "wide": [generated_asset]},
+            "other game": {"grid": [other_asset]},
+        }
+        window.artwork_job_status = {}
+        window.manual_artwork_slots = {(id(game), "grid"), (id(game), "hero")}
+        window.current_game_index = None
+        window.logger = logging.getLogger("SteamShortcutStudioTest")
+        window.refresh_game_row = lambda _index: None
+        window.save_persistent_artwork_search_cache = lambda: None
+
+        window.clear_individual_artwork_cache(game)
+
+        assert not cached_file.exists()
+        assert not generated_file.exists()
+        assert other_cached_file.exists()
+        assert steam_grid_file.exists()
+        assert game.artwork.grid is None
+        assert game.artwork.hero is None
+        assert 0 not in window.artwork_search_cache
+        assert "test game" not in window.artwork_title_cache
+        assert "other game" in window.artwork_title_cache
+        assert not window.manual_artwork_slots
+
+
+def test_list_artwork_search_clears_cache_for_selected_current_view_games() -> None:
+    visible_selected = DetectedGame(title="Visible Selected", root_path=Path(r"C:\Games\Visible Selected"), selected=True)
+    visible_unselected = DetectedGame(title="Visible Unselected", root_path=Path(r"C:\Games\Visible Unselected"), selected=False)
+    hidden_selected = DetectedGame(title="Hidden Selected", root_path=Path(r"C:\Games\Hidden Selected"), selected=True)
+
+    window = object.__new__(MainWindow)
+    window.games = [visible_selected, visible_unselected, hidden_selected]
+    window.displayed_game_indices = [0, 1]
+    cleared: list[str] = []
+    started: list[tuple[list[str], bool]] = []
+    window.clear_individual_artwork_cache = lambda game: cleared.append(game.display_title)
+    window.match_metadata_and_art_for_games = lambda games, force_refresh=False: started.append(
+        ([game.display_title for game in games], force_refresh)
+    )
+
+    window.match_metadata_and_art_for_selected(force_refresh=True)
+
+    assert cleared == ["Visible Selected"]
+    assert started == [(["Visible Selected"], True)]
+
+
+def test_reset_settings_to_defaults_rewrites_settings_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        old_appdata = os.environ.get("APPDATA")
+        old_localappdata = os.environ.get("LOCALAPPDATA")
+        os.environ["APPDATA"] = str(Path(tmp) / "Roaming")
+        os.environ["LOCALAPPDATA"] = str(Path(tmp) / "Local")
+        try:
+            store = SettingsStore(Path(tmp) / "settings.json")
+            store.save(
+                AppSettings(
+                    steam_path=r"D:\Steam",
+                    collection_root=r"D:\pcgame",
+                    steamgriddb_api_key="sgdb-key",
+                    rawg_api_key="rawg-key",
+                    cache_dir=str(Path(tmp) / "custom-cache"),
+                    theme_name="Glacier Blue",
+                    view_filter="Needs artwork",
+                )
+            )
+
+            reset = store.reset_to_defaults()
+            loaded = store.load()
+
+            assert reset.steam_path == ""
+            assert loaded.collection_root == ""
+            assert loaded.steamgriddb_api_key == ""
+            assert loaded.rawg_api_key == ""
+            assert loaded.theme_name == "Follow System"
+            assert loaded.view_filter == "All"
+            assert Path(loaded.cache_dir) == Path(tmp) / "Local" / "SteamShortcutStudio" / "cache"
+        finally:
+            if old_appdata is None:
+                os.environ.pop("APPDATA", None)
+            else:
+                os.environ["APPDATA"] = old_appdata
+            if old_localappdata is None:
+                os.environ.pop("LOCALAPPDATA", None)
+            else:
+                os.environ["LOCALAPPDATA"] = old_localappdata
+
+
 def test_artwork_search_terms_prefer_folder_title_and_logical_aliases() -> None:
     game = DetectedGame(
         title="GoWR",
@@ -509,10 +798,68 @@ def test_artwork_search_terms_prefer_folder_title_and_logical_aliases() -> None:
         root_path=Path(r"C:\Games\God of War - Ragnarok"),
         selected_exe=Path(r"C:\Games\God of War - Ragnarok\GoWR.exe"),
     )
+    game.metadata.release_year = "2022"
     terms = build_artwork_search_terms(game)
     assert terms[0] == "God of War - Ragnarok"
     assert "God of War Ragnarok" in terms
+    assert "God of War Ragnarok 2022" in terms
     assert "GoWR" in terms
+    game = DetectedGame(
+        title="Disney Epic Mickey Rebrushed",
+        source_title="Disney Epic Mickey Rebrushed",
+        root_path=Path(r"C:\Games\Disney Epic Mickey Rebrushed"),
+        selected_exe=Path(r"C:\Games\Disney Epic Mickey Rebrushed\recolored\Binaries\Win64\recolored-Win64-Shipping.exe"),
+    )
+    terms = build_artwork_search_terms(game)
+    assert "Disney Epic Mickey: Rebrushed" in terms
+    assert "Epic Mickey: Rebrushed" in terms
+    assert "recolored-Win64-Shipping" not in terms
+    game = DetectedGame(title="Ghost of Tsushima DC", source_title="Ghost of Tsushima DC", root_path=Path(r"C:\Games\Ghost of Tsushima DC"))
+    terms = build_artwork_search_terms(game)
+    assert "Ghost of Tsushima Director's Cut" in terms
+    game = DetectedGame(title="WUCHANG Fallen Feathers", source_title="WUCHANG - Fallen Feathers", root_path=Path(r"C:\Games\WUCHANG - Fallen Feathers"))
+    terms = build_artwork_search_terms(game)
+    assert "WUCHANG: Fallen Feathers" in terms
+
+
+def test_artwork_search_terms_use_typed_title_first() -> None:
+    game = DetectedGame(
+        title="RCRA",
+        source_title="RCRA",
+        root_path=Path(r"C:\Games\RCRA"),
+        selected_exe=Path(r"C:\Games\RCRA\RCRA.exe"),
+    )
+    terms = build_artwork_search_terms(game, preferred="Ratchet & Clank Rift Apart")
+    assert terms[0] == "Ratchet & Clank Rift Apart"
+    assert "RCRA" in terms
+
+
+def test_artwork_candidate_score_prefers_matching_release_year() -> None:
+    game = DetectedGame(title="God of War", root_path=Path(r"C:\Games\God of War"))
+    game.metadata.release_year = "2018"
+    old_console_match = {"name": "God of War", "release_date": "2005-03-22"}
+    modern_match = {"name": "God of War", "release_date": "2018-04-20"}
+    assert release_year_from_text("Apr 20, 2018") == "2018"
+    assert artwork_candidate_score(game, "God of War", modern_match) > artwork_candidate_score(game, "God of War", old_console_match)
+
+
+def test_path_and_store_media_fallbacks_are_stable() -> None:
+    assert normalize_windows_path_text("D:/pcgame") == r"D:\pcgame"
+    assert find_steam_app("Ghost of Tsushima DC") == {"id": 2215430, "name": "Ghost of Tsushima DIRECTOR'S CUT"}
+    official = official_steam_assets(2215430, "Ghost of Tsushima DIRECTOR'S CUT")
+    assert any("store_item_assets" in asset.url for asset in official["wide"])
+    assets = steam_store_media_assets(
+        2215430,
+        "Ghost of Tsushima DIRECTOR'S CUT",
+        {
+            "header_image": "https://example.invalid/header.jpg",
+            "background": "https://example.invalid/background.jpg",
+            "screenshots": [{"path_full": "https://example.invalid/screenshot.jpg"}],
+        },
+    )
+    assert assets["wide"]
+    assert assets["hero"]
+    assert assets["icon"]
 
 
 def test_artwork_cache_key_and_api_links_are_stable() -> None:
@@ -526,9 +873,15 @@ if __name__ == "__main__":
     test_scanner_ranks_primary_exe()
     test_title_normalization_handles_god_of_war_and_gta()
     test_scanner_uses_root_exe_title_instead_of_collection_name()
+    test_scanner_prefers_root_title_exe_over_unrelated_shipping_codename()
+    test_scanner_reports_games_as_they_are_ranked()
+    test_scanner_detects_exes_but_leaves_games_unselected_by_default()
     test_upsert_and_duplicate_marking()
     test_malformed_shortcuts_vdf_is_backed_up_and_replaced()
     test_combined_scan_keeps_folder_row_writable_when_shortcut_exists()
+    test_combined_scan_merges_existing_shortcut_when_scan_picks_different_exe()
+    test_rescan_title_match_remembers_existing_shortcut_exe()
+    test_nonsteam_shortcut_title_merge_does_not_absorb_native_steam_game()
     test_metadata_notes_are_marked_and_updated()
     test_metadata_scrape_populates_nonsteam_notes()
     test_bad_short_metadata_title_does_not_replace_folder_title()
@@ -537,13 +890,21 @@ if __name__ == "__main__":
     test_selected_executable_is_written_to_shortcut()
     test_manual_title_override_is_written_to_shortcut()
     test_native_steam_game_notes_are_not_written()
-    test_native_steam_game_artwork_is_not_modified()
+    test_native_steam_game_artwork_can_be_replaced_without_shortcuts()
     test_native_steam_game_shortcut_is_not_upserted()
     test_grid_artwork_writes_both_steam_grid_slots()
     test_user_edited_notes_are_preserved_when_written()
     test_artwork_slot_fallbacks_cover_big_picture_slots()
     test_theme_palettes_are_visibly_distinct()
     test_settings_roundtrip_includes_view_and_metadata_options()
+    test_game_list_columns_remove_confidence_from_defaults()
+    test_clear_cached_artwork_removes_downloads_and_search_cache_only()
+    test_individual_artwork_search_deletes_only_that_games_cached_files()
+    test_list_artwork_search_clears_cache_for_selected_current_view_games()
+    test_reset_settings_to_defaults_rewrites_settings_file()
     test_artwork_search_terms_prefer_folder_title_and_logical_aliases()
+    test_artwork_search_terms_use_typed_title_first()
+    test_artwork_candidate_score_prefers_matching_release_year()
+    test_path_and_store_media_fallbacks_are_stable()
     test_artwork_cache_key_and_api_links_are_stable()
     print("Smoke tests passed.")

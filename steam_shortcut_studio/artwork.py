@@ -27,11 +27,15 @@ def _extension_from_asset(asset: ArtworkAsset) -> str:
     return ".png"
 
 
-def download_asset(asset: ArtworkAsset, cache_dir: Path) -> Path:
-    cache_dir.mkdir(parents=True, exist_ok=True)
+def asset_download_cache_path(asset: ArtworkAsset, cache_dir: Path) -> Path:
     ext = _extension_from_asset(asset)
     safe_id = "".join(ch for ch in asset.asset_id if ch.isalnum() or ch in ("-", "_"))[:80] or "asset"
-    destination = cache_dir / "artwork" / asset.kind / f"{safe_id}{ext}"
+    return cache_dir / "artwork" / asset.kind / f"{safe_id}{ext}"
+
+
+def download_asset(asset: ArtworkAsset, cache_dir: Path) -> Path:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    destination = asset_download_cache_path(asset, cache_dir)
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and destination.stat().st_size > 0:
         asset.local_path = destination
@@ -101,7 +105,7 @@ def _replace_artwork_file(source: Path, target: Path) -> bool:
 
 def artwork_appid_for_game(game: DetectedGame) -> int | None:
     if game.is_native_steam_game:
-        return None
+        return game.steam_appid
     if game.existing_appid is not None:
         return game.existing_appid
     if game.selected_exe:
@@ -189,8 +193,6 @@ def artwork_assets_for_steam_slots(game: DetectedGame) -> list[ArtworkAsset]:
 
 
 def copy_game_artwork_to_steam(game: DetectedGame, profile: SteamProfile) -> list[Path]:
-    if game.is_native_steam_game:
-        return []
     appid = artwork_appid_for_game(game)
     if appid is None:
         return []
@@ -210,6 +212,6 @@ def copy_game_artwork_to_steam(game: DetectedGame, profile: SteamProfile) -> lis
 def copy_all_artwork_to_steam(games: list[DetectedGame], profile: SteamProfile) -> list[Path]:
     copied: list[Path] = []
     for game in games:
-        if game.selected and game.is_managed_non_steam:
+        if game.selected and (game.is_managed_non_steam or game.is_native_steam_game):
             copied.extend(copy_game_artwork_to_steam(game, profile))
     return copied
