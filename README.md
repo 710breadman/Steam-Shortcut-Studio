@@ -24,45 +24,9 @@ It is built for personal game libraries where many games live outside Steam, and
 - Windows 10 or newer, SteamOS, or Bazzite
 - Python 3.11 or newer
 - Optional: Pillow for richer JPEG/WebP artwork previews
+- Optional: Tkinter if your Python does not include it
 
-Install optional dependencies:
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-On SteamOS or Bazzite, install Tkinter if your Python does not include it:
-
-```bash
-# SteamOS / Arch
-sudo pacman -S tk
-
-# Bazzite / Fedora
-sudo dnf install python3-tkinter
-```
-
-## Run From Source
-
-```powershell
-python main.py
-```
-
-or:
-
-```powershell
-.\run.ps1
-```
-
-Linux:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-python main.py
-```
-
-## Basic Workflow
+## Basic Usage
 
 1. Open the app.
 2. In `Library Location`, choose or detect your Steam folder.
