@@ -22,10 +22,11 @@ At the end of every coding session:
 
 ## Current Position
 
-- **Active sprint:** Sprint 00 — Baseline and Repository Audit
-- **Status:** In progress — architecture/write audits and foundation scaffolding complete; CI validation pending
-- **Working branch:** `agent/foundation-and-bulk-artwork`
-- **Next sprint:** Sprint 01 — Transactional Steam Write Service
+- **Completed:** Sprint 00 — Baseline and Repository Audit
+- **Active sprint:** Sprint 01 — Transactional Steam Write Service
+- **Status:** Ready for Codex implementation
+- **Working branch/PR:** `agent/foundation-and-bulk-artwork` / draft PR #1
+- **Next sprint:** Sprint 02 — Transaction History and Restore Foundation
 - **Product direction:** Approved
 - **UI direction:** Approved mockup #2 style; incremental CustomTkinter shell prototype after safety boundaries
 - **Priority feature:** Multi-select `Find Artwork for Selected`
@@ -45,20 +46,18 @@ At the end of every coding session:
 - Theme/accent color options must remain.
 - The approved UI direction is modern, dark, sleek, and blue by default.
 
-## Active Sprint Checklist
+## Sprint 00 Completion Evidence
 
-### Sprint 00 — Baseline and Repository Audit
-
-#### Repository and Runtime
+### Repository and Runtime
 
 - [x] Record current branch and latest branch commits.
 - [x] Record Python version requirements.
 - [x] Record supported operating systems.
-- [ ] Verify development dependencies in CI/local runtime.
-- [ ] Run the complete current smoke suite in CI/local runtime.
-- [ ] Record all baseline failures without hiding them.
+- [x] Verify development dependencies in CI.
+- [x] Run the complete current smoke suite in CI.
+- [x] Record baseline result: no failures.
 
-#### Architecture Inventory
+### Architecture Inventory
 
 - [x] Map package/module structure.
 - [x] Identify responsibilities currently inside `ui.py`.
@@ -66,7 +65,7 @@ At the end of every coding session:
 - [x] Identify current background-thread/job concerns.
 - [x] Identify persistent settings and cache formats.
 
-#### Steam Write Audit
+### Steam Write Audit
 
 - [x] Find the paths that write `shortcuts.vdf`.
 - [x] Find the paths that write Steam grid artwork.
@@ -76,90 +75,30 @@ At the end of every coding session:
 - [x] Record malformed-file behavior.
 - [x] Record unknown-field preservation risk.
 
-#### Workflow Baseline
+### Required Deliverables
 
-- [x] Record startup and UI coordination architecture.
-- [x] Record Steam detection flow.
-- [x] Record folder and existing-shortcut scan flow.
-- [x] Record native Steam artwork boundary.
-- [x] Record non-Steam shortcut write flow.
-- [x] Record preview and transaction requirements.
-- [x] Record error/logging responsibilities and current concentration in `ui.py`.
+- [x] `docs/CURRENT_ARCHITECTURE.md`
+- [x] `docs/WRITE_PATH_AUDIT.md`
+- [x] `docs/FIXTURE_PLAN.md`
+- [x] `docs/TRANSACTION_SERVICE_SPEC.md`
+- [x] `docs/NATIVE_STEAM_FIELD_MATRIX.md`
+- [x] `docs/ARTWORK_MATCH_POLICY.md`
+- [x] `docs/UI_FRAMEWORK_DECISION.md`
+- [x] `docs/DEVELOPMENT_SETUP.md`
+- [x] `CODEX_START_HERE.md`
+- [x] Cross-platform CI
+- [x] Selection, job, artwork-policy, and transaction-plan foundations
+- [x] Foundation and transaction tests
 
-#### Required Deliverables
+### CI Results
 
-- [x] Create `docs/CURRENT_ARCHITECTURE.md`.
-- [x] Create `docs/WRITE_PATH_AUDIT.md`.
-- [x] Create `docs/FIXTURE_PLAN.md`.
-- [x] Create `docs/TRANSACTION_SERVICE_SPEC.md`.
-- [x] Create `docs/NATIVE_STEAM_FIELD_MATRIX.md`.
-- [x] Create `docs/ARTWORK_MATCH_POLICY.md`.
-- [x] Create `docs/UI_FRAMEWORK_DECISION.md`.
-- [x] Add cross-platform CI workflow.
-- [x] Add UI-independent selection, job, artwork-policy, and transaction-plan foundations.
-- [x] Add foundation tests.
-- [x] Update this status file with evidence.
+GitHub Actions completed successfully on draft PR #1:
 
-#### Sprint 00 Acceptance Criteria
+- **Smoke Tests**, run 38: success
+- **CI**, run 19: success
+- CI matrix: Windows and Ubuntu, Python 3.11 and 3.13
 
-- [ ] Baseline tests are recorded and passing or failures are explicitly accepted.
-- [x] All known Steam write categories are listed.
-- [x] Current architecture dependencies are documented.
-- [x] Risks and blockers are explicit.
-- [x] Sprint 01 can start without guessing where writes occur.
-
-## Current Blockers
-
-- GitHub CI results are not yet recorded. Sprint 00 remains open until the new workflow runs on the pull request and results are reviewed.
-- No destructive Steam-write behavior has been exercised against a real Steam profile, by design.
-
-## Known Risks
-
-- `ui.py` carries too many responsibilities.
-- Steam-owned binary/config formats are safety-critical.
-- Malformed `shortcuts.vdf` recovery currently writes a fresh active file after backup; future default must abort instead.
-- Artwork identity can be wrong even when title matching appears strong.
-- Artwork writes are not yet atomic as a set.
-- Native Steam settings may be overwritten by Steam or vary by platform.
-- UI modernization can become a large rewrite if not kept separate from safety work.
-- Bulk jobs can freeze or destabilize the UI without a worker/event boundary.
-- The custom VDF parser needs broader fixtures before unknown future fields can be trusted.
-
-## Session Log
-
-### 2026-07-11 — Foundation and audit branch
-
-Planning and documentation:
-
-- Completed current architecture map.
-- Completed Steam/cache write-path audit.
-- Added transaction service specification.
-- Added native Steam field safety matrix.
-- Added sanitized fixture plan.
-- Added conservative bulk artwork policy.
-- Researched UI options and selected incremental CustomTkinter shell prototyping rather than an immediate PySide6 rewrite.
-- Added development setup and Codex entrypoint.
-
-Non-breaking code foundations:
-
-- Added `selection.py` for stable multi-selection and separate inspector focus.
-- Added `jobs.py` for queued/running/review/failure/cancel/retry states and batch summaries.
-- Added `artwork_policy.py` for explicit auto-accept/review/reject decisions.
-- Added `transactions.py` for change plans, risk approval, verification contracts, and result state.
-- Added standard-library tests for these foundations.
-- Added Windows/Linux CI across Python 3.11 and 3.13.
-
-Runtime behavior:
-
-- Existing Steam write call sites were not changed.
-- New foundation modules are not wired into the live UI yet.
-- No claim of runtime success is made until CI results are captured.
-
-## Last Implementation Evidence
-
-Pending pull-request CI.
-
-Expected commands:
+Commands covered:
 
 ```text
 python -m compileall -q steam_shortcut_studio tests main.py
@@ -168,17 +107,77 @@ python tests/foundation_test.py
 python tests/transaction_test.py
 ```
 
+### Sprint 00 Acceptance Criteria
+
+- [x] Baseline tests are recorded and passing.
+- [x] All known Steam write categories are listed.
+- [x] Current architecture dependencies are documented.
+- [x] Risks and blockers are explicit.
+- [x] Sprint 01 can start without guessing where writes occur.
+
+## Active Sprint 01 Checklist
+
+### Objective
+
+Route `shortcuts.vdf` writes through a transactional service without changing successful user-visible behavior.
+
+### Codex Work
+
+- [ ] Add file-operation abstraction for staging, backup, hash, replace, and restore.
+- [ ] Build prepared shortcut transactions from `TransactionPlan`.
+- [ ] Preserve unrelated shortcuts and user-managed fields.
+- [ ] Change malformed-file default to abort without replacing the active file.
+- [ ] Create grouped transaction manifests/backups.
+- [ ] Stage and parse proposed binary VDF before apply.
+- [ ] Read back and verify owned fields and unrelated-record preservation.
+- [ ] Roll back automatically on apply or verification failure.
+- [ ] Keep current UI call sites working through the service.
+- [ ] Add generated and malformed VDF fixtures.
+- [ ] Update tests and this status file with evidence.
+
+### Sprint 01 Acceptance Criteria
+
+- [ ] No UI event handler writes `shortcuts.vdf` directly.
+- [ ] Every shortcut write has a plan, backup manifest, verification result, and rollback path.
+- [ ] Malformed input does not silently replace the active file.
+- [ ] Verification failure restores the original automatically.
+- [ ] Existing smoke and foundation tests remain green.
+
+## Current Blockers
+
+None for starting Sprint 01.
+
+Do not test destructive behavior against the user's primary Steam profile. Use generated fixtures and temporary directories.
+
+## Known Risks
+
+- `ui.py` carries too many responsibilities.
+- Steam-owned binary/config formats are safety-critical.
+- Malformed `shortcuts.vdf` recovery currently writes a fresh active file after backup; Sprint 01 must change this default.
+- Artwork writes are not yet atomic as a set.
+- Native Steam settings may be overwritten by Steam or vary by platform.
+- UI modernization must remain separate from write-path work.
+- The custom VDF parser needs broader fixtures before unknown future fields can be trusted.
+
+## Session Log
+
+### 2026-07-11 — Foundation, audit, and execution setup
+
+- Completed repository architecture and write-path audits.
+- Added transaction, fixture, artwork policy, native field, UI framework, development, and Codex handoff documents.
+- Added stable selection, job state, artwork decision, and transaction-plan contracts.
+- Added cross-platform CI and tests.
+- Opened draft PR #1.
+- Created implementation issues #2 through #7 for transaction safety, history/artwork rollback, service extraction/persistence, multi-select queue, bulk artwork, and modern UI prototype.
+- Both GitHub Actions workflows passed.
+- Existing live Steam-write behavior remains unchanged on this branch.
+
 ## Exact Next Action
 
-1. Open the foundation branch as a draft pull request.
-2. Review all CI jobs on Windows/Linux and Python 3.11/3.13.
-3. Fix any failures without changing Steam behavior.
-4. Record CI evidence here.
-5. Mark Sprint 00 complete only after baseline validation.
-6. Begin Sprint 01 by wrapping `shortcuts.vdf` in the transaction service while preserving current behavior behind tests.
+Use Codex on issue #2: **Sprint 01: Transactional shortcuts.vdf service**.
 
 ## Next Codex Prompt
 
 ```text
-Read CODEX_START_HERE.md and all linked docs. Work only on Sprint 00 until CI is green and evidence is recorded. Do not rewrite UI or change Steam writes. Run compileall, smoke_test.py, foundation_test.py, and transaction_test.py. Fix only baseline/foundation failures. Update SPRINT_STATUS with exact commands/results. When Sprint 00 passes, start Sprint 01 by wrapping shortcuts.vdf in a transaction service with abort-on-malformed, backup manifest, readback verification, and automatic rollback. Keep legacy UI call sites working through the new service. Small commits. Tests required.
+Read CODEX_START_HERE.md and all linked docs. Sprint 00 is complete and CI is green. Execute issue #2 / Sprint 01 only. Wrap shortcuts.vdf in a transaction service with staging, grouped backup manifest, SHA-256, readback verification, and automatic rollback. Malformed input must abort by default and leave the active file untouched. Preserve unrelated records and user-managed fields. Keep current UI behavior working through the new service. Use generated fixtures and temp directories only. Run compileall, smoke_test.py, foundation_test.py, transaction_test.py, and all new tests. Update SPRINT_STATUS with exact commands/results. Small commits. Do not start UI modernization or native Steam field edits.
 ```
