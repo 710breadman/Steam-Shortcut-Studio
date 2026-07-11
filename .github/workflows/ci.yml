@@ -44,3 +44,9 @@ jobs:
 
       - name: Run transaction contract tests
         run: python tests/transaction_test.py
+
+      - name: Run verified file transaction tests
+        run: python tests/file_transaction_test.py
+
+      - name: Run transactional shortcut tests
+        run: python tests/shortcut_transaction_test.py
