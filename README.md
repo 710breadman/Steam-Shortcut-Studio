@@ -19,6 +19,27 @@ It is built for personal game libraries where many games live outside Steam, and
 - Write grid, wide, hero, logo, and icon artwork to Steam's grid folder.
 - Keep generated settings, API keys, cache files, logs, and builds out of source control.
 
+## Development Roadmap
+
+The next major direction is a safer, modern personal-library manager with:
+
+- A sleek dark desktop UI with selectable accent colors
+- Native Steam and non-Steam games in one library view
+- Reliable multi-selection and contextual bulk actions
+- `Find Artwork for Selected` for processing many games in one batch
+- High-confidence artwork automation with an exception review queue
+- Transactional writes, read-back verification, history, and rollback
+- Windows launcher manifests first, followed by SteamOS/Bazzite sources
+
+Planning and execution documents:
+
+- [Product Roadmap](docs/PRODUCT_ROADMAP.md)
+- [UI/UX Target](docs/UI_UX_TARGET.md)
+- [Sprint Map](docs/SPRINT_MAP.md)
+- [Current Sprint Status](docs/SPRINT_STATUS.md)
+
+Future development should begin by reading all four files. The current active work is **Sprint 00 — Baseline and Repository Audit**. Safety and write-path verification come before the broader UI rewrite or native Steam setting expansion.
+
 ## Requirements
 
 - Windows 10 or newer, SteamOS, or Bazzite
