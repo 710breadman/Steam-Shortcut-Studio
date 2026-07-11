@@ -41,3 +41,6 @@ jobs:
 
       - name: Run foundation tests
         run: python tests/foundation_test.py
+
+      - name: Run transaction contract tests
+        run: python tests/transaction_test.py
