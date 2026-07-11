@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "agent/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install runtime dependencies
+        run: python -m pip install --upgrade pip -r requirements.txt
+
+      - name: Compile package
+        run: python -m compileall -q steam_shortcut_studio tests main.py
+
+      - name: Run existing smoke suite
+        run: python tests/smoke_test.py
+
+      - name: Run foundation tests
+        run: python tests/foundation_test.py
+
+      - name: Run transaction contract tests
+        run: python tests/transaction_test.py
