@@ -51,6 +51,9 @@ jobs:
       - name: Run transactional shortcut tests
         run: python tests/shortcut_transaction_test.py
 
+      - name: Run artwork image validation tests
+        run: python tests/image_validation_test.py
+
   ui-prototype:
     name: UI prototype import / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
