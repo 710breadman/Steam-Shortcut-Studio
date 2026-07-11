@@ -1,0 +1,4 @@
+# Optional dependency for the read-only modern shell prototype.
+# This is intentionally separate from production requirements until packaging,
+# DPI behavior, and Windows/Linux rendering are accepted.
+customtkinter==6.0.0
