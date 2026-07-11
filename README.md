@@ -31,14 +31,33 @@ The next major direction is a safer, modern personal-library manager with:
 - Transactional writes, read-back verification, history, and rollback
 - Windows launcher manifests first, followed by SteamOS/Bazzite sources
 
+Development should begin with [CODEX_START_HERE.md](CODEX_START_HERE.md).
+
 Planning and execution documents:
 
 - [Product Roadmap](docs/PRODUCT_ROADMAP.md)
 - [UI/UX Target](docs/UI_UX_TARGET.md)
 - [Sprint Map](docs/SPRINT_MAP.md)
 - [Current Sprint Status](docs/SPRINT_STATUS.md)
+- [Current Architecture](docs/CURRENT_ARCHITECTURE.md)
+- [Write Path Audit](docs/WRITE_PATH_AUDIT.md)
+- [Transaction Service Specification](docs/TRANSACTION_SERVICE_SPEC.md)
+- [Artwork Match Policy](docs/ARTWORK_MATCH_POLICY.md)
+- [UI Framework Decision](docs/UI_FRAMEWORK_DECISION.md)
+- [Development Setup](docs/DEVELOPMENT_SETUP.md)
 
-Future development should begin by reading all four files. The current active work is **Sprint 00 — Baseline and Repository Audit**. Safety and write-path verification come before the broader UI rewrite or native Steam setting expansion.
+Sprint 00 is complete with green Windows/Linux CI. The active work is **Sprint 01 — Transactional Steam Write Service**. Safety and rollback remain prerequisites for the broader UI rewrite and native Steam setting expansion.
+
+## Validation
+
+```text
+python -m compileall -q steam_shortcut_studio tests main.py
+python tests/smoke_test.py
+python tests/foundation_test.py
+python tests/transaction_test.py
+```
+
+GitHub Actions runs the suites on Windows and Ubuntu with Python 3.11 and 3.13.
 
 ## Requirements
 
@@ -59,7 +78,7 @@ Future development should begin by reading all four files. The current active wo
 8. Click `Preview`.
 9. Click `Write to Steam`.
 
-Installed Steam game Artwork can also be edited.
+Installed Steam game artwork can also be edited.
 
 ## Settings And Cache
 
@@ -122,7 +141,7 @@ Linux:
 <Steam>/userdata/<user id>/config/grid
 ```
 
-Before writing an existing `shortcuts.vdf`, the app creates a timestamped backup beside it.
+Before writing an existing `shortcuts.vdf`, the current app creates a timestamped backup beside it. The roadmap replaces this with grouped transaction backups, read-back verification, and automatic rollback.
 
 ## Linux Steam Paths
 
