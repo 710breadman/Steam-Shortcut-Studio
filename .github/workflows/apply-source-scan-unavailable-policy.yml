@@ -1,0 +1,31 @@
+name: Apply Unavailable Source Scan Policy
+
+on:
+  push:
+    branches:
+      - "agent/steam-folder-cli"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, 'Treat unavailable Steam and folder roots as partial scans') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/steam-folder-cli
+          fetch-depth: 0
+
+      - name: Apply unavailable-source policy patch
+        run: python scripts/apply_source_scan_unavailable_policy.py
+
+      - name: Commit branch patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Treat unavailable Steam and folder roots as partial scans"
+          git push origin HEAD:agent/steam-folder-cli
