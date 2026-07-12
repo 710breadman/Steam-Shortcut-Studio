@@ -66,6 +66,9 @@ jobs:
       - name: Run Epic manifest source tests
         run: python tests/epic_source_test.py
 
+      - name: Run library persistence tests
+        run: python tests/library_store_test.py
+
       - name: Run artwork image validation tests
         run: python tests/image_validation_test.py
 
