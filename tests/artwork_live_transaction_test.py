@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PIL import Image  # noqa: E402
 
 from steam_shortcut_studio.artwork import (  # noqa: E402
+    copy_all_artwork_to_steam,
     copy_game_artwork_to_steam,
     plan_game_artwork_transaction,
 )
@@ -31,13 +32,13 @@ def _profile(root: Path) -> SteamProfile:
     )
 
 
-def _native_game(root: Path) -> DetectedGame:
+def _native_game(root: Path, *, appid: int = 424242, title: str = "Native Example") -> DetectedGame:
     return DetectedGame(
-        title="Native Example",
-        root_path=root / "Steam" / "steamapps" / "common" / "Native Example",
+        title=title,
+        root_path=root / "Steam" / "steamapps" / "common" / title,
         selected=True,
         source_type="steam",
-        steam_appid=424242,
+        steam_appid=appid,
     )
 
 
@@ -134,8 +135,56 @@ def test_existing_target_selected_as_source_is_a_true_noop() -> None:
         assert logo.read_bytes() == original
 
 
+def test_batch_continues_after_one_game_has_invalid_artwork() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        profile = _profile(root)
+
+        invalid_path = root / "cache" / "bad.png"
+        invalid_path.parent.mkdir(parents=True)
+        invalid_path.write_text("<html>bad provider response</html>", encoding="utf-8")
+        invalid_game = _native_game(root, appid=111111, title="Broken Art")
+        invalid_game.artwork.grid = ArtworkAsset(
+            kind="grid",
+            asset_id="bad",
+            url="https://example.invalid/bad.png",
+            width=600,
+            height=900,
+            local_path=invalid_path,
+        )
+
+        valid_path = _image(root / "cache" / "good.png", (600, 900), (1, 2, 3))
+        valid_game = _native_game(root, appid=222222, title="Good Art")
+        valid_game.artwork.grid = ArtworkAsset(
+            kind="grid",
+            asset_id="good",
+            url="https://example.invalid/good.png",
+            width=600,
+            height=900,
+            local_path=valid_path,
+        )
+
+        failures: list[tuple[str, str]] = []
+        copied = copy_all_artwork_to_steam(
+            [invalid_game, valid_game],
+            profile,
+            error_handler=lambda game, exc: failures.append((game.display_title, str(exc))),
+        )
+
+        assert failures and failures[0][0] == "Broken Art"
+        assert not any(path.name.startswith("111111") for path in profile.grid_dir.glob("111111*"))
+        assert {path.name for path in copied} == {
+            "222222p.png",
+            "222222.png",
+            "222222_hero.png",
+            "222222_icon.png",
+        }
+        assert all(path.exists() for path in copied)
+
+
 if __name__ == "__main__":
     test_live_artwork_copy_commits_fallback_slots_and_removes_stale_variants()
     test_invalid_live_artwork_is_blocked_before_existing_target_changes()
     test_existing_target_selected_as_source_is_a_true_noop()
+    test_batch_continues_after_one_game_has_invalid_artwork()
     print("Live atomic artwork tests passed.")
