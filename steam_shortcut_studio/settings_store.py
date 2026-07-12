@@ -49,8 +49,8 @@ class AppSettings:
     last_export_dir: str = ""
     dark_mode: bool = False
     theme_name: str = "Follow System"
-    visible_game_columns: list[str] = field(default_factory=lambda: ["add", "title", "exe", "artwork", "existing"])
-    game_column_order: list[str] = field(default_factory=lambda: ["add", "title", "exe", "artwork", "existing"])
+    visible_game_columns: list[str] = field(default_factory=lambda: ["add", "title", "source", "platform", "status", "exe", "artwork", "existing"])
+    game_column_order: list[str] = field(default_factory=lambda: ["add", "title", "source", "platform", "status", "exe", "artwork", "existing"])
     view_filter: str = "All"
     sort_preset: str = "Title A-Z"
     artwork_preview_limit: int = 16
@@ -70,6 +70,12 @@ class AppSettings:
         allowed = {field.name for field in cls.__dataclass_fields__.values()}  # type: ignore[attr-defined]
         cleaned = {key: value for key, value in data.items() if key in allowed}
         settings = cls(**cleaned)
+        legacy_columns = ["add", "title", "exe", "artwork", "existing"]
+        modern_columns = ["add", "title", "source", "platform", "status", "exe", "artwork", "existing"]
+        if settings.visible_game_columns == legacy_columns:
+            settings.visible_game_columns = list(modern_columns)
+        if settings.game_column_order == legacy_columns:
+            settings.game_column_order = list(modern_columns)
         if not settings.cache_dir:
             settings.cache_dir = str(_local_cache_dir())
         if settings.artwork_preview_limit < 4:

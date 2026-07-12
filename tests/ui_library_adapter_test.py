@@ -8,7 +8,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from steam_shortcut_studio.library_controller import LibraryRow, LibrarySnapshot  # noqa: E402
 from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     LIBRARY_ITEM_ID_META,
+    LIBRARY_PLATFORM_META,
+    LIBRARY_SIZE_META,
     game_from_library_row,
+    library_platform_for_game,
+    library_size_for_game,
+    library_source_for_game,
+    library_status_for_game,
     games_from_library_snapshot,
     is_persistent_library_game,
     library_launch_target_for_game,
@@ -55,7 +61,13 @@ def test_library_row_maps_to_read_only_legacy_game() -> None:
     assert game.selected_exe is None
     assert not game.is_managed_non_steam
     assert game.metadata.extra[LIBRARY_ITEM_ID_META] == "folder:one"
+    assert game.metadata.extra[LIBRARY_PLATFORM_META] == "windows"
+    assert game.metadata.extra[LIBRARY_SIZE_META] == "1024"
     assert library_launch_target_for_game(game).endswith("Example.exe")
+    assert library_source_for_game(game) == "Folder"
+    assert library_platform_for_game(game) == "Windows"
+    assert library_status_for_game(game) == "Ready"
+    assert library_size_for_game(game) == "1 KB"
     assert is_persistent_library_game(game)
 
 

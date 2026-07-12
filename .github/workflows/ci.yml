@@ -66,11 +66,23 @@ jobs:
       - name: Run Epic manifest source tests
         run: python tests/epic_source_test.py
 
+      - name: Run Steam and folder source tests
+        run: python tests/steam_folder_source_test.py
+
       - name: Run library persistence tests
         run: python tests/library_store_test.py
 
       - name: Run source scan persistence tests
         run: python tests/source_scan_test.py
+
+      - name: Run library controller tests
+        run: python tests/library_controller_test.py
+
+      - name: Run UI library adapter tests
+        run: python tests/ui_library_adapter_test.py
+
+      - name: Run settings store tests
+        run: python tests/settings_store_test.py
 
       - name: Run CLI tests
         run: python tests/cli_test.py

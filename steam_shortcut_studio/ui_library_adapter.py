@@ -14,6 +14,8 @@ LIBRARY_ITEM_ID_META = "library_item_id"
 LIBRARY_SOURCE_META = "library_source"
 LIBRARY_STATUS_META = "library_status"
 LIBRARY_LAUNCH_TARGET_META = "library_launch_target"
+LIBRARY_PLATFORM_META = "library_platform"
+LIBRARY_SIZE_META = "library_size_bytes"
 
 
 def library_item_id_for_game(game: DetectedGame) -> str:
@@ -44,6 +46,8 @@ def game_from_library_row(row: LibraryRow, *, selected: bool = False) -> Detecte
             LIBRARY_SOURCE_META: row.source,
             LIBRARY_STATUS_META: row.status,
             LIBRARY_LAUNCH_TARGET_META: row.launch_target,
+            LIBRARY_PLATFORM_META: row.platform,
+            LIBRARY_SIZE_META: str(row.size_bytes),
         },
     )
     game = DetectedGame(
@@ -68,6 +72,46 @@ def games_from_library_snapshot(snapshot: LibrarySnapshot) -> list[DetectedGame]
         game_from_library_row(row, selected=row.item_id in selected_ids)
         for row in snapshot.rows
     ]
+
+
+def format_library_size(size_bytes: int) -> str:
+    value = max(0, int(size_bytes))
+    if value == 0:
+        return ""
+    units = ("B", "KB", "MB", "GB", "TB")
+    amount = float(value)
+    unit = units[0]
+    for candidate in units:
+        unit = candidate
+        if amount < 1024.0 or candidate == units[-1]:
+            break
+        amount /= 1024.0
+    precision = 0 if unit in {"B", "KB"} else 1
+    return f"{amount:.{precision}f} {unit}"
+
+
+def display_label(value: str, *, fallback: str = "") -> str:
+    text = str(value or "").replace("_", " ").strip()
+    return text.title() if text else fallback
+
+
+def library_source_for_game(game: DetectedGame) -> str:
+    return display_label(str(game.metadata.extra.get(LIBRARY_SOURCE_META) or ""), fallback="Library")
+
+
+def library_status_for_game(game: DetectedGame) -> str:
+    return display_label(str(game.metadata.extra.get(LIBRARY_STATUS_META) or ""), fallback="Stored")
+
+
+def library_platform_for_game(game: DetectedGame) -> str:
+    return display_label(str(game.metadata.extra.get(LIBRARY_PLATFORM_META) or ""), fallback="PC")
+
+
+def library_size_for_game(game: DetectedGame) -> str:
+    try:
+        return format_library_size(int(game.metadata.extra.get(LIBRARY_SIZE_META) or "0"))
+    except ValueError:
+        return ""
 
 
 def source_scan_adapters(

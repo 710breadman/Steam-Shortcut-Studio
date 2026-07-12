@@ -56,14 +56,21 @@ from .ui_library_adapter import (
     is_persistent_library_game,
     library_item_id_for_game,
     library_launch_target_for_game,
+    library_platform_for_game,
+    library_size_for_game,
+    library_source_for_game,
+    library_status_for_game,
     source_scan_adapters,
 )
 from .vdf import VdfParseError
 
-GAME_COLUMNS = ("add", "title", "exe", "artwork", "existing")
+GAME_COLUMNS = ("add", "title", "source", "platform", "status", "exe", "artwork", "existing")
 GAME_COLUMN_LABELS = {
     "add": "Add",
     "title": "Game Title",
+    "source": "Source",
+    "platform": "Platform / Size",
+    "status": "Status",
     "exe": "Detected Executable",
     "artwork": "Artwork",
     "existing": "Steam",
@@ -71,6 +78,9 @@ GAME_COLUMN_LABELS = {
 GAME_COLUMN_WIDTHS = {
     "add": 56,
     "title": 180,
+    "source": 92,
+    "platform": 128,
+    "status": 116,
     "exe": 360,
     "artwork": 110,
     "existing": 110,
@@ -83,11 +93,16 @@ VIEW_FILTERS = [
     "New non-Steam",
     "Existing non-Steam",
     "Installed Steam",
+    "Stored Library",
+    "Needs review",
+    "Missing",
     "Skipped",
 ]
 
 SORT_PRESETS = [
     "Title A-Z",
+    "Library status",
+    "Source",
     "Selected first",
     "Needs artwork",
     "Steam status",
@@ -2627,15 +2642,25 @@ class MainWindow(tk.Tk):
     def game_identity_keys(self, game: DetectedGame) -> set[tuple[str, str]]:
         return game_identity_keys(game)
 
-    def game_row_values(self, game: DetectedGame) -> tuple[str, str, str, str, str]:
+    def game_row_values(self, game: DetectedGame) -> tuple[str, str, str, str, str, str, str, str]:
         exe = str(game.selected_exe or "")
+        source = game.source_type.replace("_", " ").title() if game.source_type else "Folder"
+        platform = "PC"
+        status = "Selected" if game.selected else "Ready"
         if is_persistent_library_game(game):
             exe = library_launch_target_for_game(game) or exe
+            source = library_source_for_game(game)
+            platform = library_platform_for_game(game)
+            size = library_size_for_game(game)
+            status = library_status_for_game(game)
+            if size:
+                platform = f"{platform} / {size}"
         if game.is_native_steam_game:
             exe = f"Steam AppID {game.steam_appid}"
+            source = "Steam"
+            platform = "PC"
+            status = "Installed"
         if is_persistent_library_game(game):
-            source = str(game.metadata.extra.get(LIBRARY_SOURCE_META) or "library").replace("_", " ").title()
-            status = str(game.metadata.extra.get(LIBRARY_STATUS_META) or "stored").replace("_", " ").title()
             existing = f"Stored {source} ({status})"
         elif game.is_native_steam_game:
             existing = "Installed Steam"
@@ -2650,6 +2675,9 @@ class MainWindow(tk.Tk):
         return (
             "[x]" if game.selected else "[ ]",
             game.display_title,
+            source,
+            platform,
+            status,
             exe,
             self.artwork_job_status.get(id(game), game.artwork_status),
             existing,
@@ -2697,6 +2725,12 @@ class MainWindow(tk.Tk):
             return not game.is_native_steam_game and game.existing_appid is not None
         if selected_filter == "Installed Steam":
             return game.is_native_steam_game
+        if selected_filter == "Stored Library":
+            return is_persistent_library_game(game)
+        if selected_filter == "Needs review":
+            return is_persistent_library_game(game) and library_status_for_game(game) == "Review"
+        if selected_filter == "Missing":
+            return is_persistent_library_game(game) and library_status_for_game(game) == "Missing"
         if selected_filter == "Skipped":
             return not game.selected
         return True
@@ -2808,7 +2842,22 @@ class MainWindow(tk.Tk):
             return (not game.selected, game.display_title.casefold())
         if column == "title":
             return game.display_title.casefold()
+        if column == "source":
+            return (
+                0 if is_persistent_library_game(game) else 1,
+                library_source_for_game(game).casefold() if is_persistent_library_game(game) else game.source_type.casefold(),
+                game.display_title.casefold(),
+            )
+        if column == "platform":
+            return (library_platform_for_game(game).casefold() if is_persistent_library_game(game) else "pc", game.display_title.casefold())
+        if column == "status":
+            return (
+                library_status_for_game(game).casefold() if is_persistent_library_game(game) else "",
+                game.display_title.casefold(),
+            )
         if column == "exe":
+            if is_persistent_library_game(game):
+                return library_launch_target_for_game(game).casefold()
             return str(game.selected_exe or "").casefold()
         if column == "artwork":
             return game.artwork.selected_count()
@@ -2840,7 +2889,13 @@ class MainWindow(tk.Tk):
         self.save_current_detail()
         current_game = self.games[self.current_game_index] if self.current_game_index is not None and 0 <= self.current_game_index < len(self.games) else None
         preset = self.sort_preset_var.get()
-        if preset == "Selected first":
+        if preset == "Library status":
+            key = lambda game: self.sort_key_for_game(game, "status")
+            reverse = False
+        elif preset == "Source":
+            key = lambda game: self.sort_key_for_game(game, "source")
+            reverse = False
+        elif preset == "Selected first":
             key = lambda game: (not game.selected, game.display_title.casefold())
             reverse = False
         elif preset == "Needs artwork":
