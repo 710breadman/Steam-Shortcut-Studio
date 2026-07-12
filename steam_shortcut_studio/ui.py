@@ -25,6 +25,8 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_sources import ARTWORK_SOURCE_LABELS, rawg_artwork_assets, wikimedia_artwork_assets
+from .library_controller import LibraryController
+from .library_store import LibraryStore
 from .metadata import (
     build_metadata_notes,
     LocalExecutableMetadataProvider,
@@ -46,6 +48,14 @@ from .steam_notes import write_metadata_notes
 from .steam_store import find_steam_app, get_steam_app_details, official_steam_assets, steam_store_media_assets
 from .steam_shortcuts import load_shortcuts, mark_existing_shortcuts, matching_record_for_game, preview_changes, upsert_games
 from .steamgrid import SteamGridDbClient, SteamGridDbError
+from .ui_library_adapter import (
+    LIBRARY_SOURCE_META,
+    LIBRARY_STATUS_META,
+    games_from_library_snapshot,
+    is_persistent_library_game,
+    library_item_id_for_game,
+    library_launch_target_for_game,
+)
 from .vdf import VdfParseError
 
 GAME_COLUMNS = ("add", "title", "exe", "artwork", "existing")
@@ -740,6 +750,8 @@ class MainWindow(tk.Tk):
         self.settings_store = SettingsStore()
         self.settings = self.settings_store.load()
         self.log_path = self.settings_store.settings_dir / "logs" / "steam_shortcut_studio.log"
+        self.library_store = LibraryStore()
+        self.library_controller = LibraryController(self.library_store)
         self.games: list[DetectedGame] = []
         self.profiles: list[SteamProfile] = []
         self.current_game_index: int | None = None
@@ -1216,6 +1228,9 @@ class MainWindow(tk.Tk):
         preview_button = ttk.Button(actions, text="Preview", width=action_width, command=self.preview_write)
         preview_button.grid(row=0, column=1, padx=(0, 8))
         ToolTip(preview_button, "Show exactly what will be added or updated before touching Steam files.")
+        library_button = ttk.Button(actions, text="Library", width=action_width, command=self.load_persistent_library)
+        library_button.grid(row=0, column=2, sticky="w")
+        ToolTip(library_button, "Load the app-owned persistent library through the production controller.")
         write_button = ttk.Button(actions, text="Write to Steam", width=action_width, style="Accent.TButton", command=self.write_to_steam)
         write_button.grid(row=0, column=3, sticky="e", padx=(8, 8))
         ToolTip(write_button, "Closes running Steam when needed, writes shortcuts, artwork, and simple notes with backups, then reopens Steam only if this app closed it.")
@@ -2249,6 +2264,18 @@ class MainWindow(tk.Tk):
 
         self.run_background("Detecting SGDBoop", detect_sgdboop, done)
 
+    def load_persistent_library(self) -> None:
+        self.save_current_detail()
+        snapshot = self.library_controller.refresh()
+        self.apply_library_snapshot(snapshot)
+
+    def apply_library_snapshot(self, snapshot: Any) -> None:
+        games = games_from_library_snapshot(snapshot)
+        self.replace_live_scan_games(
+            games,
+            f"Loaded {len(games)} stored library item(s).",
+        )
+
     def scan_all_libraries(self) -> None:
         self.save_current_detail()
         self.save_settings_from_ui(log=False)
@@ -2463,6 +2490,7 @@ class MainWindow(tk.Tk):
     def replace_live_scan_games(self, games: list[DetectedGame], status: str = "") -> None:
         self.games = list(games)
         self.current_game_index = None
+        self.sync_library_selection_state()
         self.refresh_game_table(select_index=0 if self.games else None)
         if self.displayed_game_indices:
             self.load_game_detail(self.displayed_game_indices[0])
@@ -2472,6 +2500,7 @@ class MainWindow(tk.Tk):
     def add_live_scan_game(self, game: DetectedGame) -> None:
         current_game = self.games[self.current_game_index] if self.current_game_index is not None and 0 <= self.current_game_index < len(self.games) else None
         self.games = self.merge_game_lists(self.games, [game])
+        self.sync_library_selection_state()
         new_index = self.game_index_for_object(game)
         select_index = self.games.index(current_game) if current_game in self.games else new_index
         self.refresh_game_table(select_index=select_index)
@@ -2483,9 +2512,15 @@ class MainWindow(tk.Tk):
 
     def game_row_values(self, game: DetectedGame) -> tuple[str, str, str, str, str]:
         exe = str(game.selected_exe or "")
+        if is_persistent_library_game(game):
+            exe = library_launch_target_for_game(game) or exe
         if game.is_native_steam_game:
             exe = f"Steam AppID {game.steam_appid}"
-        if game.is_native_steam_game:
+        if is_persistent_library_game(game):
+            source = str(game.metadata.extra.get(LIBRARY_SOURCE_META) or "library").replace("_", " ").title()
+            status = str(game.metadata.extra.get(LIBRARY_STATUS_META) or "stored").replace("_", " ").title()
+            existing = f"Stored {source} ({status})"
+        elif game.is_native_steam_game:
             existing = "Installed Steam"
             if game.existing_appid is not None:
                 existing += f" + non-Steam ({game.existing_match or 'title'})"
@@ -2502,6 +2537,23 @@ class MainWindow(tk.Tk):
             self.artwork_job_status.get(id(game), game.artwork_status),
             existing,
         )
+
+    def sync_library_selection_state(self) -> None:
+        active_id = ""
+        if self.current_game_index is not None and 0 <= self.current_game_index < len(self.games):
+            active_id = library_item_id_for_game(self.games[self.current_game_index])
+        try:
+            self.library_controller.set_active(active_id or None)
+        except KeyError:
+            pass
+        for game in self.games:
+            item_id = library_item_id_for_game(game)
+            if not item_id:
+                continue
+            try:
+                self.library_controller.set_selected(item_id, game.selected)
+            except KeyError:
+                continue
 
     def metadata_score(self, game: DetectedGame) -> int:
         return sum(
@@ -2595,6 +2647,7 @@ class MainWindow(tk.Tk):
             game = self.games[index]
             game.selected = selected
             count += 1
+        self.sync_library_selection_state()
         self.refresh_all_game_rows()
         scope = "visible" if visible_only else "all"
         self.status_var.set(f"{'Selected' if selected else 'Cleared'} {count} {scope} game row(s).")
@@ -2602,12 +2655,14 @@ class MainWindow(tk.Tk):
     def invert_visible_selection(self) -> None:
         for index in self.displayed_game_indices:
             self.games[index].selected = not self.games[index].selected
+        self.sync_library_selection_state()
         self.refresh_all_game_rows()
         self.status_var.set(f"Inverted {len(self.displayed_game_indices)} visible game row(s).")
 
     def invert_all_selection(self) -> None:
         for game in self.games:
             game.selected = not game.selected
+        self.sync_library_selection_state()
         self.refresh_all_game_rows()
         self.status_var.set(f"Inverted {len(self.games)} game selection(s).")
 
@@ -2617,6 +2672,7 @@ class MainWindow(tk.Tk):
             game.selected = game.artwork.selected_count() < len(game.artwork.slot_names())
             if game.selected:
                 count += 1
+        self.sync_library_selection_state()
         self.refresh_all_game_rows()
         self.status_var.set(f"Selected {count} game(s) needing artwork.")
 
@@ -2626,6 +2682,7 @@ class MainWindow(tk.Tk):
             game.selected = not game.is_native_steam_game and game.existing_appid is None
             if game.selected:
                 count += 1
+        self.sync_library_selection_state()
         self.refresh_all_game_rows()
         self.status_var.set(f"Selected {count} new non-Steam shortcut(s).")
 
@@ -2711,6 +2768,7 @@ class MainWindow(tk.Tk):
         if row_id and clicked_column == "add":
             index = int(row_id)
             self.games[index].selected = not self.games[index].selected
+            self.sync_library_selection_state()
             self.refresh_game_row(index)
             self.games_tree.selection_set(row_id)
             self.games_tree.focus(row_id)
@@ -2726,8 +2784,17 @@ class MainWindow(tk.Tk):
             return
         self.save_current_detail()
         self.load_game_detail(index)
+        self.sync_library_selection_state()
 
     def notes_text_for_game(self, game: DetectedGame) -> str:
+        if is_persistent_library_game(game):
+            source = str(game.metadata.extra.get(LIBRARY_SOURCE_META) or "library").replace("_", " ").title()
+            status = str(game.metadata.extra.get(LIBRARY_STATUS_META) or "stored").replace("_", " ").title()
+            return (
+                f"Persistent {source} library row - {status}.\n\n"
+                "This legacy view is read-only for stored library rows. "
+                "Use source scans to refresh library data; Steam writes remain disabled for these rows."
+            )
         if game.is_native_steam_game:
             return (
                 "Installed Steam game - protected reference row.\n\n"
@@ -2782,6 +2849,12 @@ class MainWindow(tk.Tk):
             return
         self.current_game_index = index
         game = self.games[index]
+        item_id = library_item_id_for_game(game)
+        if item_id:
+            try:
+                self.library_controller.set_active(item_id)
+            except KeyError:
+                pass
         self.set_detail_editable(True)
         self.suppress_detail_dirty = True
         self.detail_vars["title_entry"].set(game.display_title)
@@ -2801,7 +2874,7 @@ class MainWindow(tk.Tk):
         self.description_text.insert("1.0", self.notes_text_for_game(game))
         self.description_text.edit_modified(False)
         self.notes_dirty = False
-        self.set_detail_editable(not game.is_native_steam_game)
+        self.set_detail_editable(not game.is_native_steam_game and not is_persistent_library_game(game))
         self.artwork_search_var.set(game.display_title)
 
         for row in self.candidate_tree.get_children():
@@ -2824,6 +2897,9 @@ class MainWindow(tk.Tk):
         if self.current_game_index is None or not (0 <= self.current_game_index < len(self.games)):
             return
         game = self.games[self.current_game_index]
+        if is_persistent_library_game(game):
+            self.logger.info("Skipped saving detail edits for stored library row: %s", game.display_title)
+            return
         if game.is_native_steam_game:
             self.logger.info("Skipped saving detail edits for protected Steam game: %s", game.display_title)
             return
@@ -2862,7 +2938,19 @@ class MainWindow(tk.Tk):
             return
         game = self.games[self.current_game_index]
         candidate = game.selected_candidate
-        if game.is_native_steam_game:
+        if is_persistent_library_game(game):
+            lines = [
+                "Persistent library row.",
+                f"Source: {game.metadata.extra.get(LIBRARY_SOURCE_META, 'library')}",
+                f"Status: {game.metadata.extra.get(LIBRARY_STATUS_META, 'stored')}",
+                f"Install folder: {game.root_path}",
+            ]
+            launch_target = library_launch_target_for_game(game)
+            if launch_target:
+                lines.append(f"Launch target: {launch_target}")
+            lines.append("Read-only in the legacy view; no Steam writes are enabled for this row.")
+            self.reason_text.insert("1.0", "\n".join(lines))
+        elif game.is_native_steam_game:
             lines = [
                 "Installed Steam game.",
                 f"Steam AppID: {game.steam_appid}",
@@ -4151,11 +4239,19 @@ class MainWindow(tk.Tk):
         selected = [
             game
             for game in self.games
-            if game.selected and (game.is_managed_non_steam or (game.is_native_steam_game and game.artwork.selected_count()))
+            if game.selected
+            and not is_persistent_library_game(game)
+            and (game.is_managed_non_steam or (game.is_native_steam_game and game.artwork.selected_count()))
         ]
         if not selected and self.current_game_index is not None and 0 <= self.current_game_index < len(self.games):
             current = self.games[self.current_game_index]
-            if current.is_managed_non_steam or (current.is_native_steam_game and current.artwork.selected_count()):
+            if (
+                not is_persistent_library_game(current)
+                and (
+                    current.is_managed_non_steam
+                    or (current.is_native_steam_game and current.artwork.selected_count())
+                )
+            ):
                 current.selected = True
                 selected = [current]
                 self.refresh_game_row(self.current_game_index)

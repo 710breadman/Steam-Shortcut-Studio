@@ -42,6 +42,7 @@ Already completed foundations include:
 - Read-only Epic Games Launcher manifest import
 - Persistent SQLite library state
 - Tk-free persistent library controller
+- Legacy UI can load persistent library rows through the controller
 - Read-only modern UI prototype using real stored library data
 - Read-only native Steam and loose-folder source adapters
 
@@ -82,6 +83,7 @@ python tests/steam_folder_source_test.py
 python tests/library_store_test.py
 python tests/source_scan_test.py
 python tests/library_controller_test.py
+python tests/ui_library_adapter_test.py
 python tests/cli_test.py
 python tests/source_cli_test.py
 python tests/image_validation_test.py

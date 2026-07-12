@@ -200,6 +200,8 @@ Implemented:
 ### Production UI — Remaining
 
 - [x] Tk-free persistent `LibraryController` foundation
+- [x] Legacy UI can load persistent library rows through the controller
+- [x] Stored library rows remain read-only in the legacy Steam write path
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
@@ -282,6 +284,7 @@ python tests/steam_folder_source_test.py
 python tests/library_store_test.py
 python tests/source_scan_test.py
 python tests/library_controller_test.py
+python tests/ui_library_adapter_test.py
 python tests/cli_test.py
 python tests/source_cli_test.py
 python tests/image_validation_test.py
@@ -296,6 +299,8 @@ Latest local integration evidence, 2026-07-12:
 - Merged `agent/library-controller`, `agent/steam-folder-source-adapters`, and `agent/current-status-refresh` into an integration branch from `origin/main`
 - Fixed local-folder title cleaning so `Example Game` remains `Example Game`
 - Ran every command listed above on Windows; all passed
+- Added `steam_shortcut_studio/ui_library_adapter.py` and a legacy `Library` action that loads stored rows through `LibraryController`
+- Verified stored library rows do not become shortcut/artwork write candidates in the legacy adapter
 
 ## Known Risks
 
@@ -308,13 +313,13 @@ Latest local integration evidence, 2026-07-12:
 
 ## Exact Next Action
 
-Connect the existing `LibraryController` to the legacy production UI without changing Steam write behavior or replacing the full UI at once.
+Extend the `LibraryController` bridge from read-only loading to controller-owned scan actions without changing Steam write behavior or replacing the full UI at once.
 
-Start with a controller-backed library view adapter that:
+Next controller-backed adapter work:
 
-1. Reads immutable `LibraryRow` records.
-2. Uses stable IDs for active and bulk selection.
-3. Polls `BackgroundJobQueue` events from the Tk thread.
+1. Route Epic, Steam, and folder source scans through `LibraryController.scan_source`.
+2. Poll `BackgroundJobQueue` events from the Tk thread.
+3. Refresh persistent rows after scan completion or review-needed events.
 4. Keeps the existing UI operational.
 5. Adds no new Steam writes.
 
