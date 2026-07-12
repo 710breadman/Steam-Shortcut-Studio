@@ -64,6 +64,7 @@ from .ui_library_adapter import (
     library_source_for_game,
     library_status_for_game,
     source_scan_adapters,
+    source_scan_event_summary,
 )
 from .vdf import VdfParseError
 
@@ -2381,15 +2382,12 @@ class MainWindow(tk.Tk):
         if event.state in TERMINAL_JOB_STATES:
             if controller_event.snapshot is not None:
                 self.apply_library_snapshot(controller_event.snapshot)
-            detected = event.result.get("detected_items")
-            issue_count = event.result.get("issue_count")
-            detail = f"{source} scan {event.state.value}"
-            if detected is not None:
-                detail += f": {detected} item(s)"
-            if issue_count:
-                detail += f", {issue_count} issue(s)"
-            if event.error:
-                detail += f" - {event.error}"
+            detail = source_scan_event_summary(
+                source=source,
+                state=event.state.value,
+                result=event.result,
+                error=event.error,
+            )
             self.logger.info(detail)
             self.status_var.set(detail)
             return

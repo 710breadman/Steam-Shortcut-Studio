@@ -22,6 +22,7 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     is_persistent_library_game,
     library_launch_target_for_game,
     source_scan_adapters,
+    source_scan_event_summary,
 )
 
 
@@ -138,10 +139,28 @@ def test_library_selection_helpers_use_stable_ids() -> None:
     assert [first.selected, second.selected, third.selected] == [False, True, False]
 
 
+def test_source_scan_event_summary_surfaces_review_codes() -> None:
+    summary = source_scan_event_summary(
+        source="epic",
+        state="needs_review",
+        result={
+            "detected_items": 0,
+            "issue_count": 2,
+            "issues": [
+                {"code": "manifest_directory_missing"},
+                {"code": "programdata_unavailable"},
+            ],
+        },
+    )
+
+    assert summary == "Epic scan needs review: 0 item(s), 2 issue(s) [manifest_directory_missing, programdata_unavailable]"
+
+
 if __name__ == "__main__":
     test_library_row_maps_to_read_only_legacy_game()
     test_native_steam_library_row_does_not_become_writable_native_game()
     test_snapshot_selection_is_preserved()
     test_source_scan_adapters_cover_controller_backed_sources()
     test_library_selection_helpers_use_stable_ids()
+    test_source_scan_event_summary_surfaces_review_codes()
     print("UI library adapter tests passed.")

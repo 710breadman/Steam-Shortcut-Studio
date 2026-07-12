@@ -209,6 +209,7 @@ Implemented:
 - [x] Shift-clicking persistent row checkboxes selects visible stable-ID ranges without touching hidden rows
 - [x] Space toggles the focused persistent row through the same stable-ID selection path
 - [x] Selection menu exposes explicit visible-scope actions and the table shows selected/visible counts
+- [x] Source-scan terminal events surface review/failure issue codes from the Tk thread
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
@@ -317,6 +318,7 @@ Latest local integration evidence, 2026-07-12:
 - Added stable-ID visible-range selection for persistent library checkbox rows
 - Added keyboard Space selection for focused persistent rows through the shared stable-ID toggle path
 - Added explicit Select/Clear/Invert visible commands plus a selected/visible count affordance in the production table toolbar
+- Added source-scan event summaries that include review/failure issue codes in UI-thread status/log updates
 
 ## Known Risks
 
@@ -335,7 +337,7 @@ Next controller-backed UI work:
 
 1. Add Ctrl additive row gestures and production bulk-action affordances for persistent library rows.
 2. Preserve stored-row read-only behavior in all Steam write paths.
-3. Surface source-scan review/failure details without letting worker threads touch widgets.
+3. Add production bulk action controls for selected persistent rows.
 4. Keep the legacy scan/write workflows available during migration.
 5. Add no new Steam writes.
 

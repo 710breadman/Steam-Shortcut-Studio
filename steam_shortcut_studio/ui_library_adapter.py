@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Mapping
 
 from .library_controller import LibraryRow, LibrarySnapshot
 from .models import DetectedGame, GameMetadata
@@ -117,6 +118,43 @@ def apply_library_selection_to_games(
         item_id = library_item_id_for_game(game)
         if item_id:
             game.selected = item_id in selected_ids
+
+
+def source_scan_event_summary(
+    *,
+    source: str,
+    state: str,
+    result: Mapping[str, object],
+    error: str = "",
+) -> str:
+    label = display_label(source, fallback="Source")
+    detail = f"{label} scan {state.replace('_', ' ')}"
+    detected = result.get("detected_items")
+    issue_count = result.get("issue_count")
+    if detected is not None:
+        detail += f": {detected} item(s)"
+    try:
+        issue_total = int(issue_count or 0)
+    except (TypeError, ValueError):
+        issue_total = 0
+    issues = result.get("issues")
+    codes: list[str] = []
+    if isinstance(issues, list):
+        for issue in issues:
+            if isinstance(issue, dict):
+                code = str(issue.get("code") or "").strip()
+                if code and code not in codes:
+                    codes.append(code)
+    if issue_total:
+        detail += f", {issue_total} issue(s)"
+    if codes:
+        shown = ", ".join(codes[:3])
+        if len(codes) > 3:
+            shown += ", ..."
+        detail += f" [{shown}]"
+    if error:
+        detail += f" - {error}"
+    return detail
 
 
 def format_library_size(size_bytes: int) -> str:
