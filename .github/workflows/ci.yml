@@ -63,6 +63,9 @@ jobs:
       - name: Run bulk artwork coordinator tests
         run: python tests/bulk_artwork_test.py
 
+      - name: Run Epic manifest source tests
+        run: python tests/epic_source_test.py
+
       - name: Run artwork image validation tests
         run: python tests/image_validation_test.py
 
