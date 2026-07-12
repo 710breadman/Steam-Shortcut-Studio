@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -44,6 +44,32 @@ def serialize_shortcuts(records: list[ShortcutRecord]) -> bytes:
         shortcuts_map[str(index)] = _mapping_from_shortcut(record)
     root: OrderedDict[str, object] = OrderedDict([("shortcuts", shortcuts_map)])
     return dump_binary_vdf(root)
+
+
+def _normalized_shortcut_record(record: ShortcutRecord) -> dict[str, object]:
+    """Return a comparison form that matches Steam's 32-bit AppID semantics.
+
+    Some shortcut writers encode ``appid`` as an unsigned integer while Steam and
+    this project's normal writer commonly encode the same 32 bits as a signed
+    INT32. Both representations identify the same shortcut. Comparing the raw
+    Python integers would reject a valid staged file after a harmless round trip.
+    """
+
+    normalized = asdict(record)
+    normalized["appid"] = record.unsigned_appid
+    return normalized
+
+
+def shortcut_records_equivalent(
+    planned: list[ShortcutRecord],
+    observed: list[ShortcutRecord],
+) -> bool:
+    if len(planned) != len(observed):
+        return False
+    return all(
+        _normalized_shortcut_record(expected) == _normalized_shortcut_record(actual)
+        for expected, actual in zip(planned, observed, strict=True)
+    )
 
 
 def load_shortcuts_strict(path: Path) -> list[ShortcutRecord]:
@@ -107,8 +133,8 @@ def _verify_shortcut_records(
     expected_games: list[DetectedGame],
 ) -> None:
     written = load_shortcuts(path)
-    if written != expected_records:
-        raise RuntimeError("Shortcut read-back did not exactly match the staged records.")
+    if not shortcut_records_equivalent(expected_records, written):
+        raise RuntimeError("Shortcut read-back did not match the staged records.")
 
     missing = [
         game.display_title
@@ -130,9 +156,10 @@ def upsert_games_transactional(
 ) -> ShortcutTransactionResult:
     """Safely add/update selected non-Steam shortcuts.
 
-    This service is intentionally separate from the legacy UI path until its
-    fixtures and CI coverage are proven. Malformed active files always abort;
-    they are never silently replaced with a fresh shortcut list.
+    Malformed active files always abort; they are never silently replaced with a
+    fresh shortcut list. Staged and written records are compared using Steam's
+    unsigned 32-bit AppID semantics so equivalent signed/unsigned encodings do
+    not create false validation failures.
     """
 
     selected_games = [
@@ -155,7 +182,7 @@ def upsert_games_transactional(
 
     def validate_staged(path: Path) -> None:
         staged_records = load_shortcuts(path)
-        if staged_records != records:
+        if not shortcut_records_equivalent(records, staged_records):
             raise RuntimeError("Staged shortcuts.vdf does not match the planned records.")
 
     def verify_written(path: Path) -> None:
