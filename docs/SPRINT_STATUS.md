@@ -22,7 +22,9 @@ Before changing code:
 - **Foundation complete:** Sprint 07 — Background Job Queue
 - **Foundation complete:** Sprint 09-10 — Artwork Policy and Selected-Game Coordinator
 - **First launcher complete:** Epic Games Launcher read-only manifest adapter
-- **Current active engineering track:** Sprint 04 — Extract production UI services/controllers
+- **Current controller foundation:** Tk-free persistent `LibraryController`
+- **Additional sources complete:** read-only native Steam and loose-folder adapters
+- **Current active engineering track:** Production modern-library UI integration
 - **Next visible milestone:** Production modern library view backed by persistent data
 - **Priority feature after that:** Real provider integration for `Find Artwork for Selected`
 
@@ -113,6 +115,14 @@ Before changing code:
 
 Every new adapter must remain read-only and use the shared `SourceAdapter` model.
 
+### Native Steam and Loose Folder — Complete Read-Only Adapters
+
+- [x] Native Steam adapter maps installed Steam games to stable library records
+- [x] Loose-folder adapter persists existing scanner results without writing Steam
+- [x] Missing roots and scan failures are non-authoritative and preserve prior presence
+- [x] Steam and folder scan CLI commands persist through `SourceScanCoordinator`
+- [x] Folder titles keep real title words such as `Game`
+
 ## Bulk Work — Complete Foundation
 
 ### Selection
@@ -189,6 +199,7 @@ Implemented:
 
 ### Production UI — Remaining
 
+- [x] Tk-free persistent `LibraryController` foundation
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
@@ -204,7 +215,9 @@ Implemented:
 
 ```text
 python -m steam_shortcut_studio.cli scan-epic
-python -m steam_shortcut_studio.cli list-library --source epic
+python -m steam_shortcut_studio.source_cli scan-steam --steam-root "C:\Program Files (x86)\Steam"
+python -m steam_shortcut_studio.source_cli scan-folder --root "D:\PC Games"
+python -m steam_shortcut_studio.cli list-library
 python -m steam_shortcut_studio.cli scan-history
 python -m steam_shortcut_studio.cli transaction-history
 python prototypes/modern_library.py
@@ -229,13 +242,16 @@ The CLI and prototype do not write Steam shortcuts or artwork.
 - **#22:** Atomic artwork-set transaction engine
 - **#23:** Production atomic artwork integration
 - **#25:** Persistent-library modern UI prototype
+- **#26:** Current status and handoff refresh
+- **#27:** Tk-free persistent library controller
+- **#28:** Native Steam and loose-folder source adapters
 
 ## Issue State
 
 - **#2:** Closed — transactional `shortcuts.vdf` complete
 - **#3:** Closed — transaction history and atomic artwork complete
-- **#4:** Open — controller extraction remains; persistence complete
-- **#5:** Open — production multi-select UI remains; queue complete
+- **#4:** Open — controller foundation complete; production UI wiring remains
+- **#5:** Open — production multi-select UI remains; queue and controller foundations complete
 - **#6:** Open — real provider/UI integration remains; coordinator and atomic apply complete
 - **#7:** Open — production adaptation remains; real-data prototype complete
 
@@ -262,15 +278,24 @@ python tests/transaction_history_test.py
 python tests/job_queue_test.py
 python tests/bulk_artwork_test.py
 python tests/epic_source_test.py
+python tests/steam_folder_source_test.py
 python tests/library_store_test.py
 python tests/source_scan_test.py
+python tests/library_controller_test.py
 python tests/cli_test.py
+python tests/source_cli_test.py
 python tests/image_validation_test.py
 python tests/artwork_transaction_test.py
 python tests/artwork_live_transaction_test.py
 ```
 
 Optional modern UI import and persistent-library mapping are tested separately on Windows and Ubuntu.
+
+Latest local integration evidence, 2026-07-12:
+
+- Merged `agent/library-controller`, `agent/steam-folder-source-adapters`, and `agent/current-status-refresh` into an integration branch from `origin/main`
+- Fixed local-folder title cleaning so `Example Game` remains `Example Game`
+- Ran every command listed above on Windows; all passed
 
 ## Known Risks
 
@@ -283,13 +308,13 @@ Optional modern UI import and persistent-library mapping are tested separately o
 
 ## Exact Next Action
 
-Execute Sprint 04 controller extraction without changing Steam write behavior or replacing the full UI at once.
+Connect the existing `LibraryController` to the legacy production UI without changing Steam write behavior or replacing the full UI at once.
 
-Start with a production `LibraryController`/`LibraryService` boundary that:
+Start with a controller-backed library view adapter that:
 
-1. Reads persistent `LibraryStore` records.
-2. Runs `SourceScanCoordinator` through `BackgroundJobQueue`.
-3. Exposes immutable library rows and scan events to both legacy and modern UI layers.
+1. Reads immutable `LibraryRow` records.
+2. Uses stable IDs for active and bulk selection.
+3. Polls `BackgroundJobQueue` events from the Tk thread.
 4. Keeps the existing UI operational.
 5. Adds no new Steam writes.
 

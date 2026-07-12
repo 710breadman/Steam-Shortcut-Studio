@@ -41,7 +41,9 @@ Already completed foundations include:
 - Image validation and duplicate detection
 - Read-only Epic Games Launcher manifest import
 - Persistent SQLite library state
+- Tk-free persistent library controller
 - Read-only modern UI prototype using real stored library data
+- Read-only native Steam and loose-folder source adapters
 
 Development should begin with [CODEX_START_HERE.md](CODEX_START_HERE.md).
 
@@ -76,9 +78,12 @@ python tests/transaction_history_test.py
 python tests/job_queue_test.py
 python tests/bulk_artwork_test.py
 python tests/epic_source_test.py
+python tests/steam_folder_source_test.py
 python tests/library_store_test.py
 python tests/source_scan_test.py
+python tests/library_controller_test.py
 python tests/cli_test.py
+python tests/source_cli_test.py
 python tests/image_validation_test.py
 python tests/artwork_transaction_test.py
 python tests/artwork_live_transaction_test.py
@@ -108,7 +113,7 @@ GitHub Actions runs the suites on Windows and Ubuntu with Python 3.11 and 3.13. 
 
 Installed Steam game artwork can also be edited.
 
-## Epic Library and Modern Prototype
+## Source Scans and Modern Prototype
 
 Scan Epic's installed-game manifests into the persistent library:
 
@@ -116,10 +121,22 @@ Scan Epic's installed-game manifests into the persistent library:
 python -m steam_shortcut_studio.cli scan-epic
 ```
 
+Scan native Steam installs into the persistent library:
+
+```powershell
+python -m steam_shortcut_studio.source_cli scan-steam --steam-root "C:\Program Files (x86)\Steam"
+```
+
+Scan a loose/local game folder into the persistent library:
+
+```powershell
+python -m steam_shortcut_studio.source_cli scan-folder --root "D:\PC Games"
+```
+
 Inspect the stored library:
 
 ```powershell
-python -m steam_shortcut_studio.cli list-library --source epic
+python -m steam_shortcut_studio.cli list-library
 ```
 
 Open the approved modern UI prototype with those real stored games:

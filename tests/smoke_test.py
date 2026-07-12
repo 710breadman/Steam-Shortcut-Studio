@@ -109,6 +109,7 @@ def test_scanner_ranks_primary_exe() -> None:
 
 def test_title_normalization_handles_god_of_war_and_gta() -> None:
     assert clean_display_title("God of War") == "God of War"
+    assert clean_display_title("Example Game") == "Example Game"
     assert clean_display_title("God of War - Ragnarok") == "God of War Ragnarok"
     assert clean_display_title("GTA - The Trilogy - DELauncher") == "Grand Theft Auto: The Trilogy - The Definitive Edition"
     assert not is_specific_title_match("God of War Ragnarok", "God of War", minimum_similarity=0.52)

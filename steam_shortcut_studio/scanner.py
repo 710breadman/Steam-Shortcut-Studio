@@ -137,7 +137,7 @@ def canonical_gta_title(text: str) -> str:
 def strip_launcher_suffixes(text: str) -> str:
     cleaned = text
     cleaned = re.sub(r"(?i)\b(del|de|definitive edition)?\s*launcher$", "", cleaned).strip()
-    cleaned = re.sub(r"(?i)\b(win64|win32|x64|x86|shipping|client|game|launcher)$", "", cleaned).strip()
+    cleaned = re.sub(r"(?i)\b(win64|win32|x64|x86|shipping|client|launcher)$", "", cleaned).strip()
     return cleaned or text
 
 
