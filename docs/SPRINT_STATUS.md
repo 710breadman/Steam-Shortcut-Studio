@@ -208,6 +208,7 @@ Implemented:
 - [x] Persistent row checkbox and selection-menu actions mutate `SelectionState` by stable library ID
 - [x] Shift-clicking persistent row checkboxes selects visible stable-ID ranges without touching hidden rows
 - [x] Space toggles the focused persistent row through the same stable-ID selection path
+- [x] Selection menu exposes explicit visible-scope actions and the table shows selected/visible counts
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
@@ -315,6 +316,7 @@ Latest local integration evidence, 2026-07-12:
 - Routed persistent table selection changes through stable library IDs and mirrored `SelectionState` back to displayed rows
 - Added stable-ID visible-range selection for persistent library checkbox rows
 - Added keyboard Space selection for focused persistent rows through the shared stable-ID toggle path
+- Added explicit Select/Clear/Invert visible commands plus a selected/visible count affordance in the production table toolbar
 
 ## Known Risks
 

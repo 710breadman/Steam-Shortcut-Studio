@@ -1068,6 +1068,7 @@ class MainWindow(tk.Tk):
         self.profile_var = tk.StringVar()
         self.profile_status_var = tk.StringVar(value="Profile: none")
         self.status_var = tk.StringVar(value="Ready.")
+        self.bulk_status_var = tk.StringVar(value="0 selected")
         self.settings_location_var = tk.StringVar(value=str(self.settings_store.settings_path))
         self.cache_location_var = tk.StringVar(value=str(Path(self.settings.cache_dir)))
         self.update_existing_var = tk.BooleanVar(value=self.settings.update_existing_shortcuts)
@@ -1668,6 +1669,10 @@ class MainWindow(tk.Tk):
                 ("Clear all", lambda: self.set_games_selected(False, visible_only=False)),
                 ("Select inverse", self.invert_all_selection),
                 None,
+                ("Select visible", lambda: self.set_games_selected(True, visible_only=True)),
+                ("Clear visible", lambda: self.set_games_selected(False, visible_only=True)),
+                ("Invert visible", self.invert_visible_selection),
+                None,
                 ("Select games needing artwork", self.select_needing_artwork),
                 ("Select new non-Steam shortcuts", self.select_new_nonsteam),
             ],
@@ -1696,6 +1701,7 @@ class MainWindow(tk.Tk):
         self.sort_preset_combo.pack(side=tk.LEFT, padx=(0, 10))
         self.sort_preset_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_sort_preset())
         ToolTip(self.sort_preset_combo, "Use common sort recipes, or click column headers for one-off sorting.")
+        ttk.Label(table_actions, textvariable=self.bulk_status_var, style="Subtle.TLabel").pack(side=tk.RIGHT)
         ttk.Label(table_actions, text="Right-click headers for columns.", style="Subtle.TLabel").pack(side=tk.LEFT, padx=(8, 0))
         self.games_tree = ttk.Treeview(parent, columns=GAME_COLUMNS, show="headings", selectmode="browse")
         for column in GAME_COLUMNS:
@@ -2798,6 +2804,7 @@ class MainWindow(tk.Tk):
             self.games_tree.see(row_id)
         self.games_tree.bind("<<TreeviewSelect>>", self.on_game_selected)
         self.suppress_game_select_events = False
+        self.update_bulk_action_status()
 
     def refresh_game_row(self, index: int) -> None:
         if not (0 <= index < len(self.games)):
@@ -2810,6 +2817,7 @@ class MainWindow(tk.Tk):
             self.games_tree.item(str(index), values=self.game_row_values(self.games[index]), tags=self.game_row_tags(self.games[index]))
         else:
             self.refresh_game_table(select_index=self.current_game_index)
+        self.update_bulk_action_status()
 
     def refresh_all_game_rows(self) -> None:
         if len(self.games_tree.get_children()) != len(self.visible_game_indices()):
@@ -2817,6 +2825,23 @@ class MainWindow(tk.Tk):
             return
         for index in self.visible_game_indices():
             self.refresh_game_row(index)
+        self.update_bulk_action_status()
+
+    def update_bulk_action_status(self) -> None:
+        total = len(self.games)
+        selected = sum(1 for game in self.games if game.selected)
+        visible_total = len(self.displayed_game_indices)
+        visible_selected = sum(
+            1
+            for index in self.displayed_game_indices
+            if 0 <= index < len(self.games) and self.games[index].selected
+        )
+        if not total:
+            self.bulk_status_var.set("0 selected")
+            return
+        self.bulk_status_var.set(
+            f"{selected}/{total} selected; {visible_selected}/{visible_total} visible"
+        )
 
     def set_all_games_selected(self, selected: bool) -> None:
         self.set_games_selected(selected, visible_only=False)
