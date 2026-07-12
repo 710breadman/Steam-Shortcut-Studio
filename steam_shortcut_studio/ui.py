@@ -1711,6 +1711,9 @@ class MainWindow(tk.Tk):
         retry_sources_button = ttk.Button(table_actions, text="Retry Source Reviews", command=self.retry_reviewed_source_scans)
         retry_sources_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(retry_sources_button, "Retry source refresh jobs that ended in review or failure.")
+        clear_reviews_button = ttk.Button(table_actions, text="Clear Source Reviews", command=self.clear_reviewed_source_scans)
+        clear_reviews_button.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(clear_reviews_button, "Dismiss remembered source refresh review/failure jobs after you have handled them.")
         ttk.Label(table_actions, textvariable=self.bulk_status_var, style="Subtle.TLabel").pack(side=tk.RIGHT)
         ttk.Label(table_actions, text="Right-click headers for columns.", style="Subtle.TLabel").pack(side=tk.LEFT, padx=(8, 0))
         self.games_tree = ttk.Treeview(parent, columns=GAME_COLUMNS, show="headings", selectmode="browse")
@@ -2432,6 +2435,12 @@ class MainWindow(tk.Tk):
         self.status_var.set(source_scan_progress_summary(self.library_scan_progress))
         self.set_busy_controls()
         self._schedule_library_controller_poll()
+
+    def clear_reviewed_source_scans(self) -> None:
+        count = len(self.library_retry_job_ids)
+        self.library_retry_job_ids.clear()
+        self.status_var.set(f"Cleared {count} source review job(s)." if count else "No source review jobs to clear.")
+        self.logger.info("Cleared %s source review job(s).", count)
 
     def _schedule_library_controller_poll(self) -> None:
         if self.library_scan_poll_after_id is None:
