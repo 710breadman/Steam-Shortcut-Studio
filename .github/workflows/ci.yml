@@ -57,6 +57,9 @@ jobs:
       - name: Run transaction history tests
         run: python tests/transaction_history_test.py
 
+      - name: Run background job queue tests
+        run: python tests/job_queue_test.py
+
       - name: Run artwork image validation tests
         run: python tests/image_validation_test.py
 
