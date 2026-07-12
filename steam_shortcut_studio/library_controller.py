@@ -136,9 +136,7 @@ class LibraryController:
         valid_ids = {row.item_id for row in rows}
         with self._lock:
             self._rows = tuple(rows)
-            self.selection.selected_ids.intersection_update(valid_ids)
-            if self.selection.active_id not in valid_ids:
-                self.selection.active_id = None
+            self.selection.retain_available(valid_ids)
             return self.snapshot()
 
     def snapshot(self) -> LibrarySnapshot:
@@ -165,7 +163,10 @@ class LibraryController:
         if item_id not in self.row_map():
             raise KeyError(item_id)
         with self._lock:
-            self.selection.set_selected(item_id, selected)
+            if selected:
+                self.selection.add(item_id)
+            else:
+                self.selection.remove(item_id)
             return self.snapshot()
 
     def select_all(self) -> LibrarySnapshot:
