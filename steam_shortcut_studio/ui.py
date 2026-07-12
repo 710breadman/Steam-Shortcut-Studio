@@ -65,6 +65,7 @@ from .ui_library_adapter import (
     library_status_for_game,
     source_scan_adapters,
     source_scan_event_summary,
+    source_scan_progress_summary,
 )
 from .vdf import VdfParseError
 
@@ -803,6 +804,7 @@ class MainWindow(tk.Tk):
         self.artwork_job_keys: set[str] = set()
         self.library_scan_job_ids: set[str] = set()
         self.library_scan_poll_after_id: str | None = None
+        self.library_scan_progress: dict[str, dict[str, object]] = {}
         self.library_selection_anchor_id = ""
         self.artwork_job_status: dict[int, str] = {}
         self.manual_artwork_slots: set[tuple[int, str]] = set()
@@ -2346,8 +2348,13 @@ class MainWindow(tk.Tk):
         for adapter in adapters:
             job = self.library_controller.scan_source(adapter)
             self.library_scan_job_ids.add(job.job_id)
+            self.library_scan_progress[job.job_id] = {
+                "source": adapter.source_name,
+                "state": job.state.value,
+                "progress": job.progress,
+            }
             self.logger.info("Queued persistent %s source scan: %s", adapter.source_name, job.job_id)
-        self.status_var.set(f"Queued {len(adapters)} persistent source scan(s).")
+        self.status_var.set(source_scan_progress_summary(self.library_scan_progress))
         self.set_busy_controls()
         self._schedule_library_controller_poll()
 
@@ -2381,8 +2388,13 @@ class MainWindow(tk.Tk):
         for adapter in adapters:
             job = self.library_controller.scan_source(adapter)
             self.library_scan_job_ids.add(job.job_id)
+            self.library_scan_progress[job.job_id] = {
+                "source": adapter.source_name,
+                "state": job.state.value,
+                "progress": job.progress,
+            }
             self.logger.info("Queued selected persistent %s source scan: %s", adapter.source_name, job.job_id)
-        self.status_var.set(f"Queued {len(adapters)} selected source scan(s).")
+        self.status_var.set(source_scan_progress_summary(self.library_scan_progress))
         self.set_busy_controls()
         self._schedule_library_controller_poll()
 
@@ -2417,6 +2429,11 @@ class MainWindow(tk.Tk):
         if event.job_id not in self.library_scan_job_ids:
             return
         source = str(event.result.get("source") or event.item_id.removeprefix("source:"))
+        self.library_scan_progress[event.job_id] = {
+            "source": source,
+            "state": event.state.value,
+            "progress": event.progress,
+        }
         if event.state in TERMINAL_JOB_STATES:
             if controller_event.snapshot is not None:
                 self.apply_library_snapshot(controller_event.snapshot)
@@ -2430,7 +2447,7 @@ class MainWindow(tk.Tk):
             self.status_var.set(detail)
             return
         if event.message:
-            self.status_var.set(event.message)
+            self.status_var.set(source_scan_progress_summary(self.library_scan_progress))
 
     def _finish_controller_source_scans(self) -> None:
         records = self._controller_scan_records()
@@ -2441,6 +2458,7 @@ class MainWindow(tk.Tk):
         total = len(records)
         self.library_scan_job_ids.clear()
         self.library_scan_poll_after_id = None
+        self.library_scan_progress.clear()
         self.set_busy_controls()
         self.progress.stop()
         self.progress.configure(mode="indeterminate", value=0)

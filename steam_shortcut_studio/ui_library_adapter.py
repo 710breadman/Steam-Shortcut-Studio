@@ -157,6 +157,20 @@ def source_scan_event_summary(
     return detail
 
 
+def source_scan_progress_summary(progress: Mapping[str, Mapping[str, object]]) -> str:
+    entries: list[str] = []
+    for item in progress.values():
+        source = display_label(str(item.get("source") or ""), fallback="Source")
+        state = str(item.get("state") or "queued").replace("_", " ")
+        try:
+            percent = int(round(float(item.get("progress") or 0.0) * 100))
+        except (TypeError, ValueError):
+            percent = 0
+        percent = max(0, min(100, percent))
+        entries.append(f"{source} {state} {percent}%")
+    return "Source refresh: " + "; ".join(entries) if entries else "Source refresh: idle"
+
+
 def format_library_size(size_bytes: int) -> str:
     value = max(0, int(size_bytes))
     if value == 0:

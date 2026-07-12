@@ -211,6 +211,7 @@ Implemented:
 - [x] Selection menu exposes explicit visible-scope actions and the table shows selected/visible counts
 - [x] Source-scan terminal events surface review/failure issue codes from the Tk thread
 - [x] Production table has a selected-row source refresh action backed by `LibraryController.selected_sources`
+- [x] Source refresh jobs show per-source queued/running progress from UI-polled job events
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
@@ -321,6 +322,7 @@ Latest local integration evidence, 2026-07-12:
 - Added explicit Select/Clear/Invert visible commands plus a selected/visible count affordance in the production table toolbar
 - Added source-scan event summaries that include review/failure issue codes in UI-thread status/log updates
 - Added `Refresh Selected Sources`, which derives selected persistent source types from stable IDs and queues only those controller-backed scans
+- Added per-source progress summaries for queued/running source refresh jobs from immutable job events
 
 ## Known Risks
 
@@ -337,7 +339,7 @@ Connect the production modern library table and selected-item actions incrementa
 
 Next controller-backed UI work:
 
-1. Add per-row/per-source progress summary for selected persistent source refreshes.
+1. Add retry/skip affordances for reviewed or failed persistent source refresh jobs.
 2. Preserve stored-row read-only behavior in all Steam write paths.
 3. Add production bulk action controls for selected persistent rows.
 4. Keep the legacy scan/write workflows available during migration.

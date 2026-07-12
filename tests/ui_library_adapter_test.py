@@ -23,6 +23,7 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     library_launch_target_for_game,
     source_scan_adapters,
     source_scan_event_summary,
+    source_scan_progress_summary,
 )
 
 
@@ -164,6 +165,17 @@ def test_source_scan_event_summary_surfaces_review_codes() -> None:
     assert summary == "Epic scan needs review: 0 item(s), 2 issue(s) [manifest_directory_missing, programdata_unavailable]"
 
 
+def test_source_scan_progress_summary_formats_sources() -> None:
+    summary = source_scan_progress_summary(
+        {
+            "job-1": {"source": "epic", "state": "running", "progress": 0.25},
+            "job-2": {"source": "folder", "state": "queued", "progress": 0},
+        }
+    )
+
+    assert summary == "Source refresh: Epic running 25%; Folder queued 0%"
+
+
 if __name__ == "__main__":
     test_library_row_maps_to_read_only_legacy_game()
     test_native_steam_library_row_does_not_become_writable_native_game()
@@ -171,4 +183,5 @@ if __name__ == "__main__":
     test_source_scan_adapters_cover_controller_backed_sources()
     test_library_selection_helpers_use_stable_ids()
     test_source_scan_event_summary_surfaces_review_codes()
+    test_source_scan_progress_summary_formats_sources()
     print("UI library adapter tests passed.")
