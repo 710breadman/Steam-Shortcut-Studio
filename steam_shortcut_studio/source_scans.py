@@ -10,6 +10,8 @@ NON_AUTHORITATIVE_ISSUE_CODES = frozenset(
     {
         "programdata_unavailable",
         "manifest_directory_missing",
+        "collection_root_missing",
+        "steam_root_missing",
     }
 )
 
