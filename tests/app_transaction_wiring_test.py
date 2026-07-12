@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import sys
 import tempfile
 from pathlib import Path
 
-from steam_shortcut_studio import app  # noqa: F401  (installs production adapters)
-from steam_shortcut_studio.models import DetectedGame, SteamProfile
-from steam_shortcut_studio.shortcut_transactions import ShortcutWriteBlockedError
-from steam_shortcut_studio.ui import preview_changes, upsert_games
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from steam_shortcut_studio import app  # noqa: E402,F401  (installs production adapters)
+from steam_shortcut_studio.models import DetectedGame, SteamProfile  # noqa: E402
+from steam_shortcut_studio.shortcut_transactions import ShortcutWriteBlockedError  # noqa: E402
+from steam_shortcut_studio.ui import preview_changes, upsert_games  # noqa: E402
 
 
 def _write_fake_exe(path: Path) -> None:
