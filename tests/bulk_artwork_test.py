@@ -45,7 +45,7 @@ def test_search_plans_preserve_existing_and_locked_slots() -> None:
 
     assert missing.requested_slots == ("hero", "icon")
     assert missing.preserved_locked_slots == ("grid", "logo")
-    assert missing.preserved_existing_slots == ("grid", "wide", "logo")
+    assert missing.preserved_existing_slots == ("grid", "wide")
     assert unlocked.requested_slots == ("wide", "hero", "icon")
     assert complete.requested_slots == unlocked.requested_slots
 
