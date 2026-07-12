@@ -805,6 +805,7 @@ class MainWindow(tk.Tk):
         self.library_scan_job_ids: set[str] = set()
         self.library_scan_poll_after_id: str | None = None
         self.library_scan_progress: dict[str, dict[str, object]] = {}
+        self.library_retry_job_ids: set[str] = set()
         self.library_selection_anchor_id = ""
         self.artwork_job_status: dict[int, str] = {}
         self.manual_artwork_slots: set[tuple[int, str]] = set()
@@ -1707,6 +1708,9 @@ class MainWindow(tk.Tk):
         refresh_selected_button = ttk.Button(table_actions, text="Refresh Selected Sources", command=self.scan_selected_persistent_sources)
         refresh_selected_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(refresh_selected_button, "Rescan only the launcher/source types represented by selected persistent library rows.")
+        retry_sources_button = ttk.Button(table_actions, text="Retry Source Reviews", command=self.retry_reviewed_source_scans)
+        retry_sources_button.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(retry_sources_button, "Retry source refresh jobs that ended in review or failure.")
         ttk.Label(table_actions, textvariable=self.bulk_status_var, style="Subtle.TLabel").pack(side=tk.RIGHT)
         ttk.Label(table_actions, text="Right-click headers for columns.", style="Subtle.TLabel").pack(side=tk.LEFT, padx=(8, 0))
         self.games_tree = ttk.Treeview(parent, columns=GAME_COLUMNS, show="headings", selectmode="browse")
@@ -2398,6 +2402,37 @@ class MainWindow(tk.Tk):
         self.set_busy_controls()
         self._schedule_library_controller_poll()
 
+    def retry_reviewed_source_scans(self) -> None:
+        retry_ids = [
+            job_id
+            for job_id in sorted(self.library_retry_job_ids)
+            if (record := self.library_controller.job_queue.get(job_id)) is not None
+            and record.state.value in {"needs_review", "failed", "skipped", "cancelled"}
+        ]
+        if not retry_ids:
+            messagebox.showinfo(__app_name__, "No reviewed or failed source refresh jobs are available to retry.")
+            return
+        for job_id in retry_ids:
+            try:
+                record = self.library_controller.retry_scan(job_id)
+            except Exception as exc:
+                self.logger.warning("Could not retry source scan %s: %s", job_id, exc)
+                continue
+            self.library_scan_job_ids.add(record.job_id)
+            source = str(record.result.get("source") or record.item_id.removeprefix("source:"))
+            self.library_scan_progress[record.job_id] = {
+                "source": source,
+                "state": record.state.value,
+                "progress": record.progress,
+            }
+            self.logger.info("Retried persistent source scan: %s", record.job_id)
+        if not self.library_scan_job_ids:
+            messagebox.showinfo(__app_name__, "No source refresh jobs could be retried.")
+            return
+        self.status_var.set(source_scan_progress_summary(self.library_scan_progress))
+        self.set_busy_controls()
+        self._schedule_library_controller_poll()
+
     def _schedule_library_controller_poll(self) -> None:
         if self.library_scan_poll_after_id is None:
             self.library_scan_poll_after_id = self.after(180, self._poll_library_controller_events)
@@ -2437,6 +2472,10 @@ class MainWindow(tk.Tk):
         if event.state in TERMINAL_JOB_STATES:
             if controller_event.snapshot is not None:
                 self.apply_library_snapshot(controller_event.snapshot)
+            if event.state.value in {"needs_review", "failed"}:
+                self.library_retry_job_ids.add(event.job_id)
+            else:
+                self.library_retry_job_ids.discard(event.job_id)
             detail = source_scan_event_summary(
                 source=source,
                 state=event.state.value,

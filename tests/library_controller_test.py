@@ -162,6 +162,44 @@ def test_partial_scan_routes_to_review_and_preserves_existing_rows() -> None:
             controller.close()
 
 
+def test_review_scan_can_be_retried_and_refreshes_rows() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = LibraryStore(Path(tmp) / "library.sqlite3")
+        controller = LibraryController(store)
+        partial = SourceScanResult(
+            "epic",
+            (),
+            (
+                SourceIssue(
+                    source="epic",
+                    code="manifest_directory_missing",
+                    message="Epic is unavailable",
+                    severity="info",
+                ),
+            ),
+        )
+        adapter = FakeAdapter(partial)
+        item = _item("retry", "Retry")
+        try:
+            job = controller.scan_source(adapter)
+            assert controller.job_queue.wait_for_idle(timeout=5.0)
+            controller.poll_events()
+            assert job.state is JobState.NEEDS_REVIEW
+
+            adapter.result = SourceScanResult("epic", (item,), ())
+            retried = controller.retry_scan(job.job_id)
+            assert retried.state is JobState.QUEUED
+            assert controller.job_queue.wait_for_idle(timeout=5.0)
+            events = controller.poll_events()
+
+            assert job.state is JobState.SUCCEEDED
+            terminal = [event for event in events if event.event.state is JobState.SUCCEEDED]
+            assert terminal and terminal[0].snapshot is not None
+            assert [row.title for row in terminal[0].snapshot.rows] == ["Retry"]
+        finally:
+            controller.close()
+
+
 def test_adapter_exception_becomes_isolated_failed_job() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         store = LibraryStore(Path(tmp) / "library.sqlite3")
@@ -185,5 +223,6 @@ if __name__ == "__main__":
     test_controller_builds_immutable_effective_rows_and_selection()
     test_successful_async_scan_persists_and_refreshes_rows()
     test_partial_scan_routes_to_review_and_preserves_existing_rows()
+    test_review_scan_can_be_retried_and_refreshes_rows()
     test_adapter_exception_becomes_isolated_failed_job()
     print("Library controller tests passed.")

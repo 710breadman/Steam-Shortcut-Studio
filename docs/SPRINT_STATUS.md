@@ -212,6 +212,7 @@ Implemented:
 - [x] Source-scan terminal events surface review/failure issue codes from the Tk thread
 - [x] Production table has a selected-row source refresh action backed by `LibraryController.selected_sources`
 - [x] Source refresh jobs show per-source queued/running progress from UI-polled job events
+- [x] Reviewed/failed source refresh jobs can be retried through the controller queue
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
@@ -323,6 +324,7 @@ Latest local integration evidence, 2026-07-12:
 - Added source-scan event summaries that include review/failure issue codes in UI-thread status/log updates
 - Added `Refresh Selected Sources`, which derives selected persistent source types from stable IDs and queues only those controller-backed scans
 - Added per-source progress summaries for queued/running source refresh jobs from immutable job events
+- Added `LibraryController.retry_scan` plus a production `Retry Source Reviews` action for source refresh jobs that ended in review or failure
 
 ## Known Risks
 
@@ -339,7 +341,7 @@ Connect the production modern library table and selected-item actions incrementa
 
 Next controller-backed UI work:
 
-1. Add retry/skip affordances for reviewed or failed persistent source refresh jobs.
+1. Add skip/clear affordance for reviewed persistent source refresh jobs.
 2. Preserve stored-row read-only behavior in all Steam write paths.
 3. Add production bulk action controls for selected persistent rows.
 4. Keep the legacy scan/write workflows available during migration.

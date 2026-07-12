@@ -257,6 +257,12 @@ class LibraryController:
             self._scan_job_ids.add(record.job_id)
         return self.job_queue.submit(record, handler)
 
+    def retry_scan(self, job_id: str) -> JobRecord:
+        record = self.job_queue.retry(job_id)
+        with self._lock:
+            self._scan_job_ids.add(job_id)
+        return record
+
     def poll_events(self, limit: int | None = None) -> tuple[LibraryControllerEvent, ...]:
         events = self.job_queue.drain_events(limit)
         controller_events: list[LibraryControllerEvent] = []
