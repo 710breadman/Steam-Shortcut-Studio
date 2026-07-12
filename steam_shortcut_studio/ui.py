@@ -1709,6 +1709,7 @@ class MainWindow(tk.Tk):
         self.games_tree.configure(yscrollcommand=scrollbar.set)
         self.games_tree.bind("<<TreeviewSelect>>", self.on_game_selected)
         self.games_tree.bind("<ButtonRelease-1>", self.on_game_table_click)
+        self.games_tree.bind("<space>", self.on_game_table_space)
         self.games_tree.bind("<Button-3>", self.show_column_context_menu)
 
     def configure_game_tree_tags(self) -> None:
@@ -2982,27 +2983,38 @@ class MainWindow(tk.Tk):
                 clicked_column = ""
         if row_id and clicked_column == "add":
             index = int(row_id)
-            game = self.games[index]
-            item_id = library_item_id_for_game(game)
-            if item_id:
-                selected_ids = self.library_controller.snapshot().selected_ids
-                if event.state & TK_SHIFT_MASK:
-                    item_ids = library_item_ids_between(
-                        self.games,
-                        self.displayed_game_indices,
-                        self.library_selection_anchor_id,
-                        item_id,
-                    )
-                    self.set_library_items_selected(item_ids, True)
-                else:
-                    self.set_library_items_selected((item_id,), item_id not in selected_ids)
-                self.library_selection_anchor_id = item_id
-            else:
-                game.selected = not game.selected
-            self.sync_library_selection_state()
-            self.refresh_game_row(index)
+            self.toggle_game_selection_at_index(index, range_select=bool(event.state & TK_SHIFT_MASK))
             self.games_tree.selection_set(row_id)
             self.games_tree.focus(row_id)
+
+    def on_game_table_space(self, event: tk.Event[Any]) -> str:
+        row_id = self.games_tree.focus() or (self.games_tree.selection()[0] if self.games_tree.selection() else "")
+        if row_id:
+            self.toggle_game_selection_at_index(int(row_id), range_select=bool(event.state & TK_SHIFT_MASK))
+        return "break"
+
+    def toggle_game_selection_at_index(self, index: int, *, range_select: bool = False) -> None:
+        if not (0 <= index < len(self.games)):
+            return
+        game = self.games[index]
+        item_id = library_item_id_for_game(game)
+        if item_id:
+            selected_ids = self.library_controller.snapshot().selected_ids
+            if range_select:
+                item_ids = library_item_ids_between(
+                    self.games,
+                    self.displayed_game_indices,
+                    self.library_selection_anchor_id,
+                    item_id,
+                )
+                self.set_library_items_selected(item_ids, True)
+            else:
+                self.set_library_items_selected((item_id,), item_id not in selected_ids)
+            self.library_selection_anchor_id = item_id
+        else:
+            game.selected = not game.selected
+        self.sync_library_selection_state()
+        self.refresh_game_row(index)
 
     def on_game_selected(self, _event: tk.Event[Any]) -> None:
         if self.suppress_game_select_events:
