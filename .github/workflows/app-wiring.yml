@@ -14,5 +14,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run isolated desktop wiring test
-        run: python tests/app_transaction_wiring_test.py
+
+      - name: Capture isolated desktop wiring test
+        shell: bash
+        run: |
+          set +e
+          python tests/app_transaction_wiring_test.py > app-wiring.log 2>&1
+          code=$?
+          cat app-wiring.log
+          printf '%s\n' "$code" > app-wiring.exit
+          exit 0
+
+      - name: Upload diagnostic output
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-wiring-diagnostic
+          path: |
+            app-wiring.log
+            app-wiring.exit
+          if-no-files-found: error
+
+      - name: Fail when the isolated test failed
+        shell: bash
+        run: test "$(cat app-wiring.exit)" = "0"
