@@ -14,22 +14,34 @@ It is built for personal game libraries where many games live outside Steam, and
 - Preview, replace, clear, or open selected artwork in Paint on Windows or the default image app on Linux.
 - Delete cached artwork and reset settings from the Settings dialog.
 - Preview Steam changes before writing.
-- Back up `shortcuts.vdf` before modifying it.
+- Write non-Steam shortcuts through staged, verified, automatically reversible transactions.
+- Write each game's grid, wide, hero, logo, and icon artwork as one atomic set with full rollback.
 - Close Steam before writing when needed, then reopen Steam only if this app closed it.
-- Write grid, wide, hero, logo, and icon artwork to Steam's grid folder.
-- Keep generated settings, API keys, cache files, logs, and builds out of source control.
+- Keep generated settings, API keys, cache files, logs, builds, and library databases out of source control.
 
-## Development Roadmap
+## Current Development Direction
 
-The next major direction is a safer, modern personal-library manager with:
+The project is evolving into a safe modern personal-library manager with:
 
 - A sleek dark desktop UI with selectable accent colors
 - Native Steam and non-Steam games in one library view
 - Reliable multi-selection and contextual bulk actions
 - `Find Artwork for Selected` for processing many games in one batch
 - High-confidence artwork automation with an exception review queue
-- Transactional writes, read-back verification, history, and rollback
+- Persistent manual overrides, artwork locks, rejected matches, and scan history
 - Windows launcher manifests first, followed by SteamOS/Bazzite sources
+
+Already completed foundations include:
+
+- Transactional production shortcut writes
+- Atomic production artwork-set writes
+- Transaction and restore-point history
+- Stable selection and bounded background jobs
+- Bulk artwork planning and policy routing
+- Image validation and duplicate detection
+- Read-only Epic Games Launcher manifest import
+- Persistent SQLite library state
+- Read-only modern UI prototype using real stored library data
 
 Development should begin with [CODEX_START_HERE.md](CODEX_START_HERE.md).
 
@@ -43,10 +55,12 @@ Planning and execution documents:
 - [Write Path Audit](docs/WRITE_PATH_AUDIT.md)
 - [Transaction Service Specification](docs/TRANSACTION_SERVICE_SPEC.md)
 - [Artwork Match Policy](docs/ARTWORK_MATCH_POLICY.md)
+- [Launcher Import Research](docs/LAUNCHER_IMPORT_RESEARCH.md)
+- [CLI Guide](docs/CLI.md)
 - [UI Framework Decision](docs/UI_FRAMEWORK_DECISION.md)
 - [Development Setup](docs/DEVELOPMENT_SETUP.md)
 
-Sprint 00 is complete with green Windows/Linux CI. The active work is **Sprint 01 — Transactional Steam Write Service**. Safety and rollback remain prerequisites for the broader UI rewrite and native Steam setting expansion.
+The active engineering focus is **controller/service extraction and production modern-library integration**, followed by real artwork-provider integration for `Find Artwork for Selected`.
 
 ## Validation
 
@@ -55,16 +69,30 @@ python -m compileall -q steam_shortcut_studio tests main.py
 python tests/smoke_test.py
 python tests/foundation_test.py
 python tests/transaction_test.py
+python tests/file_transaction_test.py
+python tests/shortcut_transaction_test.py
+python tests/app_transaction_wiring_test.py
+python tests/transaction_history_test.py
+python tests/job_queue_test.py
+python tests/bulk_artwork_test.py
+python tests/epic_source_test.py
+python tests/library_store_test.py
+python tests/source_scan_test.py
+python tests/cli_test.py
+python tests/image_validation_test.py
+python tests/artwork_transaction_test.py
+python tests/artwork_live_transaction_test.py
 ```
 
-GitHub Actions runs the suites on Windows and Ubuntu with Python 3.11 and 3.13.
+GitHub Actions runs the suites on Windows and Ubuntu with Python 3.11 and 3.13. Optional modern UI imports and persistent-library mapping are also tested on Windows and Ubuntu.
 
 ## Requirements
 
 - Windows 10 or newer, SteamOS, or Bazzite
 - Python 3.11 or newer
-- Optional: Pillow for richer JPEG/WebP artwork previews
+- Pillow 10 or newer
 - Optional: Tkinter if your Python does not include it
+- Optional UI prototype: `requirements-ui-prototype.txt`
 
 ## Basic Usage
 
@@ -80,7 +108,30 @@ GitHub Actions runs the suites on Windows and Ubuntu with Python 3.11 and 3.13.
 
 Installed Steam game artwork can also be edited.
 
-## Settings And Cache
+## Epic Library and Modern Prototype
+
+Scan Epic's installed-game manifests into the persistent library:
+
+```powershell
+python -m steam_shortcut_studio.cli scan-epic
+```
+
+Inspect the stored library:
+
+```powershell
+python -m steam_shortcut_studio.cli list-library --source epic
+```
+
+Open the approved modern UI prototype with those real stored games:
+
+```powershell
+python -m pip install -r requirements-ui-prototype.txt
+python prototypes/modern_library.py
+```
+
+The prototype is read-only. Its Apply action remains disabled until production controller and review-workspace integration is complete.
+
+## Settings, Library, and Cache
 
 Settings and API keys are stored locally under:
 
@@ -90,6 +141,16 @@ Windows:
 
 Linux:
 ~/.config/SteamShortcutStudio/settings.json
+```
+
+Persistent library state is stored under:
+
+```text
+Windows:
+%APPDATA%\SteamShortcutStudio\library.sqlite3
+
+Linux:
+~/.config/SteamShortcutStudio/library.sqlite3
 ```
 
 Logs are stored under:
@@ -141,7 +202,7 @@ Linux:
 <Steam>/userdata/<user id>/config/grid
 ```
 
-Before writing an existing `shortcuts.vdf`, the current app creates a timestamped backup beside it. The roadmap replaces this with grouped transaction backups, read-back verification, and automatic rollback.
+Production shortcut and artwork writes are staged, backed up, verified after writing, and automatically rolled back when verification fails. Malformed active shortcut data is blocked rather than silently replaced.
 
 ## Linux Steam Paths
 
