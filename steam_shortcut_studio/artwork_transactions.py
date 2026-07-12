@@ -138,8 +138,10 @@ def _rollback_all(outcome: ArtworkSetOutcome) -> None:
             operation.error = str(exc)
             operation.status = "rollback_failed"
             failures.append(str(exc))
-    outcome.restored = all(operation.restored for operation in outcome.operations)
-    outcome.restore_verified = all(
+    outcome.restored = bool(outcome.operations) and all(
+        operation.restored for operation in outcome.operations
+    )
+    outcome.restore_verified = bool(outcome.operations) and all(
         operation.restore_verified for operation in outcome.operations
     )
     if failures:
@@ -163,7 +165,8 @@ def apply_artwork_set_transaction(
     """
 
     write_requests = list(writes)
-    if not write_requests and not list(remove_paths):
+    removal_requests = list(remove_paths)
+    if not write_requests and not removal_requests:
         raise ValueError("Artwork transactions require at least one write or removal.")
 
     resolved_writes: list[tuple[ArtworkWriteRequest, Path, Path, ArtworkFileInfo]] = []
@@ -177,7 +180,7 @@ def apply_artwork_set_transaction(
         info = validate_artwork_file(source)
         resolved_writes.append((request, source, target, info))
 
-    removals = _resolved_unique_paths(Path(path) for path in remove_paths)
+    removals = _resolved_unique_paths(Path(path) for path in removal_requests)
     for target in removals:
         if target in target_set:
             raise ValueError(f"Artwork target cannot be both written and removed: {target}")
@@ -197,6 +200,7 @@ def apply_artwork_set_transaction(
         transaction_dir=str(tx_dir),
         manifest_path=str(manifest),
     )
+    apply_started = False
 
     try:
         for index, (request, source, target, info) in enumerate(resolved_writes):
@@ -240,6 +244,7 @@ def apply_artwork_set_transaction(
                 operation.backup_path = str(backup)
 
         _write_manifest(outcome)
+        apply_started = True
 
         for index, operation in enumerate(outcome.operations):
             target = Path(operation.target_path)
@@ -268,8 +273,15 @@ def apply_artwork_set_transaction(
         _write_manifest(outcome)
         return outcome
     except Exception as exc:
-        outcome.status = "verification_failed"
         outcome.error = str(exc)
+        if not apply_started:
+            outcome.status = "aborted"
+            _write_manifest(outcome)
+            if isinstance(exc, ArtworkTransactionError):
+                raise
+            raise ArtworkTransactionError(f"Artwork transaction preflight failed: {exc}") from exc
+
+        outcome.status = "verification_failed"
         try:
             _rollback_all(outcome)
             outcome.status = "rolled_back"
