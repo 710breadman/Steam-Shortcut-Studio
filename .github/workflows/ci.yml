@@ -72,6 +72,9 @@ jobs:
       - name: Run source scan persistence tests
         run: python tests/source_scan_test.py
 
+      - name: Run CLI tests
+        run: python tests/cli_test.py
+
       - name: Run artwork image validation tests
         run: python tests/image_validation_test.py
 
