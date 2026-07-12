@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import os
 import sqlite3
 import threading
@@ -168,8 +169,17 @@ class LibraryStore:
         connection.execute("PRAGMA journal_mode = WAL")
         return connection
 
+    @contextmanager
+    def _connection(self):
+        connection = self._connect()
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
+
     def initialize(self) -> None:
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             version = int(connection.execute("PRAGMA user_version").fetchone()[0])
             if version > SCHEMA_VERSION:
                 raise RuntimeError(
@@ -271,7 +281,7 @@ class LibraryStore:
         if not source_name:
             raise ValueError("Scan source is required.")
         scan_id = uuid4().hex
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO scan_runs(scan_id, source, started_at, status)
@@ -293,7 +303,7 @@ class LibraryStore:
         final_status = str(status or "").strip()
         if final_status not in {"completed", "failed", "cancelled"}:
             raise ValueError(f"Unsupported scan status: {final_status}")
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             cursor = connection.execute(
                 """
                 UPDATE scan_runs
@@ -334,7 +344,7 @@ class LibraryStore:
         updated = 0
         seen_ids: list[str] = []
 
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             for item in incoming:
                 exists = connection.execute(
                     "SELECT 1 FROM library_items WHERE stable_id = ?",
@@ -420,7 +430,7 @@ class LibraryStore:
         return SnapshotResult(inserted, updated, marked_missing)
 
     def get_record(self, item_id: str) -> LibraryItemRecord | None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM library_items WHERE stable_id = ?",
                 (item_id,),
@@ -441,7 +451,7 @@ class LibraryStore:
         if not include_missing:
             clauses.append("is_present = 1")
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 "SELECT * FROM library_items"
                 + where
@@ -477,7 +487,7 @@ class LibraryStore:
     def save_overrides(self, overrides: ManualOverrides) -> ManualOverrides:
         self._require_item(overrides.item_id)
         updated_at = overrides.updated_at or _utc_now_text()
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO manual_overrides(
@@ -513,7 +523,7 @@ class LibraryStore:
         )
 
     def get_overrides(self, item_id: str) -> ManualOverrides | None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 "SELECT * FROM manual_overrides WHERE item_id = ?",
                 (item_id,),
@@ -531,7 +541,7 @@ class LibraryStore:
         )
 
     def clear_overrides(self, item_id: str) -> bool:
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             cursor = connection.execute(
                 "DELETE FROM manual_overrides WHERE item_id = ?",
                 (item_id,),
@@ -579,7 +589,7 @@ class LibraryStore:
             raise ValueError(f"Unknown artwork slot: {lock.slot}")
         self._require_item(lock.item_id)
         updated_at = lock.updated_at or _utc_now_text()
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO artwork_locks(
@@ -610,7 +620,7 @@ class LibraryStore:
         )
 
     def clear_artwork_lock(self, item_id: str, slot: str) -> bool:
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             cursor = connection.execute(
                 "DELETE FROM artwork_locks WHERE item_id = ? AND slot = ?",
                 (item_id, slot),
@@ -618,7 +628,7 @@ class LibraryStore:
         return cursor.rowcount > 0
 
     def list_artwork_locks(self, item_id: str) -> list[ArtworkLock]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM artwork_locks
@@ -644,7 +654,7 @@ class LibraryStore:
             raise ValueError(f"Unknown artwork slot: {rejection.slot}")
         self._require_item(rejection.item_id)
         rejected_at = rejection.rejected_at or _utc_now_text()
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             connection.execute(
                 """
                 INSERT INTO rejected_matches(
@@ -679,7 +689,7 @@ class LibraryStore:
         slot: str,
         candidate_id: str,
     ) -> bool:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute(
                 """
                 SELECT 1 FROM rejected_matches
@@ -690,7 +700,7 @@ class LibraryStore:
         return row is not None
 
     def list_rejected_matches(self, item_id: str) -> list[RejectedMatch]:
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM rejected_matches
@@ -718,7 +728,7 @@ class LibraryStore:
         slot: str,
         candidate_id: str,
     ) -> bool:
-        with self._write_lock, self._connect() as connection:
+        with self._write_lock, self._connection() as connection:
             cursor = connection.execute(
                 """
                 DELETE FROM rejected_matches
@@ -735,7 +745,7 @@ class LibraryStore:
             where = " WHERE source = ?"
             parameters.append(source)
         parameters.append(max(1, int(limit)))
-        with self._connect() as connection:
+        with self._connection() as connection:
             rows = connection.execute(
                 """
                 SELECT * FROM scan_runs
