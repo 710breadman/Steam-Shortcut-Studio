@@ -142,7 +142,7 @@ def test_launch_target_outside_install_is_flagged_for_review() -> None:
         root = Path(tmp)
         manifests = root / "Manifests"
         payload = _base_manifest(root / "Game")
-        payload["LaunchExecutable"] = "../Shared/Launcher.exe"
+        payload["LaunchExecutable"] = str(root / "Shared" / "Launcher.exe")
         _write_manifest(manifests, "outside", payload)
 
         result = EpicManifestAdapter(manifests).scan()
