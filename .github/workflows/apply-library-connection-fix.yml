@@ -1,0 +1,31 @@
+name: Apply Library Connection Fix
+
+on:
+  push:
+    branches:
+      - "agent/library-persistence"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, 'Close SQLite connections explicitly') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/library-persistence
+          fetch-depth: 0
+
+      - name: Apply connection lifecycle patch
+        run: python scripts/apply_library_connection_fix.py
+
+      - name: Commit branch patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Close SQLite connections explicitly"
+          git push origin HEAD:agent/library-persistence
