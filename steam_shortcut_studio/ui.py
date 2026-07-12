@@ -52,8 +52,10 @@ from .steamgrid import SteamGridDbClient, SteamGridDbError
 from .ui_library_adapter import (
     LIBRARY_SOURCE_META,
     LIBRARY_STATUS_META,
+    apply_library_selection_to_games,
     games_from_library_snapshot,
     is_persistent_library_game,
+    library_item_ids_for_games,
     library_item_id_for_game,
     library_launch_target_for_game,
     library_platform_for_game,
@@ -2700,6 +2702,30 @@ class MainWindow(tk.Tk):
             except KeyError:
                 continue
 
+    def mirror_library_selection_state(self, snapshot: Any | None = None) -> None:
+        snapshot = snapshot or self.library_controller.snapshot()
+        apply_library_selection_to_games(self.games, snapshot.selected_ids)
+
+    def set_library_items_selected(self, item_ids: tuple[str, ...], selected: bool) -> None:
+        for item_id in item_ids:
+            try:
+                self.library_controller.set_selected(item_id, selected)
+            except KeyError:
+                continue
+        if item_ids:
+            self.mirror_library_selection_state()
+
+    def invert_library_item_selection(self, item_ids: tuple[str, ...]) -> None:
+        if not item_ids:
+            return
+        selected_ids = set(self.library_controller.snapshot().selected_ids)
+        for item_id in item_ids:
+            try:
+                self.library_controller.set_selected(item_id, item_id not in selected_ids)
+            except KeyError:
+                continue
+        self.mirror_library_selection_state()
+
     def metadata_score(self, game: DetectedGame) -> int:
         return sum(
             [
@@ -2793,47 +2819,61 @@ class MainWindow(tk.Tk):
 
     def set_games_selected(self, selected: bool, visible_only: bool = False) -> None:
         indices = self.displayed_game_indices if visible_only else range(len(self.games))
+        library_ids = library_item_ids_for_games(self.games, indices)
+        self.set_library_items_selected(library_ids, selected)
         count = 0
         for index in indices:
             game = self.games[index]
-            game.selected = selected
+            if not is_persistent_library_game(game):
+                game.selected = selected
             count += 1
-        self.sync_library_selection_state()
         self.refresh_all_game_rows()
         scope = "visible" if visible_only else "all"
         self.status_var.set(f"{'Selected' if selected else 'Cleared'} {count} {scope} game row(s).")
 
     def invert_visible_selection(self) -> None:
+        self.invert_library_item_selection(library_item_ids_for_games(self.games, self.displayed_game_indices))
         for index in self.displayed_game_indices:
-            self.games[index].selected = not self.games[index].selected
-        self.sync_library_selection_state()
+            if not is_persistent_library_game(self.games[index]):
+                self.games[index].selected = not self.games[index].selected
         self.refresh_all_game_rows()
         self.status_var.set(f"Inverted {len(self.displayed_game_indices)} visible game row(s).")
 
     def invert_all_selection(self) -> None:
+        self.invert_library_item_selection(library_item_ids_for_games(self.games))
         for game in self.games:
-            game.selected = not game.selected
-        self.sync_library_selection_state()
+            if not is_persistent_library_game(game):
+                game.selected = not game.selected
         self.refresh_all_game_rows()
         self.status_var.set(f"Inverted {len(self.games)} game selection(s).")
 
     def select_needing_artwork(self) -> None:
         count = 0
+        library_ids_to_clear: list[str] = []
         for game in self.games:
+            item_id = library_item_id_for_game(game)
+            if item_id:
+                library_ids_to_clear.append(item_id)
+                continue
             game.selected = game.artwork.selected_count() < len(game.artwork.slot_names())
             if game.selected:
                 count += 1
-        self.sync_library_selection_state()
+        self.set_library_items_selected(tuple(library_ids_to_clear), False)
         self.refresh_all_game_rows()
         self.status_var.set(f"Selected {count} game(s) needing artwork.")
 
     def select_new_nonsteam(self) -> None:
         count = 0
+        library_ids_to_clear: list[str] = []
         for game in self.games:
+            item_id = library_item_id_for_game(game)
+            if item_id:
+                library_ids_to_clear.append(item_id)
+                continue
             game.selected = not game.is_native_steam_game and game.existing_appid is None
             if game.selected:
                 count += 1
-        self.sync_library_selection_state()
+        self.set_library_items_selected(tuple(library_ids_to_clear), False)
         self.refresh_all_game_rows()
         self.status_var.set(f"Selected {count} new non-Steam shortcut(s).")
 
@@ -2939,7 +2979,13 @@ class MainWindow(tk.Tk):
                 clicked_column = ""
         if row_id and clicked_column == "add":
             index = int(row_id)
-            self.games[index].selected = not self.games[index].selected
+            game = self.games[index]
+            item_id = library_item_id_for_game(game)
+            if item_id:
+                selected_ids = self.library_controller.snapshot().selected_ids
+                self.set_library_items_selected((item_id,), item_id not in selected_ids)
+            else:
+                game.selected = not game.selected
             self.sync_library_selection_state()
             self.refresh_game_row(index)
             self.games_tree.selection_set(row_id)

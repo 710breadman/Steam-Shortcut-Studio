@@ -74,6 +74,30 @@ def games_from_library_snapshot(snapshot: LibrarySnapshot) -> list[DetectedGame]
     ]
 
 
+def library_item_ids_for_games(
+    games: list[DetectedGame],
+    indices: list[int] | range | None = None,
+) -> tuple[str, ...]:
+    selected_indices = indices if indices is not None else range(len(games))
+    ids: list[str] = []
+    for index in selected_indices:
+        if 0 <= index < len(games):
+            item_id = library_item_id_for_game(games[index])
+            if item_id:
+                ids.append(item_id)
+    return tuple(ids)
+
+
+def apply_library_selection_to_games(
+    games: list[DetectedGame],
+    selected_ids: frozenset[str],
+) -> None:
+    for game in games:
+        item_id = library_item_id_for_game(game)
+        if item_id:
+            game.selected = item_id in selected_ids
+
+
 def format_library_size(size_bytes: int) -> str:
     value = max(0, int(size_bytes))
     if value == 0:
