@@ -81,6 +81,9 @@ jobs:
       - name: Run atomic artwork transaction tests
         run: python tests/artwork_transaction_test.py
 
+      - name: Run production atomic artwork tests
+        run: python tests/artwork_live_transaction_test.py
+
   ui-prototype:
     name: UI prototype import / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
