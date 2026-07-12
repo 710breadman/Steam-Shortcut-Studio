@@ -4,23 +4,46 @@ This folder contains non-production interface experiments for the approved dark 
 
 ## Safety Boundary
 
-The prototype:
+The prototypes:
 
-- Uses mock library data only
-- Does not detect Steam
-- Does not scan folders
-- Does not call artwork providers
-- Does not write Steam files
-- Does not import production write services
+- Do not detect or control Steam
+- Do not write Steam shortcuts or artwork
+- Do not call artwork providers
+- Keep Apply disabled
+- Use either mock data or the app's own read-only persistent library database
 
-It exists to validate layout, density, theme direction, multi-selection, and the artwork/safety inspector before production integration.
+They exist to validate layout, density, theme direction, multi-selection, artwork review, and safety/history presentation before production integration.
 
-## Run
+## Run the Design Mock
 
 ```bash
 python -m pip install -r requirements-ui-prototype.txt
 python prototypes/modern_shell.py
 ```
+
+## Run With Persistent Library Data
+
+First populate the library, for example with Epic manifests:
+
+```powershell
+python -m steam_shortcut_studio.cli scan-epic
+```
+
+Then open the approved modern shell with those stored games:
+
+```powershell
+python prototypes/modern_library.py
+```
+
+Options:
+
+```powershell
+python prototypes/modern_library.py --include-missing
+python prototypes/modern_library.py --database "D:\Data\sss-library.sqlite3"
+python prototypes/modern_library.py --empty
+```
+
+If no stored games exist, the runner shows the original mock data unless `--empty` is supplied.
 
 CustomTkinter remains optional until Windows/Linux rendering, DPI behavior, startup time, and packaging impact are accepted.
 
@@ -34,11 +57,12 @@ CustomTkinter remains optional until Windows/Linux rendering, DPI behavior, star
 - Are safety and rollback states clear?
 - Do accent choices remain useful without reducing contrast?
 - Does the interface still feel calm when many games need review?
+- Do real stored titles, sources, status, and sizes fit naturally?
 
-## Next Steps After Acceptance
+## Remaining Production Integration
 
-1. Replace mock rows with controller-provided view models.
-2. Connect stable IDs through `SelectionState`.
-3. Connect progress through `JobRecord` and `BatchSummary`.
-4. Connect previews through `TransactionPlan`.
-5. Keep apply actions disabled until the production transaction service is fully integrated.
+1. Replace prototype-local selection with `SelectionState`.
+2. Connect `BackgroundJobQueue` progress and summaries.
+3. Connect `BulkArtworkCoordinator` through the Find Art action.
+4. Connect transaction history to the Backups view.
+5. Keep apply actions disabled until provider review and production UI integration are complete.
