@@ -54,6 +54,9 @@ jobs:
       - name: Run desktop transaction wiring tests
         run: python tests/app_transaction_wiring_test.py
 
+      - name: Run transaction history tests
+        run: python tests/transaction_history_test.py
+
       - name: Run artwork image validation tests
         run: python tests/image_validation_test.py
 
