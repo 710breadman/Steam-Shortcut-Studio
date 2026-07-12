@@ -115,6 +115,14 @@ def test_source_scan_adapters_cover_controller_backed_sources() -> None:
 
     assert [adapter.source_name for adapter in adapters] == ["epic", "steam", "folder"]
 
+    selected = source_scan_adapters(
+        steam_path=Path(r"C:\Steam"),
+        collection_root=Path(r"D:\Games"),
+        sources={"steam", "folder"},
+    )
+
+    assert [adapter.source_name for adapter in selected] == ["steam", "folder"]
+
 
 def test_library_selection_helpers_use_stable_ids() -> None:
     first = game_from_library_row(_row("one", "One"))

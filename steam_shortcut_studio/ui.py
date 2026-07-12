@@ -1702,6 +1702,9 @@ class MainWindow(tk.Tk):
         self.sort_preset_combo.pack(side=tk.LEFT, padx=(0, 10))
         self.sort_preset_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_sort_preset())
         ToolTip(self.sort_preset_combo, "Use common sort recipes, or click column headers for one-off sorting.")
+        refresh_selected_button = ttk.Button(table_actions, text="Refresh Selected Sources", command=self.scan_selected_persistent_sources)
+        refresh_selected_button.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(refresh_selected_button, "Rescan only the launcher/source types represented by selected persistent library rows.")
         ttk.Label(table_actions, textvariable=self.bulk_status_var, style="Subtle.TLabel").pack(side=tk.RIGHT)
         ttk.Label(table_actions, text="Right-click headers for columns.", style="Subtle.TLabel").pack(side=tk.LEFT, padx=(8, 0))
         self.games_tree = ttk.Treeview(parent, columns=GAME_COLUMNS, show="headings", selectmode="browse")
@@ -2345,6 +2348,41 @@ class MainWindow(tk.Tk):
             self.library_scan_job_ids.add(job.job_id)
             self.logger.info("Queued persistent %s source scan: %s", adapter.source_name, job.job_id)
         self.status_var.set(f"Queued {len(adapters)} persistent source scan(s).")
+        self.set_busy_controls()
+        self._schedule_library_controller_poll()
+
+    def scan_selected_persistent_sources(self) -> None:
+        self.save_current_detail()
+        self.save_settings_from_ui(log=False)
+        sources = set(self.library_controller.selected_sources())
+        if not sources:
+            messagebox.showinfo(__app_name__, "Select stored library rows before refreshing selected sources.")
+            return
+        steam_text = self.steam_path_var.get().strip()
+        root_text = self.collection_path_var.get().strip()
+        adapters = source_scan_adapters(
+            steam_path=steam_text or None,
+            collection_root=root_text or None,
+            include_epic=True,
+            sources=sources,
+        )
+        unavailable = sorted(sources - {adapter.source_name for adapter in adapters})
+        if unavailable:
+            self.logger.info(
+                "Selected source scan skipped unavailable source(s): %s",
+                ", ".join(unavailable),
+            )
+        if not adapters:
+            messagebox.showinfo(
+                __app_name__,
+                "Selected rows need a configured Steam folder or game collection folder before their source can be refreshed.",
+            )
+            return
+        for adapter in adapters:
+            job = self.library_controller.scan_source(adapter)
+            self.library_scan_job_ids.add(job.job_id)
+            self.logger.info("Queued selected persistent %s source scan: %s", adapter.source_name, job.job_id)
+        self.status_var.set(f"Queued {len(adapters)} selected source scan(s).")
         self.set_busy_controls()
         self._schedule_library_controller_poll()
 

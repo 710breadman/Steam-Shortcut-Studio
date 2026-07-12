@@ -184,6 +184,12 @@ class LibraryController:
             selected = self.selection.selected_ids
             return tuple(row for row in self._rows if row.item_id in selected)
 
+    def selected_sources(self) -> tuple[str, ...]:
+        with self._lock:
+            selected = self.selection.selected_ids
+            sources = {row.source for row in self._rows if row.item_id in selected}
+            return tuple(sorted(sources))
+
     @staticmethod
     def _scan_result_payload(execution: PersistedSourceScan) -> dict[str, object]:
         snapshot = execution.snapshot

@@ -90,6 +90,7 @@ def test_controller_builds_immutable_effective_rows_and_selection() -> None:
             assert [row.item_id for row in controller.selected_rows()] == [
                 customized.stable_id
             ]
+            assert controller.selected_sources() == ("epic",)
 
             controller.select_all()
             assert controller.snapshot().selected_count == 3

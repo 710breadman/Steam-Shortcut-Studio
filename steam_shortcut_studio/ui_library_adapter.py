@@ -202,12 +202,18 @@ def source_scan_adapters(
     steam_path: Path | str | None = None,
     collection_root: Path | str | None = None,
     include_epic: bool = True,
+    sources: set[str] | frozenset[str] | None = None,
 ) -> tuple[SourceAdapter, ...]:
+    allowed = {source.casefold() for source in sources} if sources is not None else None
+
+    def enabled(source_name: str) -> bool:
+        return allowed is None or source_name.casefold() in allowed
+
     adapters: list[SourceAdapter] = []
-    if include_epic:
+    if include_epic and enabled("epic"):
         adapters.append(EpicManifestAdapter())
-    if steam_path:
+    if steam_path and enabled("steam"):
         adapters.append(SteamLibraryAdapter(steam_path))
-    if collection_root:
+    if collection_root and enabled("folder"):
         adapters.append(FolderScannerAdapter(collection_root))
     return tuple(adapters)
