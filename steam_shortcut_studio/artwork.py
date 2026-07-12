@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import mimetypes
-import shutil
 import urllib.error
 import urllib.parse
 from dataclasses import replace
-from datetime import datetime
 from pathlib import Path
 
+from .artwork_transactions import ArtworkWriteRequest, apply_artwork_set_transaction
 from .http_client import open_url, request_with_headers
 from .models import ArtworkAsset, DetectedGame, SteamProfile
 from .steam_shortcuts import grid_appid, shortcut_from_game
@@ -88,34 +87,6 @@ def _target_names(appid: int, asset: ArtworkAsset) -> list[str]:
     if asset.kind == "wide":
         return [f"{sid}{ext}"]
     return [_target_name(appid, asset)]
-
-
-def _backup_existing(path: Path) -> None:
-    if not path.exists():
-        return
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    backup = path.with_name(f"{path.name}.{timestamp}.bak")
-    shutil.copy2(path, backup)
-
-
-def _replace_artwork_file(source: Path, target: Path) -> bool:
-    source_resolved = source.resolve()
-    target_resolved = target.resolve()
-    if source_resolved == target_resolved:
-        return False
-    target.parent.mkdir(parents=True, exist_ok=True)
-    for extension in ARTWORK_EXTENSIONS:
-        variant = target.with_suffix(extension)
-        try:
-            if variant.exists() and variant.resolve() != source_resolved:
-                _backup_existing(variant)
-                if variant != target:
-                    variant.unlink()
-        except OSError:
-            continue
-    _backup_existing(target)
-    shutil.copy2(source, target)
-    return True
 
 
 def artwork_appid_for_game(game: DetectedGame) -> int | None:
@@ -207,21 +178,55 @@ def artwork_assets_for_steam_slots(game: DetectedGame) -> list[ArtworkAsset]:
     return assets
 
 
-def copy_game_artwork_to_steam(game: DetectedGame, profile: SteamProfile) -> list[Path]:
+def plan_game_artwork_transaction(
+    game: DetectedGame,
+    profile: SteamProfile,
+) -> tuple[list[ArtworkWriteRequest], list[Path]]:
+    """Build the complete write/removal plan without changing Steam files."""
+
     appid = artwork_appid_for_game(game)
     if appid is None:
-        return []
-    profile.grid_dir.mkdir(parents=True, exist_ok=True)
-    copied: list[Path] = []
+        return [], []
+
+    writes: list[ArtworkWriteRequest] = []
+    removals: list[Path] = []
+    seen_removals: set[Path] = set()
+
     for asset in artwork_assets_for_steam_slots(game):
+        source = asset.local_path.resolve(strict=True)
         for target_name in _target_names(appid, asset):
-            target = profile.grid_dir / target_name
-            try:
-                if _replace_artwork_file(asset.local_path, target):
-                    copied.append(target)
-            except OSError:
+            target = (profile.grid_dir / target_name).resolve(strict=False)
+            if source == target:
                 continue
-    return copied
+            writes.append(
+                ArtworkWriteRequest(
+                    source_path=source,
+                    target_path=target,
+                    slot=asset.kind,
+                )
+            )
+            for extension in sorted(ARTWORK_EXTENSIONS):
+                variant = target.with_suffix(extension).resolve(strict=False)
+                if variant == target or variant == source or not variant.is_file():
+                    continue
+                if variant not in seen_removals:
+                    seen_removals.add(variant)
+                    removals.append(variant)
+
+    return writes, removals
+
+
+def copy_game_artwork_to_steam(game: DetectedGame, profile: SteamProfile) -> list[Path]:
+    writes, removals = plan_game_artwork_transaction(game, profile)
+    if not writes and not removals:
+        return []
+
+    outcome = apply_artwork_set_transaction(writes, remove_paths=removals)
+    return [
+        Path(operation.target_path)
+        for operation in outcome.operations
+        if operation.action == "write" and operation.status == "committed"
+    ]
 
 
 def copy_all_artwork_to_steam(games: list[DetectedGame], profile: SteamProfile) -> list[Path]:
