@@ -206,6 +206,7 @@ Implemented:
 - [x] Poll `BackgroundJobQueue` events from the UI thread for source-scan jobs
 - [x] Production table exposes persistent source, platform/size, and status columns for controller-backed rows
 - [x] Persistent row checkbox and selection-menu actions mutate `SelectionState` by stable library ID
+- [x] Shift-clicking persistent row checkboxes selects visible stable-ID ranges without touching hidden rows
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
@@ -311,6 +312,7 @@ Latest local integration evidence, 2026-07-12:
 - Ran the full local Windows suite listed in `Validation`; all passed
 - Added production table columns for persistent source/platform/status data, migrated legacy saved column preferences to include them, and added tests plus CI steps for settings/UI adapter/controller coverage
 - Routed persistent table selection changes through stable library IDs and mirrored `SelectionState` back to displayed rows
+- Added stable-ID visible-range selection for persistent library checkbox rows
 
 ## Known Risks
 
@@ -327,7 +329,7 @@ Connect the production modern library table and selected-item actions incrementa
 
 Next controller-backed UI work:
 
-1. Add Shift/Ctrl range/additive gestures for persistent library rows using stable IDs.
+1. Add keyboard-driven persistent-row selection actions using stable IDs.
 2. Preserve stored-row read-only behavior in all Steam write paths.
 3. Surface source-scan review/failure details without letting worker threads touch widgets.
 4. Keep the legacy scan/write workflows available during migration.

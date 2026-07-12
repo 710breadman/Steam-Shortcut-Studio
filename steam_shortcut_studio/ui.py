@@ -55,6 +55,7 @@ from .ui_library_adapter import (
     apply_library_selection_to_games,
     games_from_library_snapshot,
     is_persistent_library_game,
+    library_item_ids_between,
     library_item_ids_for_games,
     library_item_id_for_game,
     library_launch_target_for_game,
@@ -116,6 +117,7 @@ ARTWORK_KINDS = ("grid", "wide", "hero", "logo", "icon")
 ARTWORK_SEARCH_CACHE_VERSION = 3
 STEAMGRIDDB_API_URL = "https://www.steamgriddb.com/profile/preferences"
 RAWG_API_URL = "https://rawg.io/apidocs"
+TK_SHIFT_MASK = 0x0001
 APP_ICON_PNG = "sss.png"
 APP_ICON_ICO = "sss.ico"
 DEFAULT_COMPAT_TOOL_LABEL = "Steam default (clear forced tool)"
@@ -800,6 +802,7 @@ class MainWindow(tk.Tk):
         self.artwork_job_keys: set[str] = set()
         self.library_scan_job_ids: set[str] = set()
         self.library_scan_poll_after_id: str | None = None
+        self.library_selection_anchor_id = ""
         self.artwork_job_status: dict[int, str] = {}
         self.manual_artwork_slots: set[tuple[int, str]] = set()
         self.detail_dirty = False
@@ -2983,7 +2986,17 @@ class MainWindow(tk.Tk):
             item_id = library_item_id_for_game(game)
             if item_id:
                 selected_ids = self.library_controller.snapshot().selected_ids
-                self.set_library_items_selected((item_id,), item_id not in selected_ids)
+                if event.state & TK_SHIFT_MASK:
+                    item_ids = library_item_ids_between(
+                        self.games,
+                        self.displayed_game_indices,
+                        self.library_selection_anchor_id,
+                        item_id,
+                    )
+                    self.set_library_items_selected(item_ids, True)
+                else:
+                    self.set_library_items_selected((item_id,), item_id not in selected_ids)
+                self.library_selection_anchor_id = item_id
             else:
                 game.selected = not game.selected
             self.sync_library_selection_state()

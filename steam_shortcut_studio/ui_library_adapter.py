@@ -88,6 +88,27 @@ def library_item_ids_for_games(
     return tuple(ids)
 
 
+def library_item_ids_between(
+    games: list[DetectedGame],
+    ordered_indices: list[int],
+    anchor_id: str,
+    target_id: str,
+) -> tuple[str, ...]:
+    positions: dict[str, int] = {}
+    ids: list[str] = []
+    for position, index in enumerate(ordered_indices):
+        if 0 <= index < len(games):
+            item_id = library_item_id_for_game(games[index])
+            if item_id:
+                positions.setdefault(item_id, position)
+                ids.append(item_id)
+    if anchor_id not in positions or target_id not in positions:
+        return (target_id,) if target_id else ()
+    start = min(positions[anchor_id], positions[target_id])
+    end = max(positions[anchor_id], positions[target_id])
+    return tuple(ids[start : end + 1])
+
+
 def apply_library_selection_to_games(
     games: list[DetectedGame],
     selected_ids: frozenset[str],

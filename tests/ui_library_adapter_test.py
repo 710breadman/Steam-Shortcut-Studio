@@ -12,6 +12,7 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     LIBRARY_SIZE_META,
     apply_library_selection_to_games,
     game_from_library_row,
+    library_item_ids_between,
     library_item_ids_for_games,
     library_platform_for_game,
     library_size_for_game,
@@ -117,12 +118,24 @@ def test_source_scan_adapters_cover_controller_backed_sources() -> None:
 def test_library_selection_helpers_use_stable_ids() -> None:
     first = game_from_library_row(_row("one", "One"))
     second = game_from_library_row(_row("two", "Two"))
+    third = game_from_library_row(_row("three", "Three"))
 
-    assert library_item_ids_for_games([first, second], range(1)) == ("one",)
+    games = [first, second, third]
+    assert library_item_ids_for_games(games, range(1)) == ("one",)
+    assert library_item_ids_between(games, [0, 1, 2], "one", "three") == (
+        "one",
+        "two",
+        "three",
+    )
+    assert library_item_ids_between(games, [2, 1, 0], "three", "one") == (
+        "three",
+        "two",
+        "one",
+    )
 
-    apply_library_selection_to_games([first, second], frozenset({"two"}))
+    apply_library_selection_to_games(games, frozenset({"two"}))
 
-    assert [first.selected, second.selected] == [False, True]
+    assert [first.selected, second.selected, third.selected] == [False, True, False]
 
 
 if __name__ == "__main__":
