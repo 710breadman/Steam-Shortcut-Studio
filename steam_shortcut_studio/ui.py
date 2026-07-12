@@ -24,7 +24,9 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
+from .artwork_policy import ArtworkEvidence
 from .artwork_sources import ARTWORK_SOURCE_LABELS, rawg_artwork_assets, wikimedia_artwork_assets
+from .bulk_artwork import ArtworkSearchMode, ArtworkSearchOutcome, BulkArtworkCoordinator
 from .jobs import TERMINAL_JOB_STATES
 from .library_controller import LibraryController, LibraryControllerEvent
 from .library_store import LibraryStore
@@ -807,6 +809,7 @@ class MainWindow(tk.Tk):
         self.library_scan_progress: dict[str, dict[str, object]] = {}
         self.library_retry_job_ids: set[str] = set()
         self.library_selection_anchor_id = ""
+        self.persistent_artwork_job_ids: set[str] = set()
         self.artwork_job_status: dict[int, str] = {}
         self.manual_artwork_slots: set[tuple[int, str]] = set()
         self.detail_dirty = False
@@ -1708,6 +1711,9 @@ class MainWindow(tk.Tk):
         refresh_selected_button = ttk.Button(table_actions, text="Refresh Selected Sources", command=self.scan_selected_persistent_sources)
         refresh_selected_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(refresh_selected_button, "Rescan only the launcher/source types represented by selected persistent library rows.")
+        plan_art_button = ttk.Button(table_actions, text="Plan Selected Art", command=self.queue_persistent_artwork_searches)
+        plan_art_button.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(plan_art_button, "Queue selected persistent rows through the bulk artwork coordinator. Provider extraction is still pending.")
         retry_sources_button = ttk.Button(table_actions, text="Retry Source Reviews", command=self.retry_reviewed_source_scans)
         retry_sources_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(retry_sources_button, "Retry source refresh jobs that ended in review or failure.")
@@ -2079,7 +2085,7 @@ class MainWindow(tk.Tk):
     def cancel_current_job(self) -> None:
         active_controller_jobs = [
             job_id
-            for job_id in self.library_scan_job_ids
+            for job_id in (self.library_scan_job_ids | self.persistent_artwork_job_ids)
             if (record := self.library_controller.job_queue.get(job_id)) is not None
             and record.state not in TERMINAL_JOB_STATES
         ]
@@ -2098,7 +2104,7 @@ class MainWindow(tk.Tk):
         controller_active = any(
             (record := self.library_controller.job_queue.get(job_id)) is not None
             and record.state not in TERMINAL_JOB_STATES
-            for job_id in self.library_scan_job_ids
+            for job_id in (self.library_scan_job_ids | self.persistent_artwork_job_ids)
         )
         active = (self.active_job_count > 0 or controller_active) if busy is None else busy
         if hasattr(self, "cancel_button"):
@@ -2405,6 +2411,46 @@ class MainWindow(tk.Tk):
         self.set_busy_controls()
         self._schedule_library_controller_poll()
 
+    def queue_persistent_artwork_searches(self) -> None:
+        ordered_ids = list(library_item_ids_for_games(self.games, self.displayed_game_indices))
+        selected_ids = set(self.library_controller.snapshot().selected_ids)
+        selected_ordered_ids = [item_id for item_id in ordered_ids if item_id in selected_ids]
+        if not selected_ordered_ids:
+            messagebox.showinfo(__app_name__, "Select stored library rows before planning artwork.")
+            return
+
+        def provider_pending_searcher(item, requested_slots, token, report_progress):
+            token.raise_if_cancelled()
+            report_progress(0.5, f"Provider extraction pending for {item.title}")
+            return ArtworkSearchOutcome(
+                evidence=ArtworkEvidence(
+                    identity_score=0,
+                    set_coherence_score=0,
+                    source="provider-pending",
+                    reasons=("Provider extraction is not connected yet.",),
+                ),
+                found_slots=frozenset(),
+                provider="provider-pending",
+                details={"status": "provider_extraction_pending"},
+            )
+
+        submission = BulkArtworkCoordinator(self.library_controller.job_queue).submit_selected(
+            self.library_controller.selection,
+            ordered_ids,
+            self.library_controller.bulk_artwork_items(),
+            provider_pending_searcher,
+            mode=ArtworkSearchMode.ALL_UNLOCKED,
+        )
+        if not submission.jobs:
+            messagebox.showinfo(__app_name__, "No selected persistent artwork rows were available to queue.")
+            return
+        for job in submission.jobs:
+            self.persistent_artwork_job_ids.add(job.job_id)
+            self.set_persistent_artwork_status(job.item_id, "Queued artwork plan")
+        self.status_var.set(f"Queued {len(submission.jobs)} persistent artwork plan job(s).")
+        self.set_busy_controls()
+        self._schedule_library_controller_poll()
+
     def retry_reviewed_source_scans(self) -> None:
         retry_ids = [
             job_id
@@ -2461,7 +2507,7 @@ class MainWindow(tk.Tk):
         self.library_scan_poll_after_id = None
         for controller_event in self.library_controller.poll_events():
             self._handle_library_controller_event(controller_event)
-        if self._controller_scans_active():
+        if self._controller_scans_active() or self._persistent_artwork_jobs_active():
             self._schedule_library_controller_poll()
             self.set_busy_controls()
             return
@@ -2470,6 +2516,9 @@ class MainWindow(tk.Tk):
 
     def _handle_library_controller_event(self, controller_event: LibraryControllerEvent) -> None:
         event = controller_event.event
+        if event.job_id in self.persistent_artwork_job_ids:
+            self._handle_persistent_artwork_event(controller_event)
+            return
         if event.job_id not in self.library_scan_job_ids:
             return
         source = str(event.result.get("source") or event.item_id.removeprefix("source:"))
@@ -2496,6 +2545,29 @@ class MainWindow(tk.Tk):
             return
         if event.message:
             self.status_var.set(source_scan_progress_summary(self.library_scan_progress))
+
+    def _persistent_artwork_jobs_active(self) -> bool:
+        return any(
+            (record := self.library_controller.job_queue.get(job_id)) is not None
+            and record.state not in TERMINAL_JOB_STATES
+            for job_id in self.persistent_artwork_job_ids
+        )
+
+    def _handle_persistent_artwork_event(self, controller_event: LibraryControllerEvent) -> None:
+        event = controller_event.event
+        if event.state in TERMINAL_JOB_STATES:
+            requested = ", ".join(event.result.get("requested_slots", [])) if event.result else ""
+            decision = str(event.result.get("decision") or event.state.value) if event.result else event.state.value
+            status = f"Artwork {decision}"
+            if requested:
+                status += f" ({requested})"
+            self.set_persistent_artwork_status(event.item_id, status)
+            self.logger.info("Persistent artwork job %s finished: %s", event.job_id, status)
+            self.persistent_artwork_job_ids.discard(event.job_id)
+            self.status_var.set(status)
+            return
+        self.set_persistent_artwork_status(event.item_id, event.message or event.state.value)
+        self.status_var.set(event.message or event.state.value)
 
     def _finish_controller_source_scans(self) -> None:
         records = self._controller_scan_records()
@@ -3454,6 +3526,13 @@ class MainWindow(tk.Tk):
         game_index = self.game_index_for_object(game, fallback_index)
         if game_index is not None:
             self.refresh_game_row(game_index)
+
+    def set_persistent_artwork_status(self, item_id: str, status: str) -> None:
+        for index, game in enumerate(self.games):
+            if library_item_id_for_game(game) == item_id:
+                self.artwork_job_status[id(game)] = status
+                self.refresh_game_row(index)
+                return
 
     def clear_artwork_job_key(self, key: str) -> None:
         self.artwork_job_keys.discard(key)

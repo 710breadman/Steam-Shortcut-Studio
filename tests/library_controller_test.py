@@ -81,6 +81,9 @@ def test_controller_builds_immutable_effective_rows_and_selection() -> None:
             assert by_id[customized.stable_id].status == "customized"
             assert by_id[customized.stable_id].locked_slots == frozenset({"grid"})
             assert by_id[review.stable_id].status == "review"
+            artwork_items = controller.bulk_artwork_items()
+            assert artwork_items[customized.stable_id].locked_slots == frozenset({"grid"})
+            assert artwork_items[ready.stable_id].title == "Ready"
 
             controller.set_active(ready.stable_id)
             controller.set_selected(customized.stable_id, True)

@@ -214,6 +214,7 @@ Implemented:
 - [x] Source refresh jobs show per-source queued/running progress from UI-polled job events
 - [x] Reviewed/failed source refresh jobs can be retried through the controller queue
 - [x] Reviewed source refresh jobs can be cleared after handling
+- [x] Selected persistent rows can be queued through `BulkArtworkCoordinator` with provider extraction still gated off
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
@@ -327,6 +328,7 @@ Latest local integration evidence, 2026-07-12:
 - Added per-source progress summaries for queued/running source refresh jobs from immutable job events
 - Added `LibraryController.retry_scan` plus a production `Retry Source Reviews` action for source refresh jobs that ended in review or failure
 - Added `Clear Source Reviews` to dismiss remembered source refresh review/failure jobs after handling
+- Added `Plan Selected Art`, which maps selected persistent rows to `BulkArtworkItem` records and runs them through the existing coordinator without Steam writes or live provider coupling
 
 ## Known Risks
 
@@ -343,7 +345,7 @@ Connect the production modern library table and selected-item actions incrementa
 
 Next controller-backed UI work:
 
-1. Add persistent-row action wiring for metadata/artwork provider extraction.
+1. Replace the provider-pending artwork searcher with extracted real provider adapters and validated candidate conversion.
 2. Preserve stored-row read-only behavior in all Steam write paths.
 3. Add production bulk action controls for selected persistent rows.
 4. Keep the legacy scan/write workflows available during migration.

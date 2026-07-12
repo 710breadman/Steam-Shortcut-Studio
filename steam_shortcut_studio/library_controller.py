@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from .job_queue import BackgroundJobQueue, JobEvent, JobExecutionResult
 from .jobs import JobKind, JobRecord, JobState, TERMINAL_JOB_STATES
+from .bulk_artwork import BulkArtworkItem
 from .library_store import LibraryStore
 from .selection import SelectionState
 from .source_scans import PersistedSourceScan, SourceScanCoordinator
@@ -189,6 +190,17 @@ class LibraryController:
             selected = self.selection.selected_ids
             sources = {row.source for row in self._rows if row.item_id in selected}
             return tuple(sorted(sources))
+
+    def bulk_artwork_items(self) -> Mapping[str, BulkArtworkItem]:
+        with self._lock:
+            return {
+                row.item_id: BulkArtworkItem(
+                    item_id=row.item_id,
+                    title=row.title,
+                    locked_slots=row.locked_slots,
+                )
+                for row in self._rows
+            }
 
     @staticmethod
     def _scan_result_payload(execution: PersistedSourceScan) -> dict[str, object]:
