@@ -1,0 +1,37 @@
+name: Library Store Diagnostic
+
+on:
+  pull_request:
+  push:
+    branches:
+      - "agent/library-persistence"
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Capture library store test
+        shell: pwsh
+        run: |
+          python tests/library_store_test.py *> library-store.log
+          $code = $LASTEXITCODE
+          Get-Content library-store.log
+          Set-Content -Path library-store.exit -Value $code
+          exit 0
+      - name: Upload diagnostic output
+        uses: actions/upload-artifact@v4
+        with:
+          name: library-store-diagnostic
+          path: |
+            library-store.log
+            library-store.exit
+          if-no-files-found: error
+      - name: Fail when test failed
+        shell: pwsh
+        run: |
+          $code = [int](Get-Content library-store.exit)
+          if ($code -ne 0) { exit $code }
