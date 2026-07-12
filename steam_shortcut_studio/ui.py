@@ -24,9 +24,9 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
-from .artwork_policy import ArtworkEvidence
+from .artwork_provider_adapter import provider_pending_outcome
 from .artwork_sources import ARTWORK_SOURCE_LABELS, rawg_artwork_assets, wikimedia_artwork_assets
-from .bulk_artwork import ArtworkSearchMode, ArtworkSearchOutcome, BulkArtworkCoordinator
+from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
 from .jobs import TERMINAL_JOB_STATES
 from .library_controller import LibraryController, LibraryControllerEvent
 from .library_store import LibraryStore
@@ -2422,17 +2422,7 @@ class MainWindow(tk.Tk):
         def provider_pending_searcher(item, requested_slots, token, report_progress):
             token.raise_if_cancelled()
             report_progress(0.5, f"Provider extraction pending for {item.title}")
-            return ArtworkSearchOutcome(
-                evidence=ArtworkEvidence(
-                    identity_score=0,
-                    set_coherence_score=0,
-                    source="provider-pending",
-                    reasons=("Provider extraction is not connected yet.",),
-                ),
-                found_slots=frozenset(),
-                provider="provider-pending",
-                details={"status": "provider_extraction_pending"},
-            )
+            return provider_pending_outcome()
 
         submission = BulkArtworkCoordinator(self.library_controller.job_queue).submit_selected(
             self.library_controller.selection,
