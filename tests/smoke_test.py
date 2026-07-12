@@ -7,6 +7,8 @@ import json
 import logging
 from pathlib import Path
 
+from PIL import Image
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import steam_shortcut_studio.scanner as scanner_module
@@ -58,6 +60,16 @@ def write_fake_exe(path: Path, size: int = 1024 * 1024) -> None:
     data[0x98:0x9A] = (0x20B).to_bytes(2, "little")
     data[0x80 + 24 + 108 : 0x80 + 24 + 110] = (2).to_bytes(2, "little")
     path.write_bytes(data)
+
+
+def write_test_image(
+    path: Path,
+    *,
+    size: tuple[int, int] = (96, 64),
+    color: tuple[int, int, int] = (32, 96, 160),
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.new("RGB", size, color).save(path)
 
 
 def same_path(left: Path | None, right: Path) -> bool:
@@ -576,7 +588,7 @@ def test_native_steam_game_artwork_can_be_replaced_without_shortcuts() -> None:
         )
         image = root / "cache" / "hero.png"
         image.parent.mkdir(parents=True, exist_ok=True)
-        image.write_bytes(b"fake image")
+        write_test_image(image, size=(1920, 620))
         game = DetectedGame(
             title="Native Example",
             root_path=root / "Steam" / "steamapps" / "common" / "Native Example",
@@ -628,7 +640,7 @@ def test_grid_artwork_writes_both_steam_grid_slots() -> None:
         stale_wide.write_bytes(b"old wide")
         image = root / "cache" / "grid.png"
         image.parent.mkdir(parents=True, exist_ok=True)
-        image.write_bytes(b"new grid")
+        write_test_image(image, size=(600, 900))
         game = DetectedGame(
             title="Native Example",
             root_path=root / "Steam" / "steamapps" / "common" / "Native Example",
@@ -642,8 +654,8 @@ def test_grid_artwork_writes_both_steam_grid_slots() -> None:
         assert names == {"424242p.png", "424242.png", "424242_hero.png", "424242_icon.png"}
         assert not stale_portrait.exists()
         assert not stale_wide.exists()
-        assert (profile.grid_dir / "424242p.png").read_bytes() == b"new grid"
-        assert (profile.grid_dir / "424242.png").read_bytes() == b"new grid"
+        assert (profile.grid_dir / "424242p.png").read_bytes() == image.read_bytes()
+        assert (profile.grid_dir / "424242.png").read_bytes() == image.read_bytes()
 
 
 def test_user_edited_notes_are_preserved_when_written() -> None:
@@ -673,7 +685,7 @@ def test_artwork_slot_fallbacks_cover_big_picture_slots() -> None:
         root = Path(tmp)
         image = root / "cache" / "grid.png"
         image.parent.mkdir(parents=True, exist_ok=True)
-        image.write_bytes(b"new grid")
+        write_test_image(image, size=(600, 900))
         game = DetectedGame(title="Example", root_path=root / "Example", selected_exe=root / "Example" / "Example.exe")
         game.artwork.grid = ArtworkAsset(kind="grid", asset_id="grid", url="https://example.invalid/grid.png", width=600, height=900, local_path=image)
         slots = artwork_assets_for_steam_slots(game)
