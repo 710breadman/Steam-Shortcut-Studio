@@ -12,6 +12,7 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     games_from_library_snapshot,
     is_persistent_library_game,
     library_launch_target_for_game,
+    source_scan_adapters,
 )
 
 
@@ -90,8 +91,18 @@ def test_snapshot_selection_is_preserved() -> None:
     assert [game.selected for game in games] == [False, True]
 
 
+def test_source_scan_adapters_cover_controller_backed_sources() -> None:
+    adapters = source_scan_adapters(
+        steam_path=Path(r"C:\Steam"),
+        collection_root=Path(r"D:\Games"),
+    )
+
+    assert [adapter.source_name for adapter in adapters] == ["epic", "steam", "folder"]
+
+
 if __name__ == "__main__":
     test_library_row_maps_to_read_only_legacy_game()
     test_native_steam_library_row_does_not_become_writable_native_game()
     test_snapshot_selection_is_preserved()
+    test_source_scan_adapters_cover_controller_backed_sources()
     print("UI library adapter tests passed.")

@@ -202,13 +202,14 @@ Implemented:
 - [x] Tk-free persistent `LibraryController` foundation
 - [x] Legacy UI can load persistent library rows through the controller
 - [x] Stored library rows remain read-only in the legacy Steam write path
+- [x] Legacy UI can queue Epic, Steam, and folder source scans through `LibraryController`
+- [x] Poll `BackgroundJobQueue` events from the UI thread for source-scan jobs
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
 - [ ] Extract transaction/history controller
 - [ ] Build production modern library table using `LibraryStore`
 - [ ] Use `SelectionState` instead of widget-local IDs
-- [ ] Poll `BackgroundJobQueue` events from the UI thread
 - [ ] Connect the Backups view to transaction history
 - [ ] Connect the artwork review workspace to `BulkArtworkCoordinator`
 - [ ] Keep legacy UI operational during incremental migration
@@ -301,6 +302,10 @@ Latest local integration evidence, 2026-07-12:
 - Ran every command listed above on Windows; all passed
 - Added `steam_shortcut_studio/ui_library_adapter.py` and a legacy `Library` action that loads stored rows through `LibraryController`
 - Verified stored library rows do not become shortcut/artwork write candidates in the legacy adapter
+- Created local `codex/merge-issues` and ancestry-merged stale `agent/*` branch tips with the `ours` strategy because their trees were older than `origin/main`
+- Added a legacy `Sync Sources` action that queues Epic, Steam, and configured folder scans through `LibraryController.scan_source`
+- Added Tk-thread polling for controller `BackgroundJobQueue` events, persistent-row refresh after scan terminal/review events, and cancellation wiring for active source scans
+- Ran the full local Windows suite listed in `Validation`; all passed
 
 ## Known Risks
 
@@ -313,17 +318,15 @@ Latest local integration evidence, 2026-07-12:
 
 ## Exact Next Action
 
-Extend the `LibraryController` bridge from read-only loading to controller-owned scan actions without changing Steam write behavior or replacing the full UI at once.
+Connect the production modern library table and selected-item actions incrementally on top of the controller-backed source scan bridge.
 
-Next controller-backed adapter work:
+Next controller-backed UI work:
 
-1. Route Epic, Steam, and folder source scans through `LibraryController.scan_source`.
-2. Poll `BackgroundJobQueue` events from the Tk thread.
-3. Refresh persistent rows after scan completion or review-needed events.
-4. Keeps the existing UI operational.
-5. Adds no new Steam writes.
-
-After that boundary is green, connect the modern library table and selected-item actions incrementally.
+1. Replace the legacy library-row table surface with a modern multi-select table backed by `LibraryController.snapshot`.
+2. Preserve stored-row read-only behavior in all Steam write paths.
+3. Surface source-scan review/failure details without letting worker threads touch widgets.
+4. Keep the legacy scan/write workflows available during migration.
+5. Add no new Steam writes.
 
 ## Next Codex Prompt
 

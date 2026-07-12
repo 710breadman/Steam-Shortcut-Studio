@@ -4,6 +4,10 @@ from pathlib import Path
 
 from .library_controller import LibraryRow, LibrarySnapshot
 from .models import DetectedGame, GameMetadata
+from .sources.base import SourceAdapter
+from .sources.epic import EpicManifestAdapter
+from .sources.local import FolderScannerAdapter
+from .sources.steam import SteamLibraryAdapter
 
 
 LIBRARY_ITEM_ID_META = "library_item_id"
@@ -64,3 +68,19 @@ def games_from_library_snapshot(snapshot: LibrarySnapshot) -> list[DetectedGame]
         game_from_library_row(row, selected=row.item_id in selected_ids)
         for row in snapshot.rows
     ]
+
+
+def source_scan_adapters(
+    *,
+    steam_path: Path | str | None = None,
+    collection_root: Path | str | None = None,
+    include_epic: bool = True,
+) -> tuple[SourceAdapter, ...]:
+    adapters: list[SourceAdapter] = []
+    if include_epic:
+        adapters.append(EpicManifestAdapter())
+    if steam_path:
+        adapters.append(SteamLibraryAdapter(steam_path))
+    if collection_root:
+        adapters.append(FolderScannerAdapter(collection_root))
+    return tuple(adapters)

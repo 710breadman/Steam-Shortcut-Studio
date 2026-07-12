@@ -25,7 +25,8 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_sources import ARTWORK_SOURCE_LABELS, rawg_artwork_assets, wikimedia_artwork_assets
-from .library_controller import LibraryController
+from .jobs import TERMINAL_JOB_STATES
+from .library_controller import LibraryController, LibraryControllerEvent
 from .library_store import LibraryStore
 from .metadata import (
     build_metadata_notes,
@@ -55,6 +56,7 @@ from .ui_library_adapter import (
     is_persistent_library_game,
     library_item_id_for_game,
     library_launch_target_for_game,
+    source_scan_adapters,
 )
 from .vdf import VdfParseError
 
@@ -779,6 +781,8 @@ class MainWindow(tk.Tk):
         self.artwork_render_after_id: str | None = None
         self.artwork_render_token = 0
         self.artwork_job_keys: set[str] = set()
+        self.library_scan_job_ids: set[str] = set()
+        self.library_scan_poll_after_id: str | None = None
         self.artwork_job_status: dict[int, str] = {}
         self.manual_artwork_slots: set[tuple[int, str]] = set()
         self.detail_dirty = False
@@ -797,6 +801,7 @@ class MainWindow(tk.Tk):
         self._build_style()
         self._build_ui()
         self.after(120, self._poll_logs)
+        self.after(180, self._poll_library_controller_events)
         self.after(150, self._load_initial_state)
 
     def apply_app_icon(self) -> None:
@@ -1228,9 +1233,14 @@ class MainWindow(tk.Tk):
         preview_button = ttk.Button(actions, text="Preview", width=action_width, command=self.preview_write)
         preview_button.grid(row=0, column=1, padx=(0, 8))
         ToolTip(preview_button, "Show exactly what will be added or updated before touching Steam files.")
-        library_button = ttk.Button(actions, text="Library", width=action_width, command=self.load_persistent_library)
-        library_button.grid(row=0, column=2, sticky="w")
+        source_actions = ttk.Frame(actions)
+        source_actions.grid(row=0, column=2, sticky="w")
+        library_button = ttk.Button(source_actions, text="Library", width=action_width, command=self.load_persistent_library)
+        library_button.grid(row=0, column=0, padx=(0, 8))
         ToolTip(library_button, "Load the app-owned persistent library through the production controller.")
+        sync_sources_button = ttk.Button(source_actions, text="Sync Sources", width=action_width, command=self.scan_persistent_sources)
+        sync_sources_button.grid(row=0, column=1)
+        ToolTip(sync_sources_button, "Scan Epic, Steam, and the chosen folder into the app-owned persistent library through the production controller.")
         write_button = ttk.Button(actions, text="Write to Steam", width=action_width, style="Accent.TButton", command=self.write_to_steam)
         write_button.grid(row=0, column=3, sticky="e", padx=(8, 8))
         ToolTip(write_button, "Closes running Steam when needed, writes shortcuts, artwork, and simple notes with backups, then reopens Steam only if this app closed it.")
@@ -2027,17 +2037,30 @@ class MainWindow(tk.Tk):
             raise JobCancelled("Cancelled by user.")
 
     def cancel_current_job(self) -> None:
-        if not self.active_job_count:
+        active_controller_jobs = [
+            job_id
+            for job_id in self.library_scan_job_ids
+            if (record := self.library_controller.job_queue.get(job_id)) is not None
+            and record.state not in TERMINAL_JOB_STATES
+        ]
+        if not self.active_job_count and not active_controller_jobs:
             return
         for event in tuple(self.cancel_events):
             event.set()
+        for job_id in active_controller_jobs:
+            self.library_controller.job_queue.cancel(job_id)
         self.status_var.set("Cancel requested. Stopping at the next safe checkpoint...")
         self.logger.info("Cancel requested by user.")
         if hasattr(self, "cancel_button"):
             self.cancel_button.configure(state=tk.DISABLED)
 
     def set_busy_controls(self, busy: bool | None = None) -> None:
-        active = self.active_job_count > 0 if busy is None else busy
+        controller_active = any(
+            (record := self.library_controller.job_queue.get(job_id)) is not None
+            and record.state not in TERMINAL_JOB_STATES
+            for job_id in self.library_scan_job_ids
+        )
+        active = (self.active_job_count > 0 or controller_active) if busy is None else busy
         if hasattr(self, "cancel_button"):
             self.cancel_button.configure(state=tk.NORMAL if active else tk.DISABLED)
 
@@ -2275,6 +2298,100 @@ class MainWindow(tk.Tk):
             games,
             f"Loaded {len(games)} stored library item(s).",
         )
+
+    def scan_persistent_sources(self) -> None:
+        self.save_current_detail()
+        self.save_settings_from_ui(log=False)
+        steam_text = self.steam_path_var.get().strip()
+        root_text = self.collection_path_var.get().strip()
+        adapters = source_scan_adapters(
+            steam_path=steam_text or None,
+            collection_root=root_text or None,
+            include_epic=True,
+        )
+        if not adapters:
+            messagebox.showwarning(__app_name__, "No persistent source scans are available.")
+            return
+        for adapter in adapters:
+            job = self.library_controller.scan_source(adapter)
+            self.library_scan_job_ids.add(job.job_id)
+            self.logger.info("Queued persistent %s source scan: %s", adapter.source_name, job.job_id)
+        self.status_var.set(f"Queued {len(adapters)} persistent source scan(s).")
+        self.set_busy_controls()
+        self._schedule_library_controller_poll()
+
+    def _schedule_library_controller_poll(self) -> None:
+        if self.library_scan_poll_after_id is None:
+            self.library_scan_poll_after_id = self.after(180, self._poll_library_controller_events)
+
+    def _controller_scan_records(self) -> list[Any]:
+        records: list[Any] = []
+        for job_id in self.library_scan_job_ids:
+            record = self.library_controller.job_queue.get(job_id)
+            if record is not None:
+                records.append(record)
+        return records
+
+    def _controller_scans_active(self) -> bool:
+        return any(record.state not in TERMINAL_JOB_STATES for record in self._controller_scan_records())
+
+    def _poll_library_controller_events(self) -> None:
+        self.library_scan_poll_after_id = None
+        for controller_event in self.library_controller.poll_events():
+            self._handle_library_controller_event(controller_event)
+        if self._controller_scans_active():
+            self._schedule_library_controller_poll()
+            self.set_busy_controls()
+            return
+        if self.library_scan_job_ids:
+            self._finish_controller_source_scans()
+
+    def _handle_library_controller_event(self, controller_event: LibraryControllerEvent) -> None:
+        event = controller_event.event
+        if event.job_id not in self.library_scan_job_ids:
+            return
+        source = str(event.result.get("source") or event.item_id.removeprefix("source:"))
+        if event.state in TERMINAL_JOB_STATES:
+            if controller_event.snapshot is not None:
+                self.apply_library_snapshot(controller_event.snapshot)
+            detected = event.result.get("detected_items")
+            issue_count = event.result.get("issue_count")
+            detail = f"{source} scan {event.state.value}"
+            if detected is not None:
+                detail += f": {detected} item(s)"
+            if issue_count:
+                detail += f", {issue_count} issue(s)"
+            if event.error:
+                detail += f" - {event.error}"
+            self.logger.info(detail)
+            self.status_var.set(detail)
+            return
+        if event.message:
+            self.status_var.set(event.message)
+
+    def _finish_controller_source_scans(self) -> None:
+        records = self._controller_scan_records()
+        succeeded = sum(1 for record in records if record.state.value == "succeeded")
+        needs_review = sum(1 for record in records if record.state.value == "needs_review")
+        failed = sum(1 for record in records if record.state.value == "failed")
+        cancelled = sum(1 for record in records if record.state.value == "cancelled")
+        total = len(records)
+        self.library_scan_job_ids.clear()
+        self.library_scan_poll_after_id = None
+        self.set_busy_controls()
+        self.progress.stop()
+        self.progress.configure(mode="indeterminate", value=0)
+        snapshot = self.library_controller.snapshot()
+        self.apply_library_snapshot(snapshot)
+        summary = f"Persistent source scans finished: {succeeded}/{total} complete"
+        if needs_review:
+            summary += f", {needs_review} review"
+        if failed:
+            summary += f", {failed} failed"
+        if cancelled:
+            summary += f", {cancelled} cancelled"
+        self.status_var.set(summary)
+        self.logger.info(summary)
 
     def scan_all_libraries(self) -> None:
         self.save_current_detail()
