@@ -1,99 +1,195 @@
 # Codex Start Here
 
-This is the execution entrypoint for repository-capable coding sessions.
+Read this file before changing Steam Shortcut Studio.
 
-## Read First
+## Current Reality
 
-Read these files in order:
+The project is past the initial safety and foundation stages.
 
-1. `docs/PRODUCT_ROADMAP.md`
-2. `docs/UI_UX_TARGET.md`
-3. `docs/SPRINT_MAP.md`
-4. `docs/SPRINT_STATUS.md`
+Already implemented and merged:
+
+- Transactional production `shortcuts.vdf` writes
+- Malformed-file blocking instead of silent replacement
+- Read-back verification and automatic rollback
+- Atomic production artwork-set writes
+- Image decoding, size limits, hashing, and perceptual duplicate support
+- Transaction and restore-point history
+- Stable selection state
+- Bounded background job queue
+- Selected-game artwork coordinator and match policy
+- Persistent SQLite library state
+- Conservative source-scan persistence
+- Tk-free immutable `LibraryController`
+- Read-only Epic Games Launcher manifest adapter
+- Read-only native Steam library adapter
+- Read-only loose/local folder adapter
+- Epic, Steam, and folder scan CLIs
+- Approved modern UI prototype using real stored library data
+
+Do not recreate these systems or route around them.
+
+## Read in This Order
+
+1. `docs/SPRINT_STATUS.md`
+2. `docs/PRODUCT_ROADMAP.md`
+3. `docs/UI_UX_TARGET.md`
+4. `docs/SPRINT_MAP.md`
 5. `docs/CURRENT_ARCHITECTURE.md`
 6. `docs/WRITE_PATH_AUDIT.md`
-7. `docs/ARTWORK_MATCH_POLICY.md`
-8. `docs/UI_FRAMEWORK_DECISION.md`
-9. `docs/DEVELOPMENT_SETUP.md`
+7. `docs/TRANSACTION_SERVICE_SPEC.md`
+8. `docs/ARTWORK_MATCH_POLICY.md`
+9. `docs/NATIVE_STEAM_FIELD_MATRIX.md`
+10. `docs/LAUNCHER_IMPORT_RESEARCH.md`
+11. `docs/CLI.md`
+12. `docs/UI_FRAMEWORK_DECISION.md`
+13. `docs/DEVELOPMENT_SETUP.md`
 
-## Current Mission
+Then inspect the current repository. Documentation describes intent; code and tests describe the actual current state.
 
-Complete the active sprint in `docs/SPRINT_STATUS.md` without skipping prerequisites.
+## Active Engineering Goal
 
-Do not start the full modern UI rewrite until the transaction and test foundations are complete.
+Work on **incremental production modern-library integration** under issues #4, #5, and #7.
 
-## Non-Negotiable Safety Rules
+The immediate milestone is to connect the existing `LibraryController` to the production UI without replacing the whole application at once:
 
-- Never modify game installation files.
-- Never test destructive behavior against the user's primary Steam profile.
-- Do not silently replace a malformed `shortcuts.vdf`.
-- Do not auto-apply weak, incomplete, conflicting, or manually locked artwork.
-- Preserve unknown Steam fields.
-- Back up before every Steam-owned write.
-- Read back and verify every Steam-owned write.
-- Roll back automatically when verification fails.
-- Keep UI-framework changes separate from Steam-write changes.
-- Do not mark work complete without test evidence.
+- Add a controller-backed library view adapter for the legacy UI.
+- Render immutable `LibraryRow` data using stable IDs.
+- Use `SelectionState` for active and bulk selection.
+- Poll `BackgroundJobQueue` events from the Tk thread.
+- Expose Epic, Steam, and folder scan actions through the controller.
+- Keep all current legacy capabilities available during migration.
+- Add no new Steam writes.
 
-## Existing Foundation
+After that boundary is proven, migrate the modern table and then connect real artwork providers to `BulkArtworkCoordinator`.
 
-The repository already contains UI-independent groundwork:
+## Required Safety Rules
 
-- `steam_shortcut_studio/selection.py`
-- `steam_shortcut_studio/jobs.py`
-- `steam_shortcut_studio/artwork_policy.py`
-- `tests/foundation_test.py`
-- `.github/workflows/ci.yml`
+- Do not modify game installation files.
+- Do not add direct Steam writes.
+- Do not bypass `shortcut_transactions.py` or `artwork_transactions.py`.
+- Do not reintroduce malformed-VDF replacement behavior.
+- Do not swallow artwork transaction failures and continue with a partial game set.
+- Do not let worker threads touch UI widgets.
+- Do not let partial or unavailable source scans mark stored games missing.
+- Do not discard manual overrides, artwork locks, or rejected matches during rescans.
+- Do not enable prototype Apply actions merely because the interface exists.
+- Keep risky native Steam fields read-only until their ownership and rollback behavior are proven.
 
-These are foundations, not final integrations. Extend them carefully rather than duplicating their concepts inside `ui.py`.
+## Existing Building Blocks
 
-## First Codex Session
-
-Use this sequence:
-
-```text
-1. Inspect repository and current branch.
-2. Run baseline validation from docs/DEVELOPMENT_SETUP.md.
-3. Record all failures in docs/SPRINT_STATUS.md.
-4. Confirm every Steam write call site against docs/WRITE_PATH_AUDIT.md.
-5. Finish missing Sprint 00 evidence and fixture plan.
-6. Do not change write behavior unless Sprint 00 acceptance criteria pass.
-7. Commit the audit separately from implementation work.
-```
-
-## Next Engineering Sequence
-
-After Sprint 00 passes:
+Use these instead of creating duplicates:
 
 ```text
-Sprint 01: transactional shortcut write service
-Sprint 02: transaction history and restore foundation
-Sprint 03: artwork staging, validation, and rollback
-Sprint 04: extract UI services/controllers
-Sprint 05: stable library identity and persistence
-Sprint 06: modern library table and multi-selection
-Sprint 07: background job queue
-Sprint 08: bulk scan and metadata
-Sprint 09: artwork validation and policy integration
-Sprint 10: Find Artwork for Selected
+steam_shortcut_studio/selection.py
+steam_shortcut_studio/jobs.py
+steam_shortcut_studio/job_queue.py
+steam_shortcut_studio/library_controller.py
+steam_shortcut_studio/library_store.py
+steam_shortcut_studio/source_scans.py
+steam_shortcut_studio/sources/base.py
+steam_shortcut_studio/sources/epic.py
+steam_shortcut_studio/sources/steam.py
+steam_shortcut_studio/sources/local.py
+steam_shortcut_studio/cli.py
+steam_shortcut_studio/source_cli.py
+steam_shortcut_studio/artwork_policy.py
+steam_shortcut_studio/bulk_artwork.py
+steam_shortcut_studio/image_validation.py
+steam_shortcut_studio/transactions.py
+steam_shortcut_studio/file_transactions.py
+steam_shortcut_studio/shortcut_transactions.py
+steam_shortcut_studio/artwork_transactions.py
+steam_shortcut_studio/transaction_history.py
 ```
 
-Do not skip directly to Sprint 10. The selection and policy models exist, but safe execution requires stable IDs, a real queue, validated images, and transaction boundaries.
+Modern UI references:
 
-## Required Session Report
+```text
+prototypes/modern_shell.py
+prototypes/modern_library.py
+docs/UI_UX_TARGET.md
+```
 
-At the end of every session, update `docs/SPRINT_STATUS.md` with:
+## Current Usable Read-Only Workflows
 
-- Sprint and task IDs
+```text
+python -m steam_shortcut_studio.cli scan-epic
+python -m steam_shortcut_studio.source_cli scan-steam --steam-root "C:\Program Files (x86)\Steam"
+python -m steam_shortcut_studio.source_cli scan-folder --root "D:\PC Games"
+python -m steam_shortcut_studio.cli list-library
+python -m pip install -r requirements-ui-prototype.txt
+python prototypes/modern_library.py
+```
+
+These scan commands write only the app-owned SQLite database. The prototype reads that database and does not write Steam.
+
+## Validation Expectations
+
+At minimum, run every suite touched by the change. Before completing a major integration PR, run the complete matrix represented in `.github/workflows/ci.yml` and `.github/workflows/source-cli.yml`.
+
+Core commands include:
+
+```text
+python -m compileall -q steam_shortcut_studio tests main.py
+python tests/smoke_test.py
+python tests/foundation_test.py
+python tests/transaction_test.py
+python tests/file_transaction_test.py
+python tests/shortcut_transaction_test.py
+python tests/app_transaction_wiring_test.py
+python tests/transaction_history_test.py
+python tests/job_queue_test.py
+python tests/bulk_artwork_test.py
+python tests/epic_source_test.py
+python tests/steam_folder_source_test.py
+python tests/library_store_test.py
+python tests/source_scan_test.py
+python tests/library_controller_test.py
+python tests/cli_test.py
+python tests/source_cli_test.py
+python tests/image_validation_test.py
+python tests/artwork_transaction_test.py
+python tests/artwork_live_transaction_test.py
+```
+
+Never mark work complete because code was written. Record commands and passing results in `docs/SPRINT_STATUS.md`.
+
+## Work Separation
+
+### Chat / Research
+
+- UX decisions and mockups
+- Launcher ownership/schema research
+- Native Steam field research
+- Acceptance criteria
+- Threat/failure analysis
+- Review of Codex diffs and CI evidence
+- Documentation and sprint decomposition
+
+### Codex Required
+
+- Incremental `ui.py` refactoring
+- Production controller/view integration
+- Provider extraction and integration
+- Production modern table and review workspace
+- Additional launcher database adapters
+- Running tests and failure injection
+- Packaging and platform validation
+
+### Mixed
+
+Chat defines behavior, risks, wording, and acceptance criteria. Codex implements and validates. Most remaining major work is mixed.
+
+## Required Session Output
+
+At the end of a coding session, update `docs/SPRINT_STATUS.md` with:
+
+- Scope completed
 - Files changed
 - Commands run
-- Test results
-- CI state
-- Risks and blockers
+- Test and CI results
+- Known limitations
+- New risks or blockers
 - Exact next action
 
-## Compact Codex Instruction
-
-```text
-Read CODEX_START_HERE.md + all linked docs. Use SPRINT_STATUS active sprint only. Run baseline. Small changes. Tests with behavior. Never touch game files. Steam writes need backup + readback + rollback. Weak art goes review. Update status with evidence. Stop on unknown Steam fields.
-```
+Keep commits small, reviewable, and reversible.
