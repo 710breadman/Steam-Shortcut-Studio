@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
 import urllib.error
 import urllib.parse
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
 from .artwork_transactions import ArtworkWriteRequest, apply_artwork_set_transaction
 from .http_client import open_url, request_with_headers
@@ -12,6 +14,8 @@ from .models import ArtworkAsset, DetectedGame, SteamProfile
 from .steam_shortcuts import grid_appid, shortcut_from_game
 
 ARTWORK_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".ico"}
+LOGGER = logging.getLogger(__name__)
+ArtworkCopyErrorHandler = Callable[[DetectedGame, Exception], None]
 
 
 def _extension_from_asset(asset: ArtworkAsset) -> str:
@@ -229,9 +233,27 @@ def copy_game_artwork_to_steam(game: DetectedGame, profile: SteamProfile) -> lis
     ]
 
 
-def copy_all_artwork_to_steam(games: list[DetectedGame], profile: SteamProfile) -> list[Path]:
+def copy_all_artwork_to_steam(
+    games: list[DetectedGame],
+    profile: SteamProfile,
+    *,
+    error_handler: ArtworkCopyErrorHandler | None = None,
+) -> list[Path]:
+    """Copy each selected game's artwork without one failure blocking later games.
+
+    Each individual game's artwork set remains atomic and reversible. A corrupt or
+    otherwise invalid asset rolls back only that game, then the batch continues so
+    unrelated selected games still receive their artwork.
+    """
+
     copied: list[Path] = []
     for game in games:
-        if game.selected and (game.is_managed_non_steam or game.is_native_steam_game):
+        if not game.selected or not (game.is_managed_non_steam or game.is_native_steam_game):
+            continue
+        try:
             copied.extend(copy_game_artwork_to_steam(game, profile))
+        except Exception as exc:
+            LOGGER.warning("Artwork update failed for %s; continuing batch: %s", game.display_title, exc)
+            if error_handler is not None:
+                error_handler(game, exc)
     return copied
