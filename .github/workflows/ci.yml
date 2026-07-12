@@ -60,6 +60,9 @@ jobs:
       - name: Run background job queue tests
         run: python tests/job_queue_test.py
 
+      - name: Run bulk artwork coordinator tests
+        run: python tests/bulk_artwork_test.py
+
       - name: Run artwork image validation tests
         run: python tests/image_validation_test.py
 
