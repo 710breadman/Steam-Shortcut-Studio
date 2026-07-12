@@ -1,0 +1,31 @@
+name: Apply Real Image Smoke Fixtures
+
+on:
+  push:
+    branches:
+      - "agent/live-atomic-artwork"
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: ${{ !contains(github.event.head_commit.message, 'Use real images in artwork smoke fixtures') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/live-atomic-artwork
+          fetch-depth: 0
+
+      - name: Patch legacy smoke image fixtures
+        run: python scripts/apply_smoke_image_fixture_patch.py
+
+      - name: Commit branch patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Use real images in artwork smoke fixtures"
+          git push origin HEAD:agent/live-atomic-artwork
