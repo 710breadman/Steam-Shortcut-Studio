@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import struct
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ from steam_shortcut_studio.file_transactions import FileTransactionVerificationE
 from steam_shortcut_studio.models import DetectedGame, SteamProfile
 from steam_shortcut_studio.shortcut_transactions import (
     ShortcutWriteBlockedError,
+    serialize_shortcuts,
     upsert_games_transactional,
 )
 from steam_shortcut_studio.steam_shortcuts import (
@@ -34,6 +36,26 @@ def make_profile(root: Path) -> SteamProfile:
         shortcuts_path=config / "shortcuts.vdf",
         grid_dir=config / "grid",
     )
+
+
+def write_shortcuts_with_uint64_appid(path: Path, record: ShortcutRecord) -> None:
+    """Write a valid shortcut whose 32-bit AppID uses a UINT64 VDF field.
+
+    Some third-party shortcut tools use this representation. Steam treats it as
+    the same unsigned 32-bit AppID that its own INT32 encoding represents.
+    """
+
+    data = serialize_shortcuts([record])
+    int32_marker = b"\x02appid\x00"
+    marker_offset = data.find(int32_marker)
+    if marker_offset < 0:
+        raise AssertionError("Serialized shortcut did not contain an INT32 appid field")
+    value_offset = marker_offset + len(int32_marker)
+    signed_value = struct.unpack_from("<i", data, value_offset)[0]
+    uint64_field = b"\x07appid\x00" + struct.pack("<Q", signed_value & 0xFFFFFFFF)
+    data = data[:marker_offset] + uint64_field + data[value_offset + 4 :]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
 
 
 class ShortcutTransactionTests(unittest.TestCase):
@@ -79,6 +101,45 @@ class ShortcutTransactionTests(unittest.TestCase):
             self.assertEqual(len(records), 2)
             self.assertEqual(records[0], unrelated)
             self.assertEqual(records[1].app_name, "Example")
+
+    def test_uint64_appid_roundtrip_does_not_false_fail_staging(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile = make_profile(root)
+            unrelated_exe = root / "Games" / "External" / "External.exe"
+            new_exe = root / "Games" / "New" / "New.exe"
+            write_fake_exe(unrelated_exe)
+            write_fake_exe(new_exe)
+            unsigned_appid = 0xF1234567
+            unrelated = ShortcutRecord(
+                appid=unsigned_appid,
+                app_name="External Tool Shortcut",
+                exe=f'"{unrelated_exe}"',
+                start_dir=f'"{unrelated_exe.parent}"',
+                tags=["ManualTag"],
+            )
+            write_shortcuts_with_uint64_appid(profile.shortcuts_path, unrelated)
+            loaded_before = load_shortcuts(profile.shortcuts_path)
+            self.assertEqual(loaded_before[0].appid, unsigned_appid)
+
+            game = DetectedGame(
+                title="New",
+                root_path=new_exe.parent,
+                selected_exe=new_exe,
+                selected=True,
+            )
+            result = upsert_games_transactional(
+                profile,
+                [game],
+                transaction_root=root / "transactions",
+            )
+
+            self.assertEqual((result.added, result.updated), (1, 0))
+            written = load_shortcuts(profile.shortcuts_path)
+            self.assertEqual(len(written), 2)
+            self.assertEqual(written[0].unsigned_appid, unsigned_appid)
+            self.assertEqual(written[0].app_name, unrelated.app_name)
+            self.assertEqual(written[1].app_name, "New")
 
     def test_update_preserves_user_managed_fields(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
