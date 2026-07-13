@@ -61,6 +61,13 @@ class ArtworkResultPersistence:
     rejected: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class ArtworkDecisionSummary:
+    item_count: int = 0
+    locked_slots: int = 0
+    rejected_matches: int = 0
+
+
 class LibraryController:
     """Tk-free library and source-scan boundary for legacy and modern UIs."""
 
@@ -196,6 +203,35 @@ class LibraryController:
             selected = self.selection.selected_ids
             sources = {row.source for row in self._rows if row.item_id in selected}
             return tuple(sorted(sources))
+
+    def artwork_decision_summary(self, item_ids: tuple[str, ...] | list[str] | None = None) -> ArtworkDecisionSummary:
+        with self._lock:
+            scoped_ids = tuple(item_ids) if item_ids is not None else tuple(self.selection.selected_ids)
+        locked = 0
+        rejected = 0
+        for item_id in scoped_ids:
+            locked += len(self.store.list_artwork_locks(item_id))
+            rejected += len(self.store.list_rejected_matches(item_id))
+        return ArtworkDecisionSummary(
+            item_count=len(scoped_ids),
+            locked_slots=locked,
+            rejected_matches=rejected,
+        )
+
+    def clear_rejected_artwork_matches(self, item_ids: tuple[str, ...] | list[str] | None = None) -> int:
+        with self._lock:
+            scoped_ids = tuple(item_ids) if item_ids is not None else tuple(self.selection.selected_ids)
+        cleared = 0
+        for item_id in scoped_ids:
+            for rejection in self.store.list_rejected_matches(item_id):
+                if self.store.clear_rejected_match(
+                    rejection.item_id,
+                    rejection.provider,
+                    rejection.slot,
+                    rejection.candidate_id,
+                ):
+                    cleared += 1
+        return cleared
 
     def bulk_artwork_items(self) -> Mapping[str, BulkArtworkItem]:
         with self._lock:

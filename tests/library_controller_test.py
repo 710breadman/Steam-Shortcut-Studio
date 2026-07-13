@@ -12,6 +12,7 @@ from steam_shortcut_studio.library_store import (  # noqa: E402
     ArtworkLock,
     LibraryStore,
     ManualOverrides,
+    RejectedMatch,
 )
 from steam_shortcut_studio.sources.base import (  # noqa: E402
     SourceIssue,
@@ -266,6 +267,47 @@ def test_artwork_job_results_persist_accepts_and_rejections() -> None:
             controller.close()
 
 
+def test_artwork_decision_summary_and_clear_rejections_use_selected_scope() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = LibraryStore(Path(tmp) / "library.sqlite3")
+        first = _item("first", "First")
+        second = _item("second", "Second")
+        store.replace_source_snapshot("epic", [first, second])
+        store.set_artwork_lock(ArtworkLock(item_id=first.stable_id, slot="grid", candidate_id="grid-one"))
+        store.reject_match(
+            RejectedMatch(
+                item_id=first.stable_id,
+                provider="fixture",
+                slot="hero",
+                candidate_id="hero-one",
+                reason="Wrong edition",
+            )
+        )
+        store.reject_match(
+            RejectedMatch(
+                item_id=second.stable_id,
+                provider="fixture",
+                slot="logo",
+                candidate_id="logo-one",
+                reason="Wrong game",
+            )
+        )
+        controller = LibraryController(store)
+        try:
+            controller.set_selected(first.stable_id, True)
+            summary = controller.artwork_decision_summary()
+            assert summary.item_count == 1
+            assert summary.locked_slots == 1
+            assert summary.rejected_matches == 1
+
+            cleared = controller.clear_rejected_artwork_matches()
+            assert cleared == 1
+            assert store.list_rejected_matches(first.stable_id) == []
+            assert len(store.list_rejected_matches(second.stable_id)) == 1
+        finally:
+            controller.close()
+
+
 if __name__ == "__main__":
     test_controller_builds_immutable_effective_rows_and_selection()
     test_successful_async_scan_persists_and_refreshes_rows()
@@ -273,4 +315,5 @@ if __name__ == "__main__":
     test_review_scan_can_be_retried_and_refreshes_rows()
     test_adapter_exception_becomes_isolated_failed_job()
     test_artwork_job_results_persist_accepts_and_rejections()
+    test_artwork_decision_summary_and_clear_rejections_use_selected_scope()
     print("Library controller tests passed.")

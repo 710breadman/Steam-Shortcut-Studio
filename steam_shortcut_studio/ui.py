@@ -1698,7 +1698,13 @@ class MainWindow(tk.Tk):
         ToolTip(refresh_selected_button, "Rescan only the launcher/source types represented by selected persistent library rows.")
         plan_art_button = ttk.Button(table_actions, text="Plan Selected Art", command=self.queue_persistent_artwork_searches)
         plan_art_button.pack(side=tk.LEFT, padx=(0, 10))
-        ToolTip(plan_art_button, "Queue selected persistent rows through the bulk artwork coordinator. Provider extraction is still pending.")
+        ToolTip(plan_art_button, "Queue selected persistent rows through real provider search and review-safe artwork planning.")
+        art_decisions_button = ttk.Button(table_actions, text="Art Decisions", command=self.show_selected_artwork_decisions)
+        art_decisions_button.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(art_decisions_button, "Show persisted accepted/rejected artwork provider decisions for selected persistent rows.")
+        clear_art_rejections_button = ttk.Button(table_actions, text="Clear Art Rejections", command=self.clear_selected_artwork_rejections)
+        clear_art_rejections_button.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(clear_art_rejections_button, "Clear persisted rejected artwork candidates for selected persistent rows after review.")
         retry_sources_button = ttk.Button(table_actions, text="Retry Source Reviews", command=self.retry_reviewed_source_scans)
         retry_sources_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(retry_sources_button, "Retry source refresh jobs that ended in review or failure.")
@@ -2509,6 +2515,36 @@ class MainWindow(tk.Tk):
         self.library_retry_job_ids.clear()
         self.status_var.set(f"Cleared {count} source review job(s)." if count else "No source review jobs to clear.")
         self.logger.info("Cleared %s source review job(s).", count)
+
+    def selected_persistent_item_ids(self) -> tuple[str, ...]:
+        selected = set(self.library_controller.snapshot().selected_ids)
+        visible = tuple(library_item_ids_for_games(self.games, self.displayed_game_indices))
+        return tuple(item_id for item_id in visible if item_id in selected)
+
+    def show_selected_artwork_decisions(self) -> None:
+        item_ids = self.selected_persistent_item_ids()
+        if not item_ids:
+            messagebox.showinfo(__app_name__, "Select stored library rows before reviewing artwork decisions.")
+            return
+        summary = self.library_controller.artwork_decision_summary(item_ids)
+        message = (
+            f"Selected rows: {summary.item_count}\n"
+            f"Accepted/locked slots: {summary.locked_slots}\n"
+            f"Rejected provider candidates: {summary.rejected_matches}"
+        )
+        self.status_var.set(
+            f"Artwork decisions: {summary.locked_slots} accepted/locked, {summary.rejected_matches} rejected."
+        )
+        messagebox.showinfo(__app_name__, message)
+
+    def clear_selected_artwork_rejections(self) -> None:
+        item_ids = self.selected_persistent_item_ids()
+        if not item_ids:
+            messagebox.showinfo(__app_name__, "Select stored library rows before clearing artwork rejections.")
+            return
+        cleared = self.library_controller.clear_rejected_artwork_matches(item_ids)
+        self.status_var.set(f"Cleared {cleared} rejected artwork candidate(s).")
+        self.logger.info("Cleared %s rejected artwork candidate(s) for %s selected item(s).", cleared, len(item_ids))
 
     def _schedule_library_controller_poll(self) -> None:
         if self.library_scan_poll_after_id is None:

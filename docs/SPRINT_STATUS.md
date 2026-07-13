@@ -340,6 +340,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after validated provider outcomes were wired; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added controller persistence for artwork job results: accepted candidates become stored artwork locks and rejected candidates become `RejectedMatch` rows in `LibraryStore`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork result persistence; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added production table controls to show persisted artwork decision counts and clear rejected artwork candidates for selected persistent rows
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork decision controls; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 
@@ -356,11 +358,10 @@ Connect the production modern library table and selected-item actions incrementa
 
 Next controller-backed UI work:
 
-1. Surface persisted artwork review decisions in production review controls.
+1. Add explicit accept/reject review actions for persisted artwork candidates.
 2. Preserve stored-row read-only behavior in all Steam write paths.
-3. Add production bulk action controls for selected persistent rows.
-4. Keep the legacy scan/write workflows available during migration.
-5. Add no new Steam writes.
+3. Keep the legacy scan/write workflows available during migration.
+4. Add no new Steam writes.
 
 ## Next Codex Prompt
 
