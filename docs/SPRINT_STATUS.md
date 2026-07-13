@@ -243,7 +243,7 @@ Implemented:
 - [ ] Build production modern library table using `LibraryStore`
 - [ ] Use `SelectionState` instead of widget-local IDs
 - [x] Connect the Backups view to transaction history
-- [ ] Connect the artwork review workspace to `BulkArtworkCoordinator`
+- [x] Connect the artwork review workspace to `BulkArtworkCoordinator`
 - [ ] Keep legacy UI operational during incremental migration
 
 ## Usable Commands Today
@@ -392,6 +392,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review skip controls; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `Retry Art Review` controls that requeue only selected pending review items through `BulkArtworkCoordinator`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review retry controls; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Marked the artwork review workspace as connected to `BulkArtworkCoordinator`: pending review rows are built from coordinator job results and retry requeues selected pending items through the coordinator
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after marking artwork review workspace/coordinator connection complete; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added explicit current-filter select/clear/invert commands so matching-filter scope is visible alongside all/visible scopes
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after current-filter selection commands; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `TransactionHistoryController` so the Backups UI gets history rows, backup folder targets, and manifest targets through a Tk-free controller
