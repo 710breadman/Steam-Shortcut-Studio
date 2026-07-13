@@ -9,7 +9,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from steam_shortcut_studio.job_queue import JobEvent  # noqa: E402
 from steam_shortcut_studio.jobs import JobKind, JobRecord, JobState  # noqa: E402
 from steam_shortcut_studio.library_controller import LibraryControllerEvent  # noqa: E402
-from steam_shortcut_studio.source_scan_ui_state import SourceScanUiState  # noqa: E402
+from steam_shortcut_studio.source_scan_ui_state import (  # noqa: E402
+    SourceScanUiState,
+    no_persistent_source_scans_message,
+    selected_source_scan_required_message,
+    selected_source_scan_unavailable_message,
+    source_scan_retry_failed_message,
+    source_scan_retry_unavailable_message,
+)
 
 
 class FakeQueue:
@@ -103,7 +110,19 @@ def test_selected_source_plan_reports_unavailable_sources() -> None:
     assert plan.unavailable_sources == ("folder", "steam")
 
 
+def test_source_scan_empty_messages() -> None:
+    assert no_persistent_source_scans_message() == "No persistent source scans are available."
+    assert selected_source_scan_required_message() == "Select stored library rows before refreshing selected sources."
+    assert (
+        selected_source_scan_unavailable_message()
+        == "Selected rows need a configured Steam folder or game collection folder before their source can be refreshed."
+    )
+    assert source_scan_retry_unavailable_message() == "No reviewed or failed source refresh jobs are available to retry."
+    assert source_scan_retry_failed_message() == "No source refresh jobs could be retried."
+
+
 if __name__ == "__main__":
     test_source_scan_ui_state_tracks_queue_progress_and_finish_summary()
     test_selected_source_plan_reports_unavailable_sources()
+    test_source_scan_empty_messages()
     print("Source scan UI state tests passed.")

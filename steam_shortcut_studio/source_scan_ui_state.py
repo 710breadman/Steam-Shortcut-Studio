@@ -36,6 +36,26 @@ class SelectedSourceScanPlan:
     unavailable_sources: tuple[str, ...]
 
 
+def no_persistent_source_scans_message() -> str:
+    return "No persistent source scans are available."
+
+
+def selected_source_scan_required_message() -> str:
+    return "Select stored library rows before refreshing selected sources."
+
+
+def selected_source_scan_unavailable_message() -> str:
+    return "Selected rows need a configured Steam folder or game collection folder before their source can be refreshed."
+
+
+def source_scan_retry_unavailable_message() -> str:
+    return "No reviewed or failed source refresh jobs are available to retry."
+
+
+def source_scan_retry_failed_message() -> str:
+    return "No source refresh jobs could be retried."
+
+
 class SourceScanUiState:
     def __init__(self, controller: LibraryController) -> None:
         self.controller = controller

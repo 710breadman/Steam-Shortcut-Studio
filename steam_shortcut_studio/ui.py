@@ -118,7 +118,14 @@ from .selection_summary import build_mixed_selection_summary
 from .selection_targets import apply_selection_target_plan, build_selection_target_plan
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
-from .source_scan_ui_state import SourceScanUiState
+from .source_scan_ui_state import (
+    SourceScanUiState,
+    no_persistent_source_scans_message,
+    selected_source_scan_required_message,
+    selected_source_scan_unavailable_message,
+    source_scan_retry_failed_message,
+    source_scan_retry_unavailable_message,
+)
 from .steam_detection import detect_steam_install, find_steam_profiles, is_steam_running, is_valid_steam_path, reopen_steam, shutdown_steam_for_write
 from .steam_compat import CompatToolWriteResult, write_compat_tool_mappings
 from .steam_library import scan_installed_steam_games
@@ -2430,7 +2437,7 @@ class MainWindow(tk.Tk):
             include_epic=True,
         )
         if not adapters:
-            messagebox.showwarning(__app_name__, "No persistent source scans are available.")
+            messagebox.showwarning(__app_name__, no_persistent_source_scans_message())
             return
         for queued in self.source_scan_state.queue_adapters(adapters):
             self.logger.info("Queued persistent %s source scan: %s", queued.source, queued.job_id)
@@ -2443,7 +2450,7 @@ class MainWindow(tk.Tk):
         self.save_settings_from_ui(log=False)
         sources = set(self.library_controller.selected_sources())
         if not sources:
-            messagebox.showinfo(__app_name__, "Select stored library rows before refreshing selected sources.")
+            messagebox.showinfo(__app_name__, selected_source_scan_required_message())
             return
         steam_text = self.steam_path_var.get().strip()
         root_text = self.collection_path_var.get().strip()
@@ -2459,10 +2466,7 @@ class MainWindow(tk.Tk):
                 ", ".join(plan.unavailable_sources),
             )
         if not plan.adapters:
-            messagebox.showinfo(
-                __app_name__,
-                "Selected rows need a configured Steam folder or game collection folder before their source can be refreshed.",
-            )
+            messagebox.showinfo(__app_name__, selected_source_scan_unavailable_message())
             return
         for queued in self.source_scan_state.queue_adapters(plan.adapters):
             self.logger.info("Queued selected persistent %s source scan: %s", queued.source, queued.job_id)
@@ -2545,7 +2549,7 @@ class MainWindow(tk.Tk):
 
     def retry_reviewed_source_scans(self) -> None:
         if not self.source_scan_state.retry_job_ids:
-            messagebox.showinfo(__app_name__, "No reviewed or failed source refresh jobs are available to retry.")
+            messagebox.showinfo(__app_name__, source_scan_retry_unavailable_message())
             return
         try:
             queued = self.source_scan_state.retry_available()
@@ -2555,7 +2559,7 @@ class MainWindow(tk.Tk):
         for scan in queued:
             self.logger.info("Retried persistent source scan: %s", scan.job_id)
         if not queued:
-            messagebox.showinfo(__app_name__, "No source refresh jobs could be retried.")
+            messagebox.showinfo(__app_name__, source_scan_retry_failed_message())
             return
         self.status_var.set(self.source_scan_state.progress_summary())
         self.set_busy_controls()

@@ -231,6 +231,7 @@ Implemented:
 - [x] Reviewed/failed source refresh jobs can be retried through the controller queue
 - [x] Reviewed source refresh jobs can be cleared after handling
 - [x] Source-scan job IDs, progress, retry state, and finish summaries are extracted from `ui.py`
+- [x] Source-scan empty/retry messages are produced outside `ui.py`
 - [x] Combined Steam/folder scan readiness and step-count planning are extracted from `ui.py`
 - [x] Combined Steam/folder scan progress and final status messages are extracted from `ui.py`
 - [x] Folder-only scan root planning and status messages are extracted from `ui.py`
