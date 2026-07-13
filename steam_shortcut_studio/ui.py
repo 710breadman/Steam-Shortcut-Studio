@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
-from .artwork_review_workspace import ArtworkReviewRow, build_artwork_review_rows, pending_review_item_ids, review_result_slot_count
+from .artwork_review_workspace import ArtworkReviewRow, build_artwork_review_rows, build_artwork_review_summary, review_result_slot_count
 from .artwork_search_service import ArtworkProviderSearchService
 from .artwork_sources import ARTWORK_SOURCE_LABELS
 from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
@@ -2651,6 +2651,7 @@ class MainWindow(tk.Tk):
             messagebox.showinfo(__app_name__, "Select stored library rows before reviewing artwork decisions.")
             return
         summary = self.library_controller.artwork_decision_summary(item_ids)
+        review_summary = build_artwork_review_summary(item_ids, self.persistent_artwork_review_results)
         row_titles = {row.item_id: row.title for row in self.library_controller.snapshot().rows}
         review_rows = build_artwork_review_rows(
             item_ids,
@@ -2672,7 +2673,7 @@ class MainWindow(tk.Tk):
                 f"Selected rows: {summary.item_count}    "
                 f"Accepted/locked slots: {summary.locked_slots}    "
                 f"Rejected candidates: {summary.rejected_matches}    "
-                f"Pending review slots: {len(review_rows)}"
+                f"Pending review slots: {review_summary.pending_slot_count}"
             ),
             style="Subtle.TLabel",
         ).grid(row=0, column=0, columnspan=3, sticky="ew", padx=10, pady=(10, 6))
@@ -2796,7 +2797,7 @@ class MainWindow(tk.Tk):
         ttk.Button(buttons, text="Close", command=window.destroy).grid(row=0, column=6)
         self._theme_child(window, self.palette())
         self.status_var.set(
-            f"Artwork decisions: {summary.locked_slots} accepted/locked, {summary.rejected_matches} rejected, {len(review_rows)} pending slot(s)."
+            f"Artwork decisions: {summary.locked_slots} accepted/locked, {summary.rejected_matches} rejected, {review_summary.pending_slot_count} pending slot(s)."
         )
 
     def clear_selected_artwork_rejections(self) -> None:
@@ -2855,10 +2856,11 @@ class MainWindow(tk.Tk):
         self.logger.info("Skipped %s artwork review candidate(s).", skipped)
 
     def retry_selected_artwork_reviews(self) -> None:
-        item_ids = pending_review_item_ids(
+        review_summary = build_artwork_review_summary(
             self.selected_persistent_item_ids(),
             self.persistent_artwork_review_results,
         )
+        item_ids = review_summary.pending_item_ids
         if not item_ids:
             messagebox.showinfo(__app_name__, "No selected rows have pending artwork review results to retry.")
             return

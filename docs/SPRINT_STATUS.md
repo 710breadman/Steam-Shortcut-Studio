@@ -228,6 +228,7 @@ Implemented:
 - [x] Metadata refresh target selection is extracted from `ui.py`
 - [x] Metadata provider selection and `MetadataService` construction are extracted from `ui.py`
 - [x] Artwork review dialog is backed by a UI-independent row mapper and shows selected slot previews
+- [x] Artwork review selected/pending slot summaries are produced outside `ui.py`
 - [x] Artwork review queue can skip pending candidates without persisting accept/reject decisions
 - [x] Artwork review queue can retry selected pending items without rerunning accepted rows
 - [x] Backups action shows transaction history through a UI-independent view model
@@ -376,6 +377,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after controller selection extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added a UI-independent artwork review row mapper and upgraded the artwork decisions dialog with per-slot preview/details for pending provider candidates
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review slot previews; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `ArtworkReviewSummary` so selected item, pending item, and pending slot counts are tested outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `SourceScanUiState` to own source-scan job tracking, progress summaries, retry state, and finish summaries outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after source-scan UI state extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added a production `Backups` action that reads verified transaction history through a UI-independent view model and lists restore-backup availability plus manifest paths

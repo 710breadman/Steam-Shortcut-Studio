@@ -7,6 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
     build_artwork_review_rows,
+    build_artwork_review_summary,
     pending_review_item_ids,
     review_result_slot_count,
 )
@@ -75,8 +76,24 @@ def test_pending_review_item_ids_preserves_selected_order() -> None:
     ) == ("second", "first")
 
 
+def test_build_artwork_review_summary_counts_items_and_slots() -> None:
+    summary = build_artwork_review_summary(
+        ("missing", "second", "first"),
+        {
+            "first": {"candidate_ids": {"grid": "grid-1", "hero": "hero-1"}},
+            "second": {"candidate_ids": {"logo": "logo-2", "bogus": "ignored"}},
+        },
+    )
+
+    assert summary.selected_item_count == 3
+    assert summary.pending_item_ids == ("second", "first")
+    assert summary.pending_item_count == 2
+    assert summary.pending_slot_count == 3
+
+
 if __name__ == "__main__":
     test_build_artwork_review_rows_preserves_item_order_and_slot_metadata()
     test_review_result_slot_count_only_counts_known_slots()
     test_pending_review_item_ids_preserves_selected_order()
+    test_build_artwork_review_summary_counts_items_and_slots()
     print("Artwork review workspace tests passed.")

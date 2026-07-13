@@ -27,6 +27,17 @@ class ArtworkReviewRow:
         return ""
 
 
+@dataclass(frozen=True, slots=True)
+class ArtworkReviewSummary:
+    selected_item_count: int
+    pending_item_ids: tuple[str, ...]
+    pending_slot_count: int
+
+    @property
+    def pending_item_count(self) -> int:
+        return len(self.pending_item_ids)
+
+
 def _object_mapping(value: object) -> Mapping[str, object]:
     if isinstance(value, Mapping):
         return value
@@ -56,6 +67,18 @@ def pending_review_item_ids(
     review_results: Mapping[str, Mapping[str, object]],
 ) -> tuple[str, ...]:
     return tuple(item_id for item_id in item_ids if item_id in review_results)
+
+
+def build_artwork_review_summary(
+    item_ids: Sequence[str],
+    review_results: Mapping[str, Mapping[str, object]],
+) -> ArtworkReviewSummary:
+    pending_ids = pending_review_item_ids(item_ids, review_results)
+    return ArtworkReviewSummary(
+        selected_item_count=len(item_ids),
+        pending_item_ids=pending_ids,
+        pending_slot_count=sum(review_result_slot_count(review_results[item_id]) for item_id in pending_ids),
+    )
 
 
 def build_artwork_review_rows(
