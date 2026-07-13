@@ -210,6 +210,7 @@ Implemented:
 - [x] Persistent library table row mapping is available outside the prototype package
 - [x] Production table stored-row values use the shared modern library row model
 - [x] Production table filtering and filter status text use the shared modern library view model
+- [x] Production table column and preset sorting use the shared modern library view model
 - [x] Persistent row checkbox and selection-menu actions mutate `SelectionState` by stable library ID
 - [x] Shift-clicking persistent row checkboxes selects visible stable-ID ranges without touching hidden rows
 - [x] Ctrl-clicking persistent table rows toggles stable-ID selection through `SelectionState`

@@ -52,7 +52,14 @@ from .metadata import build_metadata_notes, MetadataService
 from .metadata_service_factory import build_metadata_service
 from .metadata_targets import metadata_refresh_indices, selected_or_current_indices
 from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfile
-from .modern_library_view import game_matches_view_filter, modern_library_row_for_game, view_filter_status_message, visible_library_indices
+from .modern_library_view import (
+    game_matches_view_filter,
+    library_sort_key,
+    library_sort_preset_key,
+    modern_library_row_for_game,
+    view_filter_status_message,
+    visible_library_indices,
+)
 from .reporting import export_csv, export_json
 from .scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
 from .scan_plan import (
@@ -101,9 +108,6 @@ from .ui_library_adapter import (
     library_item_id_for_game,
     library_games_by_item_id,
     library_launch_target_for_game,
-    library_platform_for_game,
-    library_source_for_game,
-    library_status_for_game,
     selected_visible_library_item_ids,
 )
 from .vdf import VdfParseError
@@ -3417,34 +3421,7 @@ class MainWindow(tk.Tk):
         self.status_var.set(selection_target_label("new_nonsteam", plan.selected_count))
 
     def sort_key_for_game(self, game: DetectedGame, column: str) -> Any:
-        if column == "add":
-            return (not game.selected, game.display_title.casefold())
-        if column == "title":
-            return game.display_title.casefold()
-        if column == "source":
-            return (
-                0 if is_persistent_library_game(game) else 1,
-                library_source_for_game(game).casefold() if is_persistent_library_game(game) else game.source_type.casefold(),
-                game.display_title.casefold(),
-            )
-        if column == "platform":
-            return (library_platform_for_game(game).casefold() if is_persistent_library_game(game) else "pc", game.display_title.casefold())
-        if column == "status":
-            return (
-                library_status_for_game(game).casefold() if is_persistent_library_game(game) else "",
-                game.display_title.casefold(),
-            )
-        if column == "exe":
-            if is_persistent_library_game(game):
-                return library_launch_target_for_game(game).casefold()
-            return str(game.selected_exe or "").casefold()
-        if column == "artwork":
-            return game.artwork.selected_count()
-        if column == "existing":
-            source_rank = 0 if game.is_native_steam_game else 1
-            shortcut_rank = 0 if game.existing_appid is not None else 1
-            return (source_rank, shortcut_rank, game.display_title.casefold())
-        return game.display_title.casefold()
+        return library_sort_key(game, column)
 
     def sort_games_by_column(self, column: str) -> None:
         if not self.games:
@@ -3468,30 +3445,8 @@ class MainWindow(tk.Tk):
         self.save_current_detail()
         current_game = self.games[self.current_game_index] if self.current_game_index is not None and 0 <= self.current_game_index < len(self.games) else None
         preset = self.sort_preset_var.get()
-        if preset == "Library status":
-            key = lambda game: self.sort_key_for_game(game, "status")
-            reverse = False
-        elif preset == "Source":
-            key = lambda game: self.sort_key_for_game(game, "source")
-            reverse = False
-        elif preset == "Selected first":
-            key = lambda game: (not game.selected, game.display_title.casefold())
-            reverse = False
-        elif preset == "Needs artwork":
-            key = lambda game: (game.artwork.selected_count(), game.display_title.casefold())
-            reverse = False
-        elif preset == "Steam status":
-            key = lambda game: self.sort_key_for_game(game, "existing")
-            reverse = False
-        elif preset == "Installed Steam first":
-            key = lambda game: (not game.is_native_steam_game, game.display_title.casefold())
-            reverse = False
-        elif preset == "New shortcuts first":
-            key = lambda game: (game.is_native_steam_game, game.existing_appid is not None, game.display_title.casefold())
-            reverse = False
-        else:
-            key = lambda game: game.display_title.casefold()
-            reverse = False
+        key = lambda game: library_sort_preset_key(game, preset)
+        reverse = False
         self.games.sort(key=key, reverse=reverse)
         visible = self.visible_game_indices()
         select_index = self.games.index(current_game) if current_game in self.games else (visible[0] if visible else 0)

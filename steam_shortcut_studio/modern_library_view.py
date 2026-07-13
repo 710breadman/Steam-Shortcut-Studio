@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .library_store import LibraryStore, default_library_database
 from .models import DetectedGame
 from .ui_library_adapter import (
+    LIBRARY_LAUNCH_TARGET_META,
     LIBRARY_SIZE_META,
     is_persistent_library_game,
     library_item_id_for_game,
@@ -132,3 +134,54 @@ def visible_library_indices(games: list[DetectedGame], selected_filter: str) -> 
 
 def view_filter_status_message(visible_count: int, total_count: int) -> str:
     return f"Showing {visible_count}/{total_count} game row(s)."
+
+
+def library_sort_key(game: DetectedGame, column: str) -> Any:
+    if column == "add":
+        return (not game.selected, game.display_title.casefold())
+    if column == "title":
+        return game.display_title.casefold()
+    if column == "source":
+        if is_persistent_library_game(game):
+            row = modern_library_row_for_game(game)
+            return (0, row.source.casefold(), row.title.casefold())
+        return (1, game.source_type.casefold(), game.display_title.casefold())
+    if column == "platform":
+        if is_persistent_library_game(game):
+            row = modern_library_row_for_game(game)
+            return (row.platform.casefold(), row.title.casefold())
+        return ("pc", game.display_title.casefold())
+    if column == "status":
+        if is_persistent_library_game(game):
+            row = modern_library_row_for_game(game)
+            return (row.status.casefold(), row.title.casefold())
+        return ("", game.display_title.casefold())
+    if column == "exe":
+        if is_persistent_library_game(game):
+            return str(game.metadata.extra.get(LIBRARY_LAUNCH_TARGET_META) or "").casefold()
+        return str(game.selected_exe or "").casefold()
+    if column == "artwork":
+        return game.artwork.selected_count()
+    if column == "existing":
+        source_rank = 0 if game.is_native_steam_game else 1
+        shortcut_rank = 0 if game.existing_appid is not None else 1
+        return (source_rank, shortcut_rank, game.display_title.casefold())
+    return game.display_title.casefold()
+
+
+def library_sort_preset_key(game: DetectedGame, preset: str) -> Any:
+    if preset == "Library status":
+        return library_sort_key(game, "status")
+    if preset == "Source":
+        return library_sort_key(game, "source")
+    if preset == "Selected first":
+        return (not game.selected, game.display_title.casefold())
+    if preset == "Needs artwork":
+        return (game.artwork.selected_count(), game.display_title.casefold())
+    if preset == "Steam status":
+        return library_sort_key(game, "existing")
+    if preset == "Installed Steam first":
+        return (not game.is_native_steam_game, game.display_title.casefold())
+    if preset == "New shortcuts first":
+        return (game.is_native_steam_game, game.existing_appid is not None, game.display_title.casefold())
+    return game.display_title.casefold()

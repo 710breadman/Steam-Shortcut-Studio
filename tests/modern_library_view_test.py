@@ -12,6 +12,8 @@ from steam_shortcut_studio.modern_library_view import (  # noqa: E402
     format_size,
     game_matches_view_filter,
     load_modern_library_rows,
+    library_sort_key,
+    library_sort_preset_key,
     modern_library_row_for_game,
     view_filter_status_message,
     visible_library_indices,
@@ -155,10 +157,45 @@ def test_view_filter_model_matches_production_table_filters() -> None:
     assert view_filter_status_message(2, 5) == "Showing 2/5 game row(s)."
 
 
+def test_sort_model_matches_production_table_columns_and_presets() -> None:
+    selected = DetectedGame(title="Selected", root_path=Path(), selected=True)
+    unselected = DetectedGame(title="Unselected", root_path=Path(), selected=False)
+    steam = DetectedGame(title="Steam", root_path=Path(), source_type="steam", steam_appid=456)
+    stored = DetectedGame(
+        title="Stored",
+        root_path=Path(),
+        selected_exe=Path(r"C:\ignored.exe"),
+        metadata=GameMetadata(
+            clean_title="Stored",
+            extra={
+                LIBRARY_ITEM_ID_META: "item-stored",
+                LIBRARY_SOURCE_META: "epic",
+                LIBRARY_STATUS_META: "ready",
+                LIBRARY_LAUNCH_TARGET_META: r"C:\Games\Stored\Stored.exe",
+                LIBRARY_PLATFORM_META: "windows",
+                LIBRARY_SIZE_META: "1024",
+            },
+        ),
+        source_type="library",
+    )
+    existing = DetectedGame(title="Existing", root_path=Path(), existing_appid=123)
+
+    assert library_sort_key(selected, "add") < library_sort_key(unselected, "add")
+    assert library_sort_key(stored, "source") == (0, "epic", "stored")
+    assert library_sort_key(stored, "platform") == ("windows", "stored")
+    assert library_sort_key(stored, "status") == ("ready", "stored")
+    assert library_sort_key(stored, "exe") == r"c:\games\stored\stored.exe"
+    assert library_sort_key(steam, "existing") < library_sort_key(existing, "existing")
+    assert library_sort_preset_key(selected, "Selected first") < library_sort_preset_key(unselected, "Selected first")
+    assert library_sort_preset_key(steam, "Installed Steam first") < library_sort_preset_key(existing, "Installed Steam first")
+    assert library_sort_preset_key(selected, "Title A-Z") == "selected"
+
+
 if __name__ == "__main__":
     test_persistent_library_maps_to_modern_library_rows()
     test_missing_items_are_hidden_by_default_and_optional()
     test_size_formatting_is_stable()
     test_modern_library_row_for_game_matches_production_table_fields()
     test_view_filter_model_matches_production_table_filters()
+    test_sort_model_matches_production_table_columns_and_presets()
     print("Modern library view tests passed.")
