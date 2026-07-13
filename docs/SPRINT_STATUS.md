@@ -215,6 +215,7 @@ Implemented:
 - [x] Selected/visible summary text is produced by a Tk-free selection summary model
 - [x] Selection action status labels are produced by a Tk-free selection action model
 - [x] Selected persistent item ID scope is resolved by a Tk-free adapter helper
+- [x] Persistent artwork queue item scope and game lookup use Tk-free adapter helpers
 - [x] Bulk stable-ID selection, inversion, and range selection are exposed through `LibraryController`
 - [x] Source-scan terminal events surface review/failure issue codes from the Tk thread
 - [x] Production table has a selected-row source refresh action backed by `LibraryController.selected_sources`
@@ -417,6 +418,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selection action status extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `selected_visible_library_item_ids` so visible selected persistent-row scope is tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selected persistent scope extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `library_games_by_item_id` and reused selected persistent scope for artwork queue planning outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after persistent artwork queue scope extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Replaced prototype-local selected ID storage with shared `SelectionState` while keeping the read-only modern shell behavior intact
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after prototype `SelectionState` wiring; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `metadata_targets.py` so selected/current metadata-refresh target selection and native Steam exclusion are tested outside `ui.py`

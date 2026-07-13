@@ -89,6 +89,14 @@ def library_item_ids_for_games(
     return tuple(ids)
 
 
+def library_games_by_item_id(games: list[DetectedGame]) -> dict[str, DetectedGame]:
+    return {
+        item_id: game
+        for game in games
+        if (item_id := library_item_id_for_game(game))
+    }
+
+
 def selected_visible_library_item_ids(
     games: list[DetectedGame],
     displayed_indices: list[int],

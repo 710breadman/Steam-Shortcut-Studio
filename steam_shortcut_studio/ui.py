@@ -86,6 +86,7 @@ from .ui_library_adapter import (
     is_persistent_library_game,
     library_item_ids_for_games,
     library_item_id_for_game,
+    library_games_by_item_id,
     library_launch_target_for_game,
     library_platform_for_game,
     library_size_for_game,
@@ -2557,13 +2558,11 @@ class MainWindow(tk.Tk):
 
     def queue_persistent_artwork_searches(self) -> None:
         self.save_settings_from_ui(log=False)
-        ordered_ids = list(library_item_ids_for_games(self.games, self.displayed_game_indices))
-        selected_ids = set(self.library_controller.snapshot().selected_ids)
-        selected_ordered_ids = [item_id for item_id in ordered_ids if item_id in selected_ids]
-        if not selected_ordered_ids:
+        item_ids = self.selected_persistent_item_ids()
+        if not item_ids:
             messagebox.showinfo(__app_name__, "Select stored library rows before planning artwork.")
             return
-        self._queue_persistent_artwork_searches_for_ids(tuple(selected_ordered_ids), "persistent artwork plan")
+        self._queue_persistent_artwork_searches_for_ids(item_ids, "persistent artwork plan")
 
     def _queue_persistent_artwork_searches_for_ids(self, item_ids: tuple[str, ...], status_label: str) -> None:
         client = self.make_sgdb_client()
@@ -2572,11 +2571,7 @@ class MainWindow(tk.Tk):
         rawg_api_key = self.rawg_api_key_var.get().strip()
         cache_dir = Path(self.settings.cache_dir)
         provider_service = ArtworkProviderSearchService(self.logger)
-        game_by_item_id = {
-            item_id: game
-            for game in self.games
-            if (item_id := library_item_id_for_game(game))
-        }
+        game_by_item_id = library_games_by_item_id(self.games)
 
         def provider_searcher(item, requested_slots, token, report_progress):
             token.raise_if_cancelled()

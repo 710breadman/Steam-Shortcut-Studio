@@ -14,6 +14,7 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     game_from_library_row,
     library_item_ids_between,
     library_item_ids_for_games,
+    library_games_by_item_id,
     library_platform_for_game,
     library_size_for_game,
     library_source_for_game,
@@ -149,6 +150,20 @@ def test_library_selection_helpers_use_stable_ids() -> None:
     assert [first.selected, second.selected, third.selected] == [False, True, False]
 
 
+def test_library_games_by_item_id_ignores_nonpersistent_rows() -> None:
+    first = game_from_library_row(_row("one", "One"))
+    second = game_from_library_row(_row("two", "Two"))
+    loose = _row("loose", "Loose")
+    loose_game = game_from_library_row(loose)
+    loose_game.metadata.extra.pop(LIBRARY_ITEM_ID_META)
+
+    by_id = library_games_by_item_id([first, loose_game, second])
+
+    assert list(by_id) == ["one", "two"]
+    assert by_id["one"] is first
+    assert by_id["two"] is second
+
+
 def test_selected_visible_library_item_ids_intersects_display_and_selection_order() -> None:
     first = game_from_library_row(_row("one", "One"))
     second = game_from_library_row(_row("two", "Two"))
@@ -195,6 +210,7 @@ if __name__ == "__main__":
     test_snapshot_selection_is_preserved()
     test_source_scan_adapters_cover_controller_backed_sources()
     test_library_selection_helpers_use_stable_ids()
+    test_library_games_by_item_id_ignores_nonpersistent_rows()
     test_selected_visible_library_item_ids_intersects_display_and_selection_order()
     test_source_scan_event_summary_surfaces_review_codes()
     test_source_scan_progress_summary_formats_sources()
