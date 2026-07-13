@@ -115,7 +115,7 @@ from .scan_plan import (
 )
 from .selection_actions import selection_action_result, selection_target_label
 from .selection_summary import build_mixed_selection_summary
-from .selection_targets import apply_selection_target_plan, build_selection_target_plan
+from .selection_targets import apply_selection_target_plan, build_selection_target_plan, build_write_selection_plan, no_writable_selection_message
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
 from .source_scan_ui_state import (
@@ -4659,28 +4659,15 @@ class MainWindow(tk.Tk):
         if not profile:
             messagebox.showwarning(__app_name__, "Choose a Steam profile first.")
             return
-        selected = [
-            game
-            for game in self.games
-            if game.selected
-            and not is_persistent_library_game(game)
-            and (game.is_managed_non_steam or (game.is_native_steam_game and game.artwork.selected_count()))
-        ]
-        if not selected and self.current_game_index is not None and 0 <= self.current_game_index < len(self.games):
-            current = self.games[self.current_game_index]
-            if (
-                not is_persistent_library_game(current)
-                and (
-                    current.is_managed_non_steam
-                    or (current.is_native_steam_game and current.artwork.selected_count())
-                )
-            ):
-                current.selected = True
-                selected = [current]
-                self.refresh_game_row(self.current_game_index)
-                self.logger.info("No checked writable rows; using current row for write: %s", current.display_title)
+        write_plan = build_write_selection_plan(self.games, self.current_game_index)
+        selected = [self.games[index] for index in write_plan.selected_indices]
+        if write_plan.fallback_index is not None:
+            current = self.games[write_plan.fallback_index]
+            current.selected = True
+            self.refresh_game_row(write_plan.fallback_index)
+            self.logger.info("No checked writable rows; using current row for write: %s", current.display_title)
         if not selected:
-            messagebox.showwarning(__app_name__, "No selected games have shortcuts or artwork ready to write.")
+            messagebox.showwarning(__app_name__, no_writable_selection_message())
             return
         self.logger.info("Write requested for %s selected writable game(s).", len(selected))
         steam_path = Path(self.steam_path_var.get().strip())
