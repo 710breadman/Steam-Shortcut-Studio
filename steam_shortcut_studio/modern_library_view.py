@@ -4,6 +4,14 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .library_store import LibraryStore, default_library_database
+from .models import DetectedGame
+from .ui_library_adapter import (
+    LIBRARY_SIZE_META,
+    library_item_id_for_game,
+    library_platform_for_game,
+    library_source_for_game,
+    library_status_for_game,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +23,12 @@ class ModernLibraryRow:
     last_played: str
     size: str
     status: str
+
+    @property
+    def platform_size_label(self) -> str:
+        if self.size and self.size != "\u2014":
+            return f"{self.platform} / {self.size}"
+        return self.platform
 
 
 def format_size(size_bytes: int) -> str:
@@ -71,3 +85,19 @@ def load_modern_library_rows(
         )
     rows.sort(key=lambda row: (row.title.casefold(), row.item_id))
     return rows
+
+
+def modern_library_row_for_game(game: DetectedGame) -> ModernLibraryRow:
+    try:
+        size = format_size(int(game.metadata.extra.get(LIBRARY_SIZE_META) or "0"))
+    except ValueError:
+        size = "\u2014"
+    return ModernLibraryRow(
+        item_id=library_item_id_for_game(game),
+        title=game.display_title,
+        source=library_source_for_game(game),
+        platform=library_platform_for_game(game),
+        last_played="\u2014",
+        size=size,
+        status=library_status_for_game(game),
+    )

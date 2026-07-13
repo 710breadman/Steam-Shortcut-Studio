@@ -45,6 +45,7 @@ from .metadata import build_metadata_notes, MetadataService
 from .metadata_service_factory import build_metadata_service
 from .metadata_targets import metadata_refresh_indices, selected_or_current_indices
 from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfile
+from .modern_library_view import modern_library_row_for_game
 from .reporting import export_csv, export_json
 from .scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
 from .scan_plan import (
@@ -94,7 +95,6 @@ from .ui_library_adapter import (
     library_games_by_item_id,
     library_launch_target_for_game,
     library_platform_for_game,
-    library_size_for_game,
     library_source_for_game,
     library_status_for_game,
     selected_visible_library_item_ids,
@@ -3208,13 +3208,11 @@ class MainWindow(tk.Tk):
         platform = "PC"
         status = "Selected" if game.selected else "Ready"
         if is_persistent_library_game(game):
+            row = modern_library_row_for_game(game)
             exe = library_launch_target_for_game(game) or exe
-            source = library_source_for_game(game)
-            platform = library_platform_for_game(game)
-            size = library_size_for_game(game)
-            status = library_status_for_game(game)
-            if size:
-                platform = f"{platform} / {size}"
+            source = row.source
+            platform = row.platform_size_label
+            status = row.status
         if game.is_native_steam_game:
             exe = f"Steam AppID {game.steam_appid}"
             source = "Steam"
