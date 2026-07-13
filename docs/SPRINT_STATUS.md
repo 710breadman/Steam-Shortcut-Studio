@@ -332,6 +332,7 @@ Latest local integration evidence, 2026-07-12:
 - Added `Clear Source Reviews` to dismiss remembered source refresh review/failure jobs after handling
 - Added `Plan Selected Art`, which maps selected persistent rows to `BulkArtworkItem` records and runs them through the existing coordinator without Steam writes or live provider coupling
 - Added `steam_shortcut_studio/artwork_provider_adapter.py` to convert provider assets into `ArtworkSearchOutcome` outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite on 2026-07-13; all production, source CLI, and optional prototype checks passed after installing `requirements-ui-prototype.txt` in the user site
 
 ## Known Risks
 
