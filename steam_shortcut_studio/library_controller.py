@@ -8,7 +8,7 @@ from uuid import uuid4
 from .job_queue import BackgroundJobQueue, JobEvent, JobExecutionResult
 from .jobs import JobKind, JobRecord, JobState, TERMINAL_JOB_STATES
 from .bulk_artwork import BulkArtworkItem
-from .library_store import LibraryStore
+from .library_store import ArtworkLock, LibraryStore, RejectedMatch
 from .selection import SelectionState
 from .source_scans import PersistedSourceScan, SourceScanCoordinator
 from .sources.base import SourceAdapter
@@ -53,6 +53,12 @@ class LibrarySnapshot:
 class LibraryControllerEvent:
     event: JobEvent
     snapshot: LibrarySnapshot | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ArtworkResultPersistence:
+    accepted: int = 0
+    rejected: int = 0
 
 
 class LibraryController:
@@ -201,6 +207,65 @@ class LibraryController:
                 )
                 for row in self._rows
             }
+
+    def persist_artwork_job_result(self, result: Mapping[str, object]) -> ArtworkResultPersistence:
+        item_id = str(result.get("item_id") or "")
+        if not item_id:
+            return ArtworkResultPersistence()
+        decision = str(result.get("decision") or "")
+        provider = str(result.get("provider") or "provider")
+        candidate_ids = {
+            str(slot): str(candidate_id)
+            for slot, candidate_id in dict(result.get("candidate_ids") or {}).items()
+            if str(candidate_id).strip()
+        }
+        details = dict(result.get("details") or {})
+        validated_files = {
+            str(slot): dict(file_info)
+            for slot, file_info in dict(details.get("validated_files") or {}).items()
+            if isinstance(file_info, Mapping)
+        }
+        raw_reasons = result.get("reasons") or ()
+        if isinstance(raw_reasons, str):
+            raw_reasons = (raw_reasons,)
+        reasons = tuple(str(reason) for reason in raw_reasons if str(reason).strip())
+        reason_text = "; ".join(reasons)
+
+        accepted = 0
+        rejected = 0
+        if decision == "auto_accept":
+            for slot, candidate_id in candidate_ids.items():
+                if slot not in {"grid", "wide", "hero", "logo", "icon"}:
+                    continue
+                file_info = validated_files.get(slot, {})
+                self.store.set_artwork_lock(
+                    ArtworkLock(
+                        item_id=item_id,
+                        slot=slot,
+                        candidate_id=candidate_id,
+                        source=provider,
+                        local_path=str(file_info.get("path") or ""),
+                    )
+                )
+                accepted += 1
+        elif decision == "reject":
+            for slot, candidate_id in candidate_ids.items():
+                if slot not in {"grid", "wide", "hero", "logo", "icon"}:
+                    continue
+                self.store.reject_match(
+                    RejectedMatch(
+                        item_id=item_id,
+                        provider=provider,
+                        slot=slot,
+                        candidate_id=candidate_id,
+                        reason=reason_text,
+                    )
+                )
+                rejected += 1
+
+        if accepted or rejected:
+            self.refresh()
+        return ArtworkResultPersistence(accepted=accepted, rejected=rejected)
 
     @staticmethod
     def _scan_result_payload(execution: PersistedSourceScan) -> dict[str, object]:

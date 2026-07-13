@@ -240,6 +240,7 @@ class BulkArtworkCoordinator:
         reasons: tuple[str, ...],
     ) -> dict[str, object]:
         return {
+            "item_id": plan.item_id,
             "decision": decision,
             "mode": plan.mode.value,
             "requested_slots": list(plan.requested_slots),

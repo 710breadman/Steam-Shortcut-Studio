@@ -222,10 +222,55 @@ def test_adapter_exception_becomes_isolated_failed_job() -> None:
             controller.close()
 
 
+def test_artwork_job_results_persist_accepts_and_rejections() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = LibraryStore(Path(tmp) / "library.sqlite3")
+        item = _item("art", "Art Game")
+        store.replace_source_snapshot("epic", [item])
+        controller = LibraryController(store)
+        try:
+            accepted = controller.persist_artwork_job_result(
+                {
+                    "item_id": item.stable_id,
+                    "decision": "auto_accept",
+                    "provider": "fixture",
+                    "candidate_ids": {"grid": "grid-one", "logo": "logo-one"},
+                    "details": {
+                        "validated_files": {
+                            "grid": {"path": str(Path(tmp) / "grid.png")},
+                            "logo": {"path": str(Path(tmp) / "logo.png")},
+                        }
+                    },
+                }
+            )
+            rejected = controller.persist_artwork_job_result(
+                {
+                    "item_id": item.stable_id,
+                    "decision": "reject",
+                    "provider": "fixture",
+                    "candidate_ids": {"hero": "hero-one"},
+                    "reasons": ["Wrong edition"],
+                }
+            )
+
+            assert accepted.accepted == 2
+            assert rejected.rejected == 1
+            locks = {lock.slot: lock for lock in store.list_artwork_locks(item.stable_id)}
+            assert locks["grid"].candidate_id == "grid-one"
+            assert locks["grid"].source == "fixture"
+            assert locks["grid"].local_path.endswith("grid.png")
+            assert store.is_match_rejected(item.stable_id, "fixture", "hero", "hero-one")
+            assert store.list_rejected_matches(item.stable_id)[0].reason == "Wrong edition"
+            assert "grid" in controller.snapshot().rows[0].locked_slots
+        finally:
+            controller.close()
+
+
 if __name__ == "__main__":
     test_controller_builds_immutable_effective_rows_and_selection()
     test_successful_async_scan_persists_and_refreshes_rows()
     test_partial_scan_routes_to_review_and_preserves_existing_rows()
     test_review_scan_can_be_retried_and_refreshes_rows()
     test_adapter_exception_becomes_isolated_failed_job()
+    test_artwork_job_results_persist_accepts_and_rejections()
     print("Library controller tests passed.")

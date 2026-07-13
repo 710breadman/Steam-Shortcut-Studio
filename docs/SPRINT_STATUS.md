@@ -160,7 +160,7 @@ Remaining:
 
 - [ ] Extract current provider searches from `ui.py`
 - [ ] Convert provider responses into validated coordinator outcomes
-- [ ] Persist accepted/rejected candidate decisions through the library store
+- [x] Persist accepted/rejected candidate decisions through the library store
 - [ ] Connect progress, review, retry, and apply controls to the production modern UI
 
 ## Modern UI
@@ -338,6 +338,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after the provider-service extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Connected `Plan Selected Art` to real provider search, download, and `validate_artwork_file` before producing review-safe `ArtworkSearchOutcome` records for `BulkArtworkCoordinator`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after validated provider outcomes were wired; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added controller persistence for artwork job results: accepted candidates become stored artwork locks and rejected candidates become `RejectedMatch` rows in `LibraryStore`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork result persistence; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 
@@ -354,7 +356,7 @@ Connect the production modern library table and selected-item actions incrementa
 
 Next controller-backed UI work:
 
-1. Persist accepted/rejected provider candidates and review outcomes through `LibraryStore`.
+1. Surface persisted artwork review decisions in production review controls.
 2. Preserve stored-row read-only behavior in all Steam write paths.
 3. Add production bulk action controls for selected persistent rows.
 4. Keep the legacy scan/write workflows available during migration.

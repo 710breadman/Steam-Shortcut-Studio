@@ -2578,11 +2578,14 @@ class MainWindow(tk.Tk):
     def _handle_persistent_artwork_event(self, controller_event: LibraryControllerEvent) -> None:
         event = controller_event.event
         if event.state in TERMINAL_JOB_STATES:
+            persistence = self.library_controller.persist_artwork_job_result(event.result)
             requested = ", ".join(event.result.get("requested_slots", [])) if event.result else ""
             decision = str(event.result.get("decision") or event.state.value) if event.result else event.state.value
             status = f"Artwork {decision}"
             if requested:
                 status += f" ({requested})"
+            if persistence.accepted or persistence.rejected:
+                status += f"; saved {persistence.accepted} accepted/{persistence.rejected} rejected"
             self.set_persistent_artwork_status(event.item_id, status)
             self.logger.info("Persistent artwork job %s finished: %s", event.job_id, status)
             self.persistent_artwork_job_ids.discard(event.job_id)
