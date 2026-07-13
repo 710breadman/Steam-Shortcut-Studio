@@ -216,6 +216,7 @@ Implemented:
 - [x] Source refresh jobs show per-source queued/running progress from UI-polled job events
 - [x] Reviewed/failed source refresh jobs can be retried through the controller queue
 - [x] Reviewed source refresh jobs can be cleared after handling
+- [x] Source-scan job IDs, progress, retry state, and finish summaries are extracted from `ui.py`
 - [x] Selected persistent rows can be queued through `BulkArtworkCoordinator` using real provider search and review-safe validated outcomes
 - [x] Provider result conversion has a UI-independent adapter for real provider wiring
 - [x] Current real artwork provider search orchestration is extracted behind a UI-independent `ArtworkProviderSearchService`
@@ -302,6 +303,7 @@ python tests/epic_source_test.py
 python tests/steam_folder_source_test.py
 python tests/library_store_test.py
 python tests/source_scan_test.py
+python tests/source_scan_ui_state_test.py
 python tests/library_controller_test.py
 python tests/ui_library_adapter_test.py
 python tests/settings_store_test.py
@@ -356,6 +358,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after controller selection extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added a UI-independent artwork review row mapper and upgraded the artwork decisions dialog with per-slot preview/details for pending provider candidates
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review slot previews; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `SourceScanUiState` to own source-scan job tracking, progress summaries, retry state, and finish summaries outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after source-scan UI state extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 

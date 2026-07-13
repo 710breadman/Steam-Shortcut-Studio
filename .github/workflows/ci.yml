@@ -84,6 +84,9 @@ jobs:
       - name: Run source scan persistence tests
         run: python tests/source_scan_test.py
 
+      - name: Run source scan UI state tests
+        run: python tests/source_scan_ui_state_test.py
+
       - name: Run library controller tests
         run: python tests/library_controller_test.py
 

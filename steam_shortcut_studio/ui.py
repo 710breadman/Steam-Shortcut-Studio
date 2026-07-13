@@ -46,6 +46,7 @@ from .reporting import export_csv, export_json
 from .scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
+from .source_scan_ui_state import SourceScanUiState
 from .steam_detection import detect_steam_install, find_steam_profiles, is_steam_running, is_valid_steam_path, reopen_steam, shutdown_steam_for_write
 from .steam_compat import CompatToolWriteResult, write_compat_tool_mappings
 from .steam_library import games_from_nonsteam_shortcuts, scan_installed_steam_games
@@ -65,9 +66,6 @@ from .ui_library_adapter import (
     library_size_for_game,
     library_source_for_game,
     library_status_for_game,
-    source_scan_adapters,
-    source_scan_event_summary,
-    source_scan_progress_summary,
 )
 from .vdf import VdfParseError
 
@@ -790,10 +788,8 @@ class MainWindow(tk.Tk):
         self.artwork_render_after_id: str | None = None
         self.artwork_render_token = 0
         self.artwork_job_keys: set[str] = set()
-        self.library_scan_job_ids: set[str] = set()
         self.library_scan_poll_after_id: str | None = None
-        self.library_scan_progress: dict[str, dict[str, object]] = {}
-        self.library_retry_job_ids: set[str] = set()
+        self.source_scan_state = SourceScanUiState(self.library_controller)
         self.library_selection_anchor_id = ""
         self.persistent_artwork_job_ids: set[str] = set()
         self.persistent_artwork_review_results: dict[str, dict[str, object]] = {}
@@ -2084,7 +2080,7 @@ class MainWindow(tk.Tk):
     def cancel_current_job(self) -> None:
         active_controller_jobs = [
             job_id
-            for job_id in (self.library_scan_job_ids | self.persistent_artwork_job_ids)
+            for job_id in (self.source_scan_state.job_ids | self.persistent_artwork_job_ids)
             if (record := self.library_controller.job_queue.get(job_id)) is not None
             and record.state not in TERMINAL_JOB_STATES
         ]
@@ -2103,7 +2099,7 @@ class MainWindow(tk.Tk):
         controller_active = any(
             (record := self.library_controller.job_queue.get(job_id)) is not None
             and record.state not in TERMINAL_JOB_STATES
-            for job_id in (self.library_scan_job_ids | self.persistent_artwork_job_ids)
+            for job_id in (self.source_scan_state.job_ids | self.persistent_artwork_job_ids)
         )
         active = (self.active_job_count > 0 or controller_active) if busy is None else busy
         if hasattr(self, "cancel_button"):
@@ -2349,7 +2345,7 @@ class MainWindow(tk.Tk):
         self.save_settings_from_ui(log=False)
         steam_text = self.steam_path_var.get().strip()
         root_text = self.collection_path_var.get().strip()
-        adapters = source_scan_adapters(
+        adapters = self.source_scan_state.configured_adapters(
             steam_path=steam_text or None,
             collection_root=root_text or None,
             include_epic=True,
@@ -2357,16 +2353,9 @@ class MainWindow(tk.Tk):
         if not adapters:
             messagebox.showwarning(__app_name__, "No persistent source scans are available.")
             return
-        for adapter in adapters:
-            job = self.library_controller.scan_source(adapter)
-            self.library_scan_job_ids.add(job.job_id)
-            self.library_scan_progress[job.job_id] = {
-                "source": adapter.source_name,
-                "state": job.state.value,
-                "progress": job.progress,
-            }
-            self.logger.info("Queued persistent %s source scan: %s", adapter.source_name, job.job_id)
-        self.status_var.set(source_scan_progress_summary(self.library_scan_progress))
+        for queued in self.source_scan_state.queue_adapters(adapters):
+            self.logger.info("Queued persistent %s source scan: %s", queued.source, queued.job_id)
+        self.status_var.set(self.source_scan_state.progress_summary())
         self.set_busy_controls()
         self._schedule_library_controller_poll()
 
@@ -2379,7 +2368,7 @@ class MainWindow(tk.Tk):
             return
         steam_text = self.steam_path_var.get().strip()
         root_text = self.collection_path_var.get().strip()
-        adapters = source_scan_adapters(
+        adapters = self.source_scan_state.configured_adapters(
             steam_path=steam_text or None,
             collection_root=root_text or None,
             include_epic=True,
@@ -2397,16 +2386,9 @@ class MainWindow(tk.Tk):
                 "Selected rows need a configured Steam folder or game collection folder before their source can be refreshed.",
             )
             return
-        for adapter in adapters:
-            job = self.library_controller.scan_source(adapter)
-            self.library_scan_job_ids.add(job.job_id)
-            self.library_scan_progress[job.job_id] = {
-                "source": adapter.source_name,
-                "state": job.state.value,
-                "progress": job.progress,
-            }
-            self.logger.info("Queued selected persistent %s source scan: %s", adapter.source_name, job.job_id)
-        self.status_var.set(source_scan_progress_summary(self.library_scan_progress))
+        for queued in self.source_scan_state.queue_adapters(adapters):
+            self.logger.info("Queued selected persistent %s source scan: %s", queued.source, queued.job_id)
+        self.status_var.set(self.source_scan_state.progress_summary())
         self.set_busy_controls()
         self._schedule_library_controller_poll()
 
@@ -2488,39 +2470,25 @@ class MainWindow(tk.Tk):
         self._schedule_library_controller_poll()
 
     def retry_reviewed_source_scans(self) -> None:
-        retry_ids = [
-            job_id
-            for job_id in sorted(self.library_retry_job_ids)
-            if (record := self.library_controller.job_queue.get(job_id)) is not None
-            and record.state.value in {"needs_review", "failed", "skipped", "cancelled"}
-        ]
-        if not retry_ids:
+        if not self.source_scan_state.retry_job_ids:
             messagebox.showinfo(__app_name__, "No reviewed or failed source refresh jobs are available to retry.")
             return
-        for job_id in retry_ids:
-            try:
-                record = self.library_controller.retry_scan(job_id)
-            except Exception as exc:
-                self.logger.warning("Could not retry source scan %s: %s", job_id, exc)
-                continue
-            self.library_scan_job_ids.add(record.job_id)
-            source = str(record.result.get("source") or record.item_id.removeprefix("source:"))
-            self.library_scan_progress[record.job_id] = {
-                "source": source,
-                "state": record.state.value,
-                "progress": record.progress,
-            }
-            self.logger.info("Retried persistent source scan: %s", record.job_id)
-        if not self.library_scan_job_ids:
+        try:
+            queued = self.source_scan_state.retry_available()
+        except Exception as exc:
+            self.logger.warning("Could not retry source scans: %s", exc)
+            queued = ()
+        for scan in queued:
+            self.logger.info("Retried persistent source scan: %s", scan.job_id)
+        if not queued:
             messagebox.showinfo(__app_name__, "No source refresh jobs could be retried.")
             return
-        self.status_var.set(source_scan_progress_summary(self.library_scan_progress))
+        self.status_var.set(self.source_scan_state.progress_summary())
         self.set_busy_controls()
         self._schedule_library_controller_poll()
 
     def clear_reviewed_source_scans(self) -> None:
-        count = len(self.library_retry_job_ids)
-        self.library_retry_job_ids.clear()
+        count = self.source_scan_state.clear_retry_jobs()
         self.status_var.set(f"Cleared {count} source review job(s)." if count else "No source review jobs to clear.")
         self.logger.info("Cleared %s source review job(s).", count)
 
@@ -2721,15 +2689,10 @@ class MainWindow(tk.Tk):
             self.library_scan_poll_after_id = self.after(180, self._poll_library_controller_events)
 
     def _controller_scan_records(self) -> list[Any]:
-        records: list[Any] = []
-        for job_id in self.library_scan_job_ids:
-            record = self.library_controller.job_queue.get(job_id)
-            if record is not None:
-                records.append(record)
-        return records
+        return list(self.source_scan_state.records())
 
     def _controller_scans_active(self) -> bool:
-        return any(record.state not in TERMINAL_JOB_STATES for record in self._controller_scan_records())
+        return self.source_scan_state.active()
 
     def _poll_library_controller_events(self) -> None:
         self.library_scan_poll_after_id = None
@@ -2739,7 +2702,7 @@ class MainWindow(tk.Tk):
             self._schedule_library_controller_poll()
             self.set_busy_controls()
             return
-        if self.library_scan_job_ids:
+        if self.source_scan_state.job_ids:
             self._finish_controller_source_scans()
 
     def _handle_library_controller_event(self, controller_event: LibraryControllerEvent) -> None:
@@ -2747,32 +2710,17 @@ class MainWindow(tk.Tk):
         if event.job_id in self.persistent_artwork_job_ids:
             self._handle_persistent_artwork_event(controller_event)
             return
-        if event.job_id not in self.library_scan_job_ids:
+        update = self.source_scan_state.handle_event(controller_event)
+        if not update.handled:
             return
-        source = str(event.result.get("source") or event.item_id.removeprefix("source:"))
-        self.library_scan_progress[event.job_id] = {
-            "source": source,
-            "state": event.state.value,
-            "progress": event.progress,
-        }
-        if event.state in TERMINAL_JOB_STATES:
+        if update.terminal:
             if controller_event.snapshot is not None:
                 self.apply_library_snapshot(controller_event.snapshot)
-            if event.state.value in {"needs_review", "failed"}:
-                self.library_retry_job_ids.add(event.job_id)
-            else:
-                self.library_retry_job_ids.discard(event.job_id)
-            detail = source_scan_event_summary(
-                source=source,
-                state=event.state.value,
-                result=event.result,
-                error=event.error,
-            )
-            self.logger.info(detail)
-            self.status_var.set(detail)
+            self.logger.info(update.message)
+            self.status_var.set(update.message)
             return
-        if event.message:
-            self.status_var.set(source_scan_progress_summary(self.library_scan_progress))
+        if update.message:
+            self.status_var.set(update.message)
 
     def _persistent_artwork_jobs_active(self) -> bool:
         return any(
@@ -2803,27 +2751,13 @@ class MainWindow(tk.Tk):
         self.status_var.set(event.message or event.state.value)
 
     def _finish_controller_source_scans(self) -> None:
-        records = self._controller_scan_records()
-        succeeded = sum(1 for record in records if record.state.value == "succeeded")
-        needs_review = sum(1 for record in records if record.state.value == "needs_review")
-        failed = sum(1 for record in records if record.state.value == "failed")
-        cancelled = sum(1 for record in records if record.state.value == "cancelled")
-        total = len(records)
-        self.library_scan_job_ids.clear()
+        summary = self.source_scan_state.finish_summary()
         self.library_scan_poll_after_id = None
-        self.library_scan_progress.clear()
         self.set_busy_controls()
         self.progress.stop()
         self.progress.configure(mode="indeterminate", value=0)
         snapshot = self.library_controller.snapshot()
         self.apply_library_snapshot(snapshot)
-        summary = f"Persistent source scans finished: {succeeded}/{total} complete"
-        if needs_review:
-            summary += f", {needs_review} review"
-        if failed:
-            summary += f", {failed} failed"
-        if cancelled:
-            summary += f", {cancelled} cancelled"
         self.status_var.set(summary)
         self.logger.info(summary)
 
