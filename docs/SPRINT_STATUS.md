@@ -221,6 +221,7 @@ Implemented:
 - [x] Provider result conversion has a UI-independent adapter for real provider wiring
 - [x] Current real artwork provider search orchestration is extracted behind a UI-independent `ArtworkProviderSearchService`
 - [x] Artwork review dialog is backed by a UI-independent row mapper and shows selected slot previews
+- [x] Artwork review queue can skip pending candidates without persisting accept/reject decisions
 - [x] Backups action shows transaction history through a UI-independent view model
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
@@ -364,6 +365,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after source-scan UI state extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added a production `Backups` action that reads verified transaction history through a UI-independent view model and lists restore-backup availability plus manifest paths
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after connecting the Backups view to transaction history; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `Skip Art Review` controls that dismiss pending review candidates without storing accept/reject decisions, backed by a UI-independent slot-count helper
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review skip controls; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 

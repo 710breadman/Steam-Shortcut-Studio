@@ -5,7 +5,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from steam_shortcut_studio.artwork_review_workspace import build_artwork_review_rows  # noqa: E402
+from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
+    build_artwork_review_rows,
+    review_result_slot_count,
+)
 
 
 def test_build_artwork_review_rows_preserves_item_order_and_slot_metadata() -> None:
@@ -49,6 +52,19 @@ def test_build_artwork_review_rows_preserves_item_order_and_slot_metadata() -> N
     assert rows[2].reasons == ("Needs manual review.",)
 
 
+def test_review_result_slot_count_only_counts_known_slots() -> None:
+    assert review_result_slot_count(
+        {
+            "candidate_ids": {
+                "grid": "grid-one",
+                "wide": "wide-one",
+                "unknown": "ignored",
+            }
+        }
+    ) == 2
+
+
 if __name__ == "__main__":
     test_build_artwork_review_rows_preserves_item_order_and_slot_metadata()
+    test_review_result_slot_count_only_counts_known_slots()
     print("Artwork review workspace tests passed.")

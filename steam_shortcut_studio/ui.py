@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
-from .artwork_review_workspace import ArtworkReviewRow, build_artwork_review_rows
+from .artwork_review_workspace import ArtworkReviewRow, build_artwork_review_rows, review_result_slot_count
 from .artwork_search_service import ArtworkProviderSearchService
 from .artwork_sources import ARTWORK_SOURCE_LABELS
 from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
@@ -1710,6 +1710,9 @@ class MainWindow(tk.Tk):
         reject_art_button = ttk.Button(table_actions, text="Reject Art Review", command=self.reject_selected_artwork_reviews)
         reject_art_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(reject_art_button, "Persist latest review-needed provider candidates as rejected for selected rows.")
+        skip_art_button = ttk.Button(table_actions, text="Skip Art Review", command=self.skip_selected_artwork_reviews)
+        skip_art_button.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(skip_art_button, "Dismiss latest review-needed provider candidates for selected rows without persisting a decision.")
         clear_art_rejections_button = ttk.Button(table_actions, text="Clear Art Rejections", command=self.clear_selected_artwork_rejections)
         clear_art_rejections_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(clear_art_rejections_button, "Clear persisted rejected artwork candidates for selected persistent rows after review.")
@@ -2759,10 +2762,15 @@ class MainWindow(tk.Tk):
         ).grid(row=0, column=2, padx=(0, 8))
         ttk.Button(
             buttons,
+            text="Skip Selected Review",
+            command=lambda: (self.skip_selected_artwork_reviews(), window.destroy()),
+        ).grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(
+            buttons,
             text="Clear Rejections",
             command=lambda: (self.clear_selected_artwork_rejections(), window.destroy()),
-        ).grid(row=0, column=3, padx=(0, 8))
-        ttk.Button(buttons, text="Close", command=window.destroy).grid(row=0, column=4)
+        ).grid(row=0, column=4, padx=(0, 8))
+        ttk.Button(buttons, text="Close", command=window.destroy).grid(row=0, column=5)
         self._theme_child(window, self.palette())
         self.status_var.set(
             f"Artwork decisions: {summary.locked_slots} accepted/locked, {summary.rejected_matches} rejected, {len(review_rows)} pending slot(s)."
@@ -2810,6 +2818,18 @@ class MainWindow(tk.Tk):
             self.persistent_artwork_review_results.pop(str(result.get("item_id") or ""), None)
         self.status_var.set(f"Rejected {rejected} artwork candidate(s).")
         self.logger.info("Rejected %s artwork candidate(s) from review.", rejected)
+
+    def skip_selected_artwork_reviews(self) -> None:
+        results = self._selected_artwork_review_results()
+        if not results:
+            messagebox.showinfo(__app_name__, "No selected rows have pending artwork review results.")
+            return
+        skipped = 0
+        for result in results:
+            skipped += review_result_slot_count(result)
+            self.persistent_artwork_review_results.pop(str(result.get("item_id") or ""), None)
+        self.status_var.set(f"Skipped {skipped} artwork review candidate(s).")
+        self.logger.info("Skipped %s artwork review candidate(s).", skipped)
 
     def _schedule_library_controller_poll(self) -> None:
         if self.library_scan_poll_after_id is None:

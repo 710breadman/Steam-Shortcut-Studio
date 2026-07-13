@@ -46,6 +46,11 @@ def _int_value(value: object) -> int:
         return 0
 
 
+def review_result_slot_count(result: Mapping[str, object]) -> int:
+    candidate_ids = _object_mapping(result.get("candidate_ids"))
+    return sum(1 for slot in ARTWORK_SLOTS if slot in candidate_ids)
+
+
 def build_artwork_review_rows(
     item_ids: Sequence[str],
     row_titles: Mapping[str, str],
