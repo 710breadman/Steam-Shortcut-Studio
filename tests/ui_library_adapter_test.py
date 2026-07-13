@@ -11,6 +11,7 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     LIBRARY_PLATFORM_META,
     LIBRARY_SIZE_META,
     apply_library_selection_to_games,
+    build_library_display_update,
     game_from_library_row,
     library_item_ids_between,
     library_item_ids_for_games,
@@ -21,6 +22,7 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     library_status_for_game,
     games_from_library_snapshot,
     is_persistent_library_game,
+    library_loaded_status,
     library_launch_target_for_game,
     selected_visible_library_item_ids,
     source_scan_adapters,
@@ -108,6 +110,21 @@ def test_snapshot_selection_is_preserved() -> None:
 
     assert [game.display_title for game in games] == ["One", "Two"]
     assert [game.selected for game in games] == [False, True]
+
+
+def test_library_display_update_contains_games_and_status() -> None:
+    snapshot = LibrarySnapshot(
+        rows=(_row("one", "One"), _row("two", "Two")),
+        active_item_id=None,
+        selected_ids=frozenset({"one"}),
+    )
+
+    update = build_library_display_update(snapshot)
+
+    assert [game.display_title for game in update.games] == ["One", "Two"]
+    assert [game.selected for game in update.games] == [True, False]
+    assert update.status == "Loaded 2 stored library item(s)."
+    assert library_loaded_status(0) == "Loaded 0 stored library item(s)."
 
 
 def test_source_scan_adapters_cover_controller_backed_sources() -> None:
@@ -208,6 +225,7 @@ if __name__ == "__main__":
     test_library_row_maps_to_read_only_legacy_game()
     test_native_steam_library_row_does_not_become_writable_native_game()
     test_snapshot_selection_is_preserved()
+    test_library_display_update_contains_games_and_status()
     test_source_scan_adapters_cover_controller_backed_sources()
     test_library_selection_helpers_use_stable_ids()
     test_library_games_by_item_id_ignores_nonpersistent_rows()

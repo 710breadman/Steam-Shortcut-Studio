@@ -138,7 +138,7 @@ from .ui_library_adapter import (
     LIBRARY_SOURCE_META,
     LIBRARY_STATUS_META,
     apply_library_selection_to_games,
-    games_from_library_snapshot,
+    build_library_display_update,
     is_persistent_library_game,
     library_item_ids_for_games,
     library_item_id_for_game,
@@ -2420,10 +2420,10 @@ class MainWindow(tk.Tk):
         self.apply_library_snapshot(snapshot)
 
     def apply_library_snapshot(self, snapshot: Any) -> None:
-        games = games_from_library_snapshot(snapshot)
+        update = build_library_display_update(snapshot)
         self.replace_live_scan_games(
-            games,
-            f"Loaded {len(games)} stored library item(s).",
+            list(update.games),
+            update.status,
         )
 
     def scan_persistent_sources(self) -> None:

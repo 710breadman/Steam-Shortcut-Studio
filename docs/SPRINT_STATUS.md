@@ -203,6 +203,7 @@ Implemented:
 
 - [x] Tk-free persistent `LibraryController` foundation
 - [x] Legacy UI can load persistent library rows through the controller
+- [x] Persistent library snapshot display update and loaded-status text are produced outside `ui.py`
 - [x] Stored library rows remain read-only in the legacy Steam write path
 - [x] Legacy UI can queue Epic, Steam, and folder source scans through `LibraryController`
 - [x] Poll `BackgroundJobQueue` events from the UI thread for source-scan jobs

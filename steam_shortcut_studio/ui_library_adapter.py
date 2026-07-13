@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
@@ -17,6 +18,12 @@ LIBRARY_STATUS_META = "library_status"
 LIBRARY_LAUNCH_TARGET_META = "library_launch_target"
 LIBRARY_PLATFORM_META = "library_platform"
 LIBRARY_SIZE_META = "library_size_bytes"
+
+
+@dataclass(frozen=True, slots=True)
+class LibraryDisplayUpdate:
+    games: tuple[DetectedGame, ...]
+    status: str
 
 
 def library_item_id_for_game(game: DetectedGame) -> str:
@@ -73,6 +80,15 @@ def games_from_library_snapshot(snapshot: LibrarySnapshot) -> list[DetectedGame]
         game_from_library_row(row, selected=row.item_id in selected_ids)
         for row in snapshot.rows
     ]
+
+
+def library_loaded_status(row_count: int) -> str:
+    return f"Loaded {row_count} stored library item(s)."
+
+
+def build_library_display_update(snapshot: LibrarySnapshot) -> LibraryDisplayUpdate:
+    games = tuple(games_from_library_snapshot(snapshot))
+    return LibraryDisplayUpdate(games=games, status=library_loaded_status(len(games)))
 
 
 def library_item_ids_for_games(
