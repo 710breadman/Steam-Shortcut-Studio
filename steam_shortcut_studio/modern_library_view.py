@@ -7,6 +7,7 @@ from .library_store import LibraryStore, default_library_database
 from .models import DetectedGame
 from .ui_library_adapter import (
     LIBRARY_SIZE_META,
+    is_persistent_library_game,
     library_item_id_for_game,
     library_platform_for_game,
     library_source_for_game,
@@ -101,3 +102,33 @@ def modern_library_row_for_game(game: DetectedGame) -> ModernLibraryRow:
         size=size,
         status=library_status_for_game(game),
     )
+
+
+def game_matches_view_filter(game: DetectedGame, selected_filter: str) -> bool:
+    if selected_filter == "Checked":
+        return game.selected
+    if selected_filter == "Needs artwork":
+        return game.artwork.selected_count() < len(game.artwork.slot_names())
+    if selected_filter == "New non-Steam":
+        return not game.is_native_steam_game and game.existing_appid is None
+    if selected_filter == "Existing non-Steam":
+        return not game.is_native_steam_game and game.existing_appid is not None
+    if selected_filter == "Installed Steam":
+        return game.is_native_steam_game
+    if selected_filter == "Stored Library":
+        return is_persistent_library_game(game)
+    if selected_filter == "Needs review":
+        return is_persistent_library_game(game) and modern_library_row_for_game(game).status == "Review"
+    if selected_filter == "Missing":
+        return is_persistent_library_game(game) and modern_library_row_for_game(game).status == "Missing"
+    if selected_filter == "Skipped":
+        return not game.selected
+    return True
+
+
+def visible_library_indices(games: list[DetectedGame], selected_filter: str) -> list[int]:
+    return [index for index, game in enumerate(games) if game_matches_view_filter(game, selected_filter)]
+
+
+def view_filter_status_message(visible_count: int, total_count: int) -> str:
+    return f"Showing {visible_count}/{total_count} game row(s)."

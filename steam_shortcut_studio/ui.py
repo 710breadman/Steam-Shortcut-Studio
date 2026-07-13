@@ -52,7 +52,7 @@ from .metadata import build_metadata_notes, MetadataService
 from .metadata_service_factory import build_metadata_service
 from .metadata_targets import metadata_refresh_indices, selected_or_current_indices
 from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfile
-from .modern_library_view import modern_library_row_for_game
+from .modern_library_view import game_matches_view_filter, modern_library_row_for_game, view_filter_status_message, visible_library_indices
 from .reporting import export_csv, export_json
 from .scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
 from .scan_plan import (
@@ -3294,35 +3294,16 @@ class MainWindow(tk.Tk):
         )
 
     def game_matches_filter(self, game: DetectedGame) -> bool:
-        selected_filter = self.view_filter_var.get()
-        if selected_filter == "Checked":
-            return game.selected
-        if selected_filter == "Needs artwork":
-            return game.artwork.selected_count() < len(game.artwork.slot_names())
-        if selected_filter == "New non-Steam":
-            return not game.is_native_steam_game and game.existing_appid is None
-        if selected_filter == "Existing non-Steam":
-            return not game.is_native_steam_game and game.existing_appid is not None
-        if selected_filter == "Installed Steam":
-            return game.is_native_steam_game
-        if selected_filter == "Stored Library":
-            return is_persistent_library_game(game)
-        if selected_filter == "Needs review":
-            return is_persistent_library_game(game) and library_status_for_game(game) == "Review"
-        if selected_filter == "Missing":
-            return is_persistent_library_game(game) and library_status_for_game(game) == "Missing"
-        if selected_filter == "Skipped":
-            return not game.selected
-        return True
+        return game_matches_view_filter(game, self.view_filter_var.get())
 
     def visible_game_indices(self) -> list[int]:
-        return [index for index, game in enumerate(self.games) if self.game_matches_filter(game)]
+        return visible_library_indices(self.games, self.view_filter_var.get())
 
     def apply_view_filter(self) -> None:
         self.settings.view_filter = self.view_filter_var.get()
         self.refresh_game_table(select_index=self.current_game_index)
         self.save_settings_from_ui(log=False)
-        self.status_var.set(f"Showing {len(self.displayed_game_indices)}/{len(self.games)} game row(s).")
+        self.status_var.set(view_filter_status_message(len(self.displayed_game_indices), len(self.games)))
 
     def refresh_game_table(self, select_index: int | None = None) -> None:
         self.suppress_game_select_events = True

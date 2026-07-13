@@ -7,8 +7,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from steam_shortcut_studio.library_store import ArtworkLock, LibraryStore, ManualOverrides  # noqa: E402
-from steam_shortcut_studio.models import DetectedGame, GameMetadata  # noqa: E402
-from steam_shortcut_studio.modern_library_view import format_size, load_modern_library_rows, modern_library_row_for_game  # noqa: E402
+from steam_shortcut_studio.models import ArtworkAsset, ArtworkSelection, DetectedGame, GameMetadata  # noqa: E402
+from steam_shortcut_studio.modern_library_view import (  # noqa: E402
+    format_size,
+    game_matches_view_filter,
+    load_modern_library_rows,
+    modern_library_row_for_game,
+    view_filter_status_message,
+    visible_library_indices,
+)
 from steam_shortcut_studio.sources.base import SourceLibraryItem, stable_source_item_id  # noqa: E402
 from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     LIBRARY_ITEM_ID_META,
@@ -111,9 +118,47 @@ def test_modern_library_row_for_game_matches_production_table_fields() -> None:
     assert row.status == "Ready"
 
 
+def test_view_filter_model_matches_production_table_filters() -> None:
+    complete_art = ArtworkSelection(
+        grid=ArtworkAsset(kind="grid", asset_id="grid", url=""),
+        wide=ArtworkAsset(kind="wide", asset_id="wide", url=""),
+        hero=ArtworkAsset(kind="hero", asset_id="hero", url=""),
+        logo=ArtworkAsset(kind="logo", asset_id="logo", url=""),
+        icon=ArtworkAsset(kind="icon", asset_id="icon", url=""),
+    )
+    checked = DetectedGame(title="Checked", root_path=Path(r"C:\Games\Checked"), selected=True)
+    existing = DetectedGame(title="Existing", root_path=Path(r"C:\Games\Existing"), existing_appid=123)
+    steam = DetectedGame(title="Steam", root_path=Path(), source_type="steam", steam_appid=456)
+    stored_review = DetectedGame(
+        title="Review",
+        root_path=Path(),
+        metadata=GameMetadata(
+            extra={
+                LIBRARY_ITEM_ID_META: "item-review",
+                LIBRARY_STATUS_META: "review",
+                LIBRARY_SOURCE_META: "epic",
+            }
+        ),
+        source_type="library",
+    )
+    ready_art = DetectedGame(title="Ready Art", root_path=Path(r"C:\Games\Ready Art"), artwork=complete_art)
+    games = [checked, existing, steam, stored_review, ready_art]
+
+    assert game_matches_view_filter(checked, "Checked") is True
+    assert game_matches_view_filter(existing, "Existing non-Steam") is True
+    assert game_matches_view_filter(steam, "Installed Steam") is True
+    assert game_matches_view_filter(stored_review, "Stored Library") is True
+    assert game_matches_view_filter(stored_review, "Needs review") is True
+    assert game_matches_view_filter(ready_art, "Needs artwork") is False
+    assert visible_library_indices(games, "New non-Steam") == [0, 3, 4]
+    assert visible_library_indices(games, "Needs review") == [3]
+    assert view_filter_status_message(2, 5) == "Showing 2/5 game row(s)."
+
+
 if __name__ == "__main__":
     test_persistent_library_maps_to_modern_library_rows()
     test_missing_items_are_hidden_by_default_and_optional()
     test_size_formatting_is_stable()
     test_modern_library_row_for_game_matches_production_table_fields()
+    test_view_filter_model_matches_production_table_filters()
     print("Modern library view tests passed.")
