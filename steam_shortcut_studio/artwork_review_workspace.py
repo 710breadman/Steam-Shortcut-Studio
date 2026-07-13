@@ -74,6 +74,16 @@ def artwork_review_action_message(action: ArtworkReviewAction, candidate_count: 
     return f"{action_text} {candidate_count} artwork candidate(s)."
 
 
+def source_review_clear_message(review_count: int) -> str:
+    if review_count:
+        return f"Cleared {review_count} source review job(s)."
+    return "No source review jobs to clear."
+
+
+def artwork_rejection_clear_message(candidate_count: int) -> str:
+    return f"Cleared {candidate_count} rejected artwork candidate(s)."
+
+
 def pending_review_item_ids(
     item_ids: Sequence[str],
     review_results: Mapping[str, Mapping[str, object]],

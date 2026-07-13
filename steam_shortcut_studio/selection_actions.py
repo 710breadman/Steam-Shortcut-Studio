@@ -5,6 +5,7 @@ from typing import Literal
 
 SelectionAction = Literal["select", "clear", "invert"]
 SelectionScope = Literal["all", "visible", "current_filter"]
+SelectionTarget = Literal["needing_artwork", "new_nonsteam"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,3 +40,9 @@ def selection_action_result(
     row_count: int,
 ) -> SelectionActionResult:
     return SelectionActionResult(action=action, scope=scope, row_count=row_count)
+
+
+def selection_target_label(target: SelectionTarget, row_count: int) -> str:
+    if target == "needing_artwork":
+        return f"Selected {row_count} game(s) needing artwork."
+    return f"Selected {row_count} new non-Steam shortcut(s)."

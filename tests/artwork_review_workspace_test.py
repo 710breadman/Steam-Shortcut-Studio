@@ -6,11 +6,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
+    artwork_rejection_clear_message,
     artwork_review_action_message,
     build_artwork_review_rows,
     build_artwork_review_summary,
     pending_review_item_ids,
     review_result_slot_count,
+    source_review_clear_message,
 )
 
 
@@ -73,6 +75,12 @@ def test_artwork_review_action_messages() -> None:
     assert artwork_review_action_message("skip", 4) == "Skipped 4 artwork candidate(s)."
 
 
+def test_review_clear_messages() -> None:
+    assert source_review_clear_message(0) == "No source review jobs to clear."
+    assert source_review_clear_message(2) == "Cleared 2 source review job(s)."
+    assert artwork_rejection_clear_message(5) == "Cleared 5 rejected artwork candidate(s)."
+
+
 def test_pending_review_item_ids_preserves_selected_order() -> None:
     assert pending_review_item_ids(
         ("missing", "second", "first"),
@@ -102,6 +110,7 @@ if __name__ == "__main__":
     test_build_artwork_review_rows_preserves_item_order_and_slot_metadata()
     test_review_result_slot_count_only_counts_known_slots()
     test_artwork_review_action_messages()
+    test_review_clear_messages()
     test_pending_review_item_ids_preserves_selected_order()
     test_build_artwork_review_summary_counts_items_and_slots()
     print("Artwork review workspace tests passed.")

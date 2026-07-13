@@ -28,10 +28,12 @@ from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
 from .artwork_queue_status import artwork_queue_item_status, artwork_queue_submission_message
 from .artwork_review_workspace import (
     ArtworkReviewRow,
+    artwork_rejection_clear_message,
     artwork_review_action_message,
     build_artwork_review_rows,
     build_artwork_review_summary,
     review_result_slot_count,
+    source_review_clear_message,
 )
 from .artwork_search_service import ArtworkProviderSearchService
 from .artwork_sources import ARTWORK_SOURCE_LABELS
@@ -67,7 +69,7 @@ from .scan_plan import (
     steam_scan_ready_message,
     steam_scan_start_message,
 )
-from .selection_actions import selection_action_result
+from .selection_actions import selection_action_result, selection_target_label
 from .selection_summary import build_selection_summary
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
@@ -2650,7 +2652,7 @@ class MainWindow(tk.Tk):
 
     def clear_reviewed_source_scans(self) -> None:
         count = self.source_scan_state.clear_retry_jobs()
-        self.status_var.set(f"Cleared {count} source review job(s)." if count else "No source review jobs to clear.")
+        self.status_var.set(source_review_clear_message(count))
         self.logger.info("Cleared %s source review job(s).", count)
 
     def selected_persistent_item_ids(self) -> tuple[str, ...]:
@@ -2821,7 +2823,7 @@ class MainWindow(tk.Tk):
             messagebox.showinfo(__app_name__, "Select stored library rows before clearing artwork rejections.")
             return
         cleared = self.library_controller.clear_rejected_artwork_matches(item_ids)
-        self.status_var.set(f"Cleared {cleared} rejected artwork candidate(s).")
+        self.status_var.set(artwork_rejection_clear_message(cleared))
         self.logger.info("Cleared %s rejected artwork candidate(s) for %s selected item(s).", cleared, len(item_ids))
 
     def _selected_artwork_review_results(self) -> list[dict[str, object]]:
@@ -3420,7 +3422,7 @@ class MainWindow(tk.Tk):
                 count += 1
         self.set_library_items_selected(tuple(library_ids_to_clear), False)
         self.refresh_all_game_rows()
-        self.status_var.set(f"Selected {count} game(s) needing artwork.")
+        self.status_var.set(selection_target_label("needing_artwork", count))
 
     def select_new_nonsteam(self) -> None:
         count = 0
@@ -3435,7 +3437,7 @@ class MainWindow(tk.Tk):
                 count += 1
         self.set_library_items_selected(tuple(library_ids_to_clear), False)
         self.refresh_all_game_rows()
-        self.status_var.set(f"Selected {count} new non-Steam shortcut(s).")
+        self.status_var.set(selection_target_label("new_nonsteam", count))
 
     def sort_key_for_game(self, game: DetectedGame, column: str) -> Any:
         if column == "add":
