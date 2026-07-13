@@ -183,6 +183,38 @@ class LibraryController:
                 self.selection.remove(item_id)
             return self.snapshot()
 
+    def set_items_selected(self, item_ids: tuple[str, ...], selected: bool) -> LibrarySnapshot:
+        valid_ids = set(self.row_map())
+        with self._lock:
+            for item_id in item_ids:
+                if item_id not in valid_ids:
+                    continue
+                if selected:
+                    self.selection.add(item_id)
+                else:
+                    self.selection.remove(item_id)
+            return self.snapshot()
+
+    def toggle_items(self, item_ids: tuple[str, ...]) -> LibrarySnapshot:
+        valid_ids = set(self.row_map())
+        with self._lock:
+            for item_id in item_ids:
+                if item_id in valid_ids:
+                    self.selection.toggle(item_id)
+            return self.snapshot()
+
+    def select_range(
+        self,
+        ordered_ids: tuple[str, ...],
+        target_id: str,
+        *,
+        additive: bool = True,
+    ) -> LibrarySnapshot:
+        valid_order = tuple(item_id for item_id in ordered_ids if item_id in self.row_map())
+        with self._lock:
+            self.selection.select_range(valid_order, target_id, additive=additive)
+            return self.snapshot()
+
     def select_all(self) -> LibrarySnapshot:
         with self._lock:
             self.selection.select_all(row.item_id for row in self._rows)

@@ -100,6 +100,17 @@ def test_controller_builds_immutable_effective_rows_and_selection() -> None:
             assert controller.snapshot().selected_count == 3
             controller.clear_selection()
             assert controller.snapshot().selected_count == 0
+
+            controller.set_items_selected((ready.stable_id, customized.stable_id), True)
+            assert controller.snapshot().selected_ids == frozenset({ready.stable_id, customized.stable_id})
+            controller.toggle_items((ready.stable_id, review.stable_id))
+            assert controller.snapshot().selected_ids == frozenset({customized.stable_id, review.stable_id})
+            controller.select_range(
+                (ready.stable_id, customized.stable_id, review.stable_id),
+                ready.stable_id,
+                additive=False,
+            )
+            assert controller.snapshot().selected_ids == frozenset({ready.stable_id, customized.stable_id, review.stable_id})
         finally:
             controller.close()
 

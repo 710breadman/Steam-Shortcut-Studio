@@ -57,7 +57,6 @@ from .ui_library_adapter import (
     apply_library_selection_to_games,
     games_from_library_snapshot,
     is_persistent_library_game,
-    library_item_ids_between,
     library_item_ids_for_games,
     library_item_id_for_game,
     library_launch_target_for_game,
@@ -3070,23 +3069,14 @@ class MainWindow(tk.Tk):
         apply_library_selection_to_games(self.games, snapshot.selected_ids)
 
     def set_library_items_selected(self, item_ids: tuple[str, ...], selected: bool) -> None:
-        for item_id in item_ids:
-            try:
-                self.library_controller.set_selected(item_id, selected)
-            except KeyError:
-                continue
+        self.library_controller.set_items_selected(item_ids, selected)
         if item_ids:
             self.mirror_library_selection_state()
 
     def invert_library_item_selection(self, item_ids: tuple[str, ...]) -> None:
         if not item_ids:
             return
-        selected_ids = set(self.library_controller.snapshot().selected_ids)
-        for item_id in item_ids:
-            try:
-                self.library_controller.set_selected(item_id, item_id not in selected_ids)
-            except KeyError:
-                continue
+        self.library_controller.toggle_items(item_ids)
         self.mirror_library_selection_state()
 
     def metadata_score(self, game: DetectedGame) -> int:
@@ -3384,13 +3374,9 @@ class MainWindow(tk.Tk):
         if item_id:
             selected_ids = self.library_controller.snapshot().selected_ids
             if range_select:
-                item_ids = library_item_ids_between(
-                    self.games,
-                    self.displayed_game_indices,
-                    self.library_selection_anchor_id,
-                    item_id,
-                )
-                self.set_library_items_selected(item_ids, True)
+                ordered_ids = library_item_ids_for_games(self.games, self.displayed_game_indices)
+                self.library_controller.select_range(ordered_ids, item_id, additive=True)
+                self.mirror_library_selection_state()
             else:
                 self.set_library_items_selected((item_id,), item_id not in selected_ids)
             self.library_selection_anchor_id = item_id

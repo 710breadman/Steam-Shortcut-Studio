@@ -210,6 +210,7 @@ Implemented:
 - [x] Ctrl-clicking persistent table rows toggles stable-ID selection through `SelectionState`
 - [x] Space toggles the focused persistent row through the same stable-ID selection path
 - [x] Selection menu exposes explicit visible-scope actions and the table shows selected/visible counts
+- [x] Bulk stable-ID selection, inversion, and range selection are exposed through `LibraryController`
 - [x] Source-scan terminal events surface review/failure issue codes from the Tk thread
 - [x] Production table has a selected-row source refresh action backed by `LibraryController.selected_sources`
 - [x] Source refresh jobs show per-source queued/running progress from UI-polled job events
@@ -349,6 +350,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after the artwork decisions dialog; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added Ctrl-click additive selection for persistent table rows through the controller-backed stable-ID selection path
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after Ctrl-click selection wiring; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Moved persistent table bulk selection, inversion, and range selection operations onto `LibraryController` helpers with Tk-free tests
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after controller selection extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 
