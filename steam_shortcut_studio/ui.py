@@ -66,6 +66,7 @@ from .scan_plan import (
     folder_scan_start_message,
     steam_scan_done_message,
     steam_scan_found_message,
+    steam_scan_live_found_message,
     steam_scan_ready_message,
     steam_scan_start_message,
 )
@@ -3006,7 +3007,7 @@ class MainWindow(tk.Tk):
                     except Exception as exc:
                         self.logger.warning("Could not read existing shortcuts/artwork while scanning Steam: %s", exc)
                 games = self.merge_game_lists(games, steam_games)
-                self.post_ui(lambda data=list(games), count=steam_count: self.replace_live_scan_games(data, f"Found {count} installed Steam game(s)."))
+                self.post_ui(lambda data=list(games), count=steam_count: self.replace_live_scan_games(data, steam_scan_live_found_message(count)))
                 step += 1
 
             if plan.folder_ready and plan.collection_root is not None:
@@ -3124,7 +3125,12 @@ class MainWindow(tk.Tk):
             self.set_task_progress(steam_scan_start_message(), 0, 3)
             self.raise_if_cancelled()
             games = scan_installed_steam_games(plan.steam_path)
-            self.post_ui(lambda data=list(games): self.replace_live_scan_games(self.merge_game_lists(self.games, data), f"Found {len(data)} installed Steam game(s)."))
+            self.post_ui(
+                lambda data=list(games): self.replace_live_scan_games(
+                    self.merge_game_lists(self.games, data),
+                    steam_scan_live_found_message(len(data)),
+                )
+            )
             self.raise_if_cancelled()
             self.set_task_progress(steam_scan_found_message(len(games)), 1, 3)
             if profile:

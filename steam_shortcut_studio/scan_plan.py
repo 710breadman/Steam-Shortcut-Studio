@@ -103,6 +103,10 @@ def steam_scan_found_message(steam_count: int) -> str:
     return f"Found {steam_count} installed Steam game(s); checking shortcuts and existing art..."
 
 
+def steam_scan_live_found_message(steam_count: int) -> str:
+    return f"Found {steam_count} installed Steam game(s)."
+
+
 def steam_scan_ready_message() -> str:
     return "Steam library scan ready for artwork editing."
 
