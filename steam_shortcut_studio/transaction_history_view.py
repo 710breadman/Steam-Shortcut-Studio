@@ -58,6 +58,13 @@ def transaction_history_row(entry: TransactionHistoryEntry) -> TransactionHistor
     )
 
 
+def transaction_history_detail_text(row: TransactionHistoryViewRow) -> str:
+    return (
+        f"Backup: {row.backup_path or 'none'}\n"
+        f"Manifest: {row.manifest_path}"
+    )
+
+
 def build_transaction_history_view(root: Path | None = None) -> TransactionHistoryView:
     entries, invalid_paths = list_transaction_history(root, include_invalid=True)
     return TransactionHistoryView(

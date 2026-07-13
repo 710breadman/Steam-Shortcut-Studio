@@ -413,6 +413,7 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after source-scan UI state extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added a production `Backups` action that reads verified transaction history through a UI-independent view model and lists restore-backup availability plus manifest paths
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after connecting the Backups view to transaction history; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Moved production Backups detail text into the transaction history view model for modern UI reuse
 - Added `Skip Art Review` controls that dismiss pending review candidates without storing accept/reject decisions, backed by a UI-independent slot-count helper
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review skip controls; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `Retry Art Review` controls that requeue only selected pending review items through `BulkArtworkCoordinator`

@@ -8,7 +8,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from steam_shortcut_studio.transaction_history_view import build_transaction_history_view  # noqa: E402
+from steam_shortcut_studio.transaction_history_view import (  # noqa: E402
+    build_transaction_history_view,
+    transaction_history_detail_text,
+)
 
 
 def _write_manifest(root: Path, transaction_id: str, *, original_exists: bool = True) -> None:
@@ -46,6 +49,14 @@ def test_transaction_history_view_formats_rows_counts_and_invalid_manifests() ->
     assert view.status_counts == {"committed": 2}
     assert len(view.invalid_manifests) == 1
     assert "Transactions: 2 (committed: 2); 1 invalid manifest(s)" == view.summary
+    assert transaction_history_detail_text(view.rows[0]) == (
+        f"Backup: {root / 'tx-one' / 'backups' / 'shortcuts.vdf'}\n"
+        f"Manifest: {root / 'tx-one' / 'manifest.json'}"
+    )
+    assert transaction_history_detail_text(view.rows[1]) == (
+        "Backup: none\n"
+        f"Manifest: {root / 'tx-new-file' / 'manifest.json'}"
+    )
 
 
 if __name__ == "__main__":

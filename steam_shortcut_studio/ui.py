@@ -124,6 +124,7 @@ from .steam_notes import write_metadata_notes
 from .steam_shortcuts import load_shortcuts, mark_existing_shortcuts, matching_record_for_game, preview_changes, upsert_games
 from .steamgrid import SteamGridDbClient, SteamGridDbError
 from .transaction_history_controller import TransactionHistoryController
+from .transaction_history_view import transaction_history_detail_text
 from .ui_library_adapter import (
     LIBRARY_SOURCE_META,
     LIBRARY_STATUS_META,
@@ -2348,12 +2349,7 @@ class MainWindow(tk.Tk):
             if row is None:
                 detail.configure(text="")
                 return
-            detail.configure(
-                text=(
-                    f"Backup: {row.backup_path or 'none'}\n"
-                    f"Manifest: {row.manifest_path}"
-                )
-            )
+            detail.configure(text=transaction_history_detail_text(row))
 
         def open_backup() -> None:
             row = selected_row()
