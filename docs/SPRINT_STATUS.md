@@ -223,6 +223,7 @@ Implemented:
 - [x] Selected persistent rows can be queued through `BulkArtworkCoordinator` using real provider search and review-safe validated outcomes
 - [x] Provider result conversion has a UI-independent adapter for real provider wiring
 - [x] Current real artwork provider search orchestration is extracted behind a UI-independent `ArtworkProviderSearchService`
+- [x] Metadata refresh target selection is extracted from `ui.py`
 - [x] Artwork review dialog is backed by a UI-independent row mapper and shows selected slot previews
 - [x] Artwork review queue can skip pending candidates without persisting accept/reject decisions
 - [x] Backups action shows transaction history through a UI-independent view model
@@ -307,6 +308,7 @@ python tests/transaction_history_view_test.py
 python tests/job_queue_test.py
 python tests/bulk_artwork_test.py
 python tests/artwork_provider_adapter_test.py
+python tests/metadata_targets_test.py
 python tests/artwork_review_workspace_test.py
 python tests/epic_source_test.py
 python tests/steam_folder_source_test.py
@@ -382,6 +384,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after combined scan plan extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added a Tk-free `SelectionSummary` model for selected/visible table status text
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selection summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `metadata_targets.py` so selected/current metadata-refresh target selection and native Steam exclusion are tested outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after metadata target extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 

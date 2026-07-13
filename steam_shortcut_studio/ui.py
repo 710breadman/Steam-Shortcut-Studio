@@ -41,6 +41,7 @@ from .metadata import (
     SteamStoreMetadataProvider,
     WikipediaMetadataProvider,
 )
+from .metadata_targets import metadata_refresh_indices, selected_or_current_indices
 from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfile
 from .reporting import export_csv, export_json
 from .scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
@@ -3818,10 +3819,11 @@ class MainWindow(tk.Tk):
         return MetadataService(providers, self.logger)
 
     def selected_or_current_games(self) -> list[DetectedGame]:
-        selected = [game for game in self.games if game.selected]
-        if not selected and self.current_game_index is not None:
-            selected = [self.games[self.current_game_index]]
-        return selected
+        indices = selected_or_current_indices(
+            tuple(game.selected for game in self.games),
+            self.current_game_index,
+        )
+        return [self.games[index] for index in indices]
 
     def selected_games_in_current_view(self) -> list[DetectedGame]:
         return [self.games[index] for index in self.displayed_game_indices if 0 <= index < len(self.games) and self.games[index].selected]
@@ -4764,7 +4766,12 @@ class MainWindow(tk.Tk):
             return None
 
     def enrich_metadata_for_selected(self) -> None:
-        selected = [game for game in self.selected_or_current_games() if not game.is_native_steam_game]
+        indices = metadata_refresh_indices(
+            tuple(game.selected for game in self.games),
+            tuple(game.is_native_steam_game for game in self.games),
+            self.current_game_index,
+        )
+        selected = [self.games[index] for index in indices]
         if not selected:
             messagebox.showwarning(__app_name__, "Select at least one non-Steam game.")
             return
