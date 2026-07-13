@@ -48,6 +48,7 @@ from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
 from .jobs import TERMINAL_JOB_STATES
 from .game_merge import (
     apply_existing_shortcut_choices as apply_existing_shortcut_choices_to_games,
+    compare_games_with_shortcuts,
     game_identity_keys,
     merge_detected_game_lists,
     normalized_artwork_cache_key,
@@ -104,7 +105,7 @@ from .sgdboop import detect_sgdboop
 from .source_scan_ui_state import SourceScanUiState
 from .steam_detection import detect_steam_install, find_steam_profiles, is_steam_running, is_valid_steam_path, reopen_steam, shutdown_steam_for_write
 from .steam_compat import CompatToolWriteResult, write_compat_tool_mappings
-from .steam_library import games_from_nonsteam_shortcuts, scan_installed_steam_games
+from .steam_library import scan_installed_steam_games
 from .steam_notes import write_metadata_notes
 from .steam_shortcuts import load_shortcuts, mark_existing_shortcuts, matching_record_for_game, preview_changes, upsert_games
 from .steamgrid import SteamGridDbClient, SteamGridDbError
@@ -2893,11 +2894,9 @@ class MainWindow(tk.Tk):
                 if profile:
                     try:
                         records = load_shortcuts(profile.shortcuts_path)
-                        nonsteam_games = games_from_nonsteam_shortcuts(records)
-                        shortcut_count = len(nonsteam_games)
-                        steam_games = self.merge_game_lists(steam_games, nonsteam_games)
-                        mark_existing_shortcuts(steam_games, records)
-                        self.apply_existing_shortcut_choices(steam_games, records)
+                        comparison = compare_games_with_shortcuts(steam_games, records, include_nonsteam_games=True)
+                        steam_games = comparison.games
+                        shortcut_count = comparison.shortcut_count
                         loaded = load_existing_artwork_for_games(steam_games, profile)
                         if loaded:
                             self.logger.info("Loaded %s existing Steam artwork file(s) while scanning Steam.", loaded)
@@ -2924,8 +2923,7 @@ class MainWindow(tk.Tk):
                     try:
                         if records is None:
                             records = load_shortcuts(profile.shortcuts_path)
-                        mark_existing_shortcuts(folder_games, records)
-                        self.apply_existing_shortcut_choices(folder_games, records)
+                        folder_games = compare_games_with_shortcuts(folder_games, records).games
                         loaded = load_existing_artwork_for_games(folder_games, profile)
                         if loaded:
                             self.logger.info("Loaded %s existing Steam artwork file(s) for folder games.", loaded)
@@ -2979,8 +2977,7 @@ class MainWindow(tk.Tk):
             if profile:
                 try:
                     records = load_shortcuts(profile.shortcuts_path)
-                    mark_existing_shortcuts(games, records)
-                    self.apply_existing_shortcut_choices(games, records)
+                    games = compare_games_with_shortcuts(games, records).games
                     loaded = load_existing_artwork_for_games(games, profile)
                     if loaded:
                         self.logger.info("Loaded %s existing Steam artwork file(s) for scanned folder games.", loaded)
@@ -3033,10 +3030,7 @@ class MainWindow(tk.Tk):
             if profile:
                 try:
                     records = load_shortcuts(profile.shortcuts_path)
-                    nonsteam_games = games_from_nonsteam_shortcuts(records)
-                    games = self.merge_game_lists(games, nonsteam_games)
-                    mark_existing_shortcuts(games, records)
-                    self.apply_existing_shortcut_choices(games, records)
+                    games = compare_games_with_shortcuts(games, records, include_nonsteam_games=True).games
                     loaded = load_existing_artwork_for_games(games, profile)
                     if loaded:
                         self.logger.info("Loaded %s existing Steam artwork file(s) while scanning Steam library.", loaded)

@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from .models import DetectedGame, ExecutableCandidate
 from .steam_library import games_from_nonsteam_shortcuts
-from .steam_shortcuts import matching_record_for_game
+from .steam_shortcuts import mark_existing_shortcuts, matching_record_for_game
+
+
+@dataclass(frozen=True, slots=True)
+class ShortcutComparisonResult:
+    games: list[DetectedGame]
+    shortcut_count: int = 0
 
 
 def normalized_artwork_cache_key(title: str) -> str:
@@ -131,3 +138,20 @@ def apply_existing_shortcut_choices(games: list[DetectedGame], records: list[Any
             continue
         shortcut_row = games_from_nonsteam_shortcuts([record])[0]
         merge_shortcut_state(game, shortcut_row)
+
+
+def compare_games_with_shortcuts(
+    games: list[DetectedGame],
+    records: list[Any],
+    *,
+    include_nonsteam_games: bool = False,
+) -> ShortcutComparisonResult:
+    compared = list(games)
+    shortcut_count = 0
+    if include_nonsteam_games:
+        nonsteam_games = games_from_nonsteam_shortcuts(records)
+        shortcut_count = len(nonsteam_games)
+        compared = merge_detected_game_lists(compared, nonsteam_games)
+    mark_existing_shortcuts(compared, records)
+    apply_existing_shortcut_choices(compared, records)
+    return ShortcutComparisonResult(games=compared, shortcut_count=shortcut_count)

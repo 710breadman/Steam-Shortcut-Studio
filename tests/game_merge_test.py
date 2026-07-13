@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from steam_shortcut_studio.game_merge import (  # noqa: E402
     apply_existing_shortcut_choices,
+    compare_games_with_shortcuts,
     game_identity_keys,
     merge_detected_game_lists,
     normalized_artwork_cache_key,
@@ -87,8 +88,31 @@ def test_existing_shortcut_choices_restore_remembered_launch_target() -> None:
         assert game.launch_options == "-old-option"
 
 
+def test_compare_games_with_shortcuts_can_include_existing_nonsteam_rows() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        exe = root / "Games" / "Example" / "Example.exe"
+        _write_fake_exe(exe)
+        record = ShortcutRecord(
+            appid=generate_appid(exe, "Example"),
+            app_name="Example",
+            exe=f'"{exe}"',
+            start_dir=f'"{exe.parent}"',
+            launch_options="-old-option",
+        )
+        scanned = DetectedGame(title="Example", root_path=exe.parent, selected_exe=exe, source_type="folder")
+
+        result = compare_games_with_shortcuts([scanned], [record], include_nonsteam_games=True)
+
+        assert result.shortcut_count == 1
+        assert len(result.games) == 1
+        assert result.games[0].existing_appid == record.appid
+        assert result.games[0].launch_options == "-old-option"
+
+
 if __name__ == "__main__":
     test_identity_keys_prefer_stable_known_ids()
     test_merge_detected_games_keeps_native_steam_distinct_from_shortcut_title_match()
     test_existing_shortcut_choices_restore_remembered_launch_target()
+    test_compare_games_with_shortcuts_can_include_existing_nonsteam_rows()
     print("Game merge tests passed.")

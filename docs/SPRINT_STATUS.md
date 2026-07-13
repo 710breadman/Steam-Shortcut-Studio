@@ -237,6 +237,7 @@ Implemented:
 - [x] Steam-only scan path validation and status messages are extracted from `ui.py`
 - [x] Steam live scan found-count status is extracted from `ui.py`
 - [x] Scan result duplicate/shortcut merge logic is extracted from `ui.py`
+- [x] Existing shortcut comparison planning is extracted from `ui.py`
 - [x] Selected persistent rows can be queued through `BulkArtworkCoordinator` using real provider search and review-safe validated outcomes
 - [x] Provider result conversion has a UI-independent adapter for real provider wiring
 - [x] Current real artwork provider search orchestration is extracted behind a UI-independent `ArtworkProviderSearchService`
