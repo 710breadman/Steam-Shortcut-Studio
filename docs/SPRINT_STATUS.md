@@ -221,13 +221,14 @@ Implemented:
 - [x] Provider result conversion has a UI-independent adapter for real provider wiring
 - [x] Current real artwork provider search orchestration is extracted behind a UI-independent `ArtworkProviderSearchService`
 - [x] Artwork review dialog is backed by a UI-independent row mapper and shows selected slot previews
+- [x] Backups action shows transaction history through a UI-independent view model
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
 - [ ] Extract transaction/history controller
 - [ ] Build production modern library table using `LibraryStore`
 - [ ] Use `SelectionState` instead of widget-local IDs
-- [ ] Connect the Backups view to transaction history
+- [x] Connect the Backups view to transaction history
 - [ ] Connect the artwork review workspace to `BulkArtworkCoordinator`
 - [ ] Keep legacy UI operational during incremental migration
 
@@ -295,6 +296,7 @@ python tests/file_transaction_test.py
 python tests/shortcut_transaction_test.py
 python tests/app_transaction_wiring_test.py
 python tests/transaction_history_test.py
+python tests/transaction_history_view_test.py
 python tests/job_queue_test.py
 python tests/bulk_artwork_test.py
 python tests/artwork_provider_adapter_test.py
@@ -360,6 +362,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review slot previews; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `SourceScanUiState` to own source-scan job tracking, progress summaries, retry state, and finish summaries outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after source-scan UI state extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added a production `Backups` action that reads verified transaction history through a UI-independent view model and lists restore-backup availability plus manifest paths
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after connecting the Backups view to transaction history; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 

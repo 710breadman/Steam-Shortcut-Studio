@@ -53,6 +53,7 @@ from .steam_library import games_from_nonsteam_shortcuts, scan_installed_steam_g
 from .steam_notes import write_metadata_notes
 from .steam_shortcuts import load_shortcuts, mark_existing_shortcuts, matching_record_for_game, preview_changes, upsert_games
 from .steamgrid import SteamGridDbClient, SteamGridDbError
+from .transaction_history_view import build_transaction_history_view
 from .ui_library_adapter import (
     LIBRARY_SOURCE_META,
     LIBRARY_STATUS_META,
@@ -1250,8 +1251,11 @@ class MainWindow(tk.Tk):
         library_button.grid(row=0, column=0, padx=(0, 8))
         ToolTip(library_button, "Load the app-owned persistent library through the production controller.")
         sync_sources_button = ttk.Button(source_actions, text="Sync Sources", width=action_width, command=self.scan_persistent_sources)
-        sync_sources_button.grid(row=0, column=1)
+        sync_sources_button.grid(row=0, column=1, padx=(0, 8))
         ToolTip(sync_sources_button, "Scan Epic, Steam, and the chosen folder into the app-owned persistent library through the production controller.")
+        backups_button = ttk.Button(source_actions, text="Backups", width=action_width, command=self.show_transaction_history)
+        backups_button.grid(row=0, column=2)
+        ToolTip(backups_button, "Show verified transaction history and available restore backups.")
         write_button = ttk.Button(actions, text="Write to Steam", width=action_width, style="Accent.TButton", command=self.write_to_steam)
         write_button.grid(row=0, column=3, sticky="e", padx=(8, 8))
         ToolTip(write_button, "Closes running Steam when needed, writes shortcuts, artwork, and simple notes with backups, then reopens Steam only if this app closed it.")
@@ -2303,6 +2307,129 @@ class MainWindow(tk.Tk):
             self.logger.warning("Browser did not accept link: %s", url)
             self.copy_link_to_clipboard(url)
             messagebox.showerror(__app_name__, f"Could not open the browser link.\n\nThe link was copied instead:\n{url}")
+
+    def open_filesystem_path(self, path_text: str) -> None:
+        path = Path(path_text).expanduser()
+        if not path.exists():
+            messagebox.showerror(__app_name__, f"Path does not exist:\n\n{path}")
+            return
+        try:
+            if os.name == "nt":
+                os.startfile(path)  # type: ignore[attr-defined]
+                return
+            opener = shutil.which("xdg-open") or shutil.which("gio")
+            if opener is None:
+                raise OSError("Could not find xdg-open or gio.")
+            command = [opener, "open", str(path)] if Path(opener).name == "gio" else [opener, str(path)]
+            subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError as exc:
+            self.logger.warning("Could not open filesystem path %s: %s", path, exc)
+            messagebox.showerror(__app_name__, f"Could not open path:\n\n{exc}")
+
+    def show_transaction_history(self) -> None:
+        view = build_transaction_history_view()
+        window = tk.Toplevel(self)
+        window.title("Backups")
+        window.geometry("1080x460")
+        window.transient(self)
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(1, weight=1)
+
+        ttk.Label(window, text=view.summary, style="Subtle.TLabel").grid(
+            row=0,
+            column=0,
+            sticky="ew",
+            padx=10,
+            pady=(10, 6),
+        )
+
+        tree = ttk.Treeview(
+            window,
+            columns=("updated", "status", "target", "restore", "id", "error"),
+            show="headings",
+            selectmode="browse",
+        )
+        tree.heading("updated", text="Updated")
+        tree.heading("status", text="Status")
+        tree.heading("target", text="Target")
+        tree.heading("restore", text="Restore")
+        tree.heading("id", text="Transaction")
+        tree.heading("error", text="Error")
+        tree.column("updated", width=160, anchor=tk.W)
+        tree.column("status", width=100, anchor=tk.W)
+        tree.column("target", width=180, anchor=tk.W)
+        tree.column("restore", width=140, anchor=tk.W)
+        tree.column("id", width=180, anchor=tk.W)
+        tree.column("error", width=300, anchor=tk.W)
+        tree.grid(row=1, column=0, sticky="nsew", padx=10)
+        scrollbar = ttk.Scrollbar(window, orient=tk.VERTICAL, command=tree.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 10))
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        rows_by_id = {str(index): row for index, row in enumerate(view.rows)}
+        for row_id, row in rows_by_id.items():
+            tree.insert(
+                "",
+                tk.END,
+                iid=row_id,
+                values=(
+                    row.updated_at,
+                    row.status,
+                    row.target,
+                    row.restore_state,
+                    row.transaction_id,
+                    row.error,
+                ),
+            )
+        if not rows_by_id:
+            tree.insert("", tk.END, values=("", "", "", "", "", "No transaction history found."))
+
+        detail = ttk.Label(window, text="", style="Subtle.TLabel", justify=tk.LEFT, wraplength=1040)
+        detail.grid(row=2, column=0, columnspan=2, sticky="ew", padx=10, pady=(8, 0))
+
+        def selected_row() -> Any:
+            selection = tree.selection()
+            return rows_by_id.get(selection[0]) if selection else None
+
+        def update_detail(_event: tk.Event[Any] | None = None) -> None:
+            row = selected_row()
+            if row is None:
+                detail.configure(text="")
+                return
+            detail.configure(
+                text=(
+                    f"Backup: {row.backup_path or 'none'}\n"
+                    f"Manifest: {row.manifest_path}"
+                )
+            )
+
+        def open_backup() -> None:
+            row = selected_row()
+            if row is None or not row.backup_path:
+                messagebox.showinfo(__app_name__, "Selected transaction has no restore backup.")
+                return
+            self.open_filesystem_path(str(Path(row.backup_path).parent))
+
+        def open_manifest() -> None:
+            row = selected_row()
+            if row is None:
+                return
+            self.open_filesystem_path(row.manifest_path)
+
+        tree.bind("<<TreeviewSelect>>", update_detail)
+        if rows_by_id:
+            tree.selection_set("0")
+            tree.focus("0")
+            update_detail()
+
+        buttons = ttk.Frame(window, padding=10)
+        buttons.grid(row=3, column=0, columnspan=2, sticky="ew")
+        buttons.columnconfigure(0, weight=1)
+        ttk.Button(buttons, text="Open Backup Folder", command=open_backup).grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(buttons, text="Open Manifest", command=open_manifest).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(buttons, text="Close", command=window.destroy).grid(row=0, column=3)
+        self._theme_child(window, self.palette())
+        self.status_var.set(view.summary)
 
     def copy_link_to_clipboard(self, url: str) -> None:
         try:
