@@ -6,8 +6,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
+    ArtworkReviewRow,
     artwork_rejection_clear_message,
     artwork_review_action_message,
+    artwork_review_detail_text,
+    artwork_review_empty_message,
+    artwork_review_header_text,
+    artwork_review_status_text,
     build_artwork_review_rows,
     build_artwork_review_summary,
     pending_review_item_ids,
@@ -75,6 +80,43 @@ def test_artwork_review_action_messages() -> None:
     assert artwork_review_action_message("skip", 4) == "Skipped 4 artwork candidate(s)."
 
 
+def test_artwork_review_dialog_text_helpers() -> None:
+    row = ArtworkReviewRow(
+        item_id="item-one",
+        title="One",
+        slot="grid",
+        candidate_id="grid-one",
+        path=r"C:\cache\grid-one.png",
+        provider="fixture",
+        identity_score=91,
+        set_coherence_score=82,
+        reasons=("Strong title match.", "Valid dimensions."),
+    )
+
+    assert (
+        artwork_review_header_text(
+            selected_item_count=4,
+            locked_slots=2,
+            rejected_matches=3,
+            pending_slot_count=5,
+        )
+        == "Selected rows: 4    Accepted/locked slots: 2    Rejected candidates: 3    Pending review slots: 5"
+    )
+    assert (
+        artwork_review_status_text(locked_slots=2, rejected_matches=3, pending_slot_count=5)
+        == "Artwork decisions: 2 accepted/locked, 3 rejected, 5 pending slot(s)."
+    )
+    assert artwork_review_empty_message() == "No pending artwork review candidates for selected rows."
+    assert artwork_review_detail_text(row) == (
+        "One\n"
+        "grid / fixture / grid-one\n"
+        "Identity 91    Set 82\n"
+        r"C:\cache\grid-one.png"
+        "\n"
+        "Strong title match.; Valid dimensions."
+    )
+
+
 def test_review_clear_messages() -> None:
     assert source_review_clear_message(0) == "No source review jobs to clear."
     assert source_review_clear_message(2) == "Cleared 2 source review job(s)."
@@ -110,6 +152,7 @@ if __name__ == "__main__":
     test_build_artwork_review_rows_preserves_item_order_and_slot_metadata()
     test_review_result_slot_count_only_counts_known_slots()
     test_artwork_review_action_messages()
+    test_artwork_review_dialog_text_helpers()
     test_review_clear_messages()
     test_pending_review_item_ids_preserves_selected_order()
     test_build_artwork_review_summary_counts_items_and_slots()

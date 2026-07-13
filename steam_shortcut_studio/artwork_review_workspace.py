@@ -74,6 +74,42 @@ def artwork_review_action_message(action: ArtworkReviewAction, candidate_count: 
     return f"{action_text} {candidate_count} artwork candidate(s)."
 
 
+def artwork_review_header_text(
+    selected_item_count: int,
+    locked_slots: int,
+    rejected_matches: int,
+    pending_slot_count: int,
+) -> str:
+    return (
+        f"Selected rows: {selected_item_count}    "
+        f"Accepted/locked slots: {locked_slots}    "
+        f"Rejected candidates: {rejected_matches}    "
+        f"Pending review slots: {pending_slot_count}"
+    )
+
+
+def artwork_review_status_text(locked_slots: int, rejected_matches: int, pending_slot_count: int) -> str:
+    return (
+        f"Artwork decisions: {locked_slots} accepted/locked, "
+        f"{rejected_matches} rejected, {pending_slot_count} pending slot(s)."
+    )
+
+
+def artwork_review_empty_message() -> str:
+    return "No pending artwork review candidates for selected rows."
+
+
+def artwork_review_detail_text(row: ArtworkReviewRow) -> str:
+    reasons = "; ".join(row.reasons)
+    return (
+        f"{row.title}\n"
+        f"{row.slot} / {row.provider or 'provider'} / {row.candidate_id}\n"
+        f"Identity {row.identity_score}    Set {row.set_coherence_score}\n"
+        f"{row.path}\n"
+        f"{reasons}"
+    ).strip()
+
+
 def source_review_clear_message(review_count: int) -> str:
     if review_count:
         return f"Cleared {review_count} source review job(s)."

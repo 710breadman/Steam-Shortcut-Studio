@@ -37,6 +37,10 @@ from .artwork_review_workspace import (
     ArtworkReviewRow,
     artwork_rejection_clear_message,
     artwork_review_action_message,
+    artwork_review_detail_text,
+    artwork_review_empty_message,
+    artwork_review_header_text,
+    artwork_review_status_text,
     build_artwork_review_rows,
     build_artwork_review_summary,
     review_result_slot_count,
@@ -2585,11 +2589,11 @@ class MainWindow(tk.Tk):
 
         ttk.Label(
             window,
-            text=(
-                f"Selected rows: {summary.item_count}    "
-                f"Accepted/locked slots: {summary.locked_slots}    "
-                f"Rejected candidates: {summary.rejected_matches}    "
-                f"Pending review slots: {review_summary.pending_slot_count}"
+            text=artwork_review_header_text(
+                summary.item_count,
+                summary.locked_slots,
+                summary.rejected_matches,
+                review_summary.pending_slot_count,
             ),
             style="Subtle.TLabel",
         ).grid(row=0, column=0, columnspan=3, sticky="ew", padx=10, pady=(10, 6))
@@ -2647,7 +2651,7 @@ class MainWindow(tk.Tk):
             tree.insert(
                 "",
                 tk.END,
-                values=("(none)", "", "", "", "No pending artwork review candidates for selected rows."),
+                values=("(none)", "", "", "", artwork_review_empty_message()),
             )
 
         def update_preview(_event: tk.Event[Any] | None = None) -> None:
@@ -2665,16 +2669,7 @@ class MainWindow(tk.Tk):
             else:
                 preview_images.clear()
                 image_label.configure(image="", text="Preview unavailable")
-            reasons = "; ".join(row.reasons)
-            detail_label.configure(
-                text=(
-                    f"{row.title}\n"
-                    f"{row.slot} / {row.provider or 'provider'} / {row.candidate_id}\n"
-                    f"Identity {row.identity_score}    Set {row.set_coherence_score}\n"
-                    f"{row.path}\n"
-                    f"{reasons}"
-                ).strip()
-            )
+            detail_label.configure(text=artwork_review_detail_text(row))
 
         tree.bind("<<TreeviewSelect>>", update_preview)
         if review_rows:
@@ -2713,7 +2708,11 @@ class MainWindow(tk.Tk):
         ttk.Button(buttons, text="Close", command=window.destroy).grid(row=0, column=6)
         self._theme_child(window, self.palette())
         self.status_var.set(
-            f"Artwork decisions: {summary.locked_slots} accepted/locked, {summary.rejected_matches} rejected, {review_summary.pending_slot_count} pending slot(s)."
+            artwork_review_status_text(
+                summary.locked_slots,
+                summary.rejected_matches,
+                review_summary.pending_slot_count,
+            )
         )
 
     def clear_selected_artwork_rejections(self) -> None:
