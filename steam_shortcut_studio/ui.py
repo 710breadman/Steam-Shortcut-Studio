@@ -795,6 +795,7 @@ class MainWindow(tk.Tk):
         self.library_retry_job_ids: set[str] = set()
         self.library_selection_anchor_id = ""
         self.persistent_artwork_job_ids: set[str] = set()
+        self.persistent_artwork_review_results: dict[str, dict[str, object]] = {}
         self.artwork_job_status: dict[int, str] = {}
         self.manual_artwork_slots: set[tuple[int, str]] = set()
         self.detail_dirty = False
@@ -1702,6 +1703,12 @@ class MainWindow(tk.Tk):
         art_decisions_button = ttk.Button(table_actions, text="Art Decisions", command=self.show_selected_artwork_decisions)
         art_decisions_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(art_decisions_button, "Show persisted accepted/rejected artwork provider decisions for selected persistent rows.")
+        accept_art_button = ttk.Button(table_actions, text="Accept Art Review", command=self.accept_selected_artwork_reviews)
+        accept_art_button.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(accept_art_button, "Persist latest review-needed provider candidates as accepted artwork choices for selected rows.")
+        reject_art_button = ttk.Button(table_actions, text="Reject Art Review", command=self.reject_selected_artwork_reviews)
+        reject_art_button.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(reject_art_button, "Persist latest review-needed provider candidates as rejected for selected rows.")
         clear_art_rejections_button = ttk.Button(table_actions, text="Clear Art Rejections", command=self.clear_selected_artwork_rejections)
         clear_art_rejections_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(clear_art_rejections_button, "Clear persisted rejected artwork candidates for selected persistent rows after review.")
@@ -2546,6 +2553,40 @@ class MainWindow(tk.Tk):
         self.status_var.set(f"Cleared {cleared} rejected artwork candidate(s).")
         self.logger.info("Cleared %s rejected artwork candidate(s) for %s selected item(s).", cleared, len(item_ids))
 
+    def _selected_artwork_review_results(self) -> list[dict[str, object]]:
+        return [
+            result
+            for item_id in self.selected_persistent_item_ids()
+            if (result := self.persistent_artwork_review_results.get(item_id)) is not None
+        ]
+
+    def accept_selected_artwork_reviews(self) -> None:
+        results = self._selected_artwork_review_results()
+        if not results:
+            messagebox.showinfo(__app_name__, "No selected rows have pending artwork review results.")
+            return
+        accepted = 0
+        for result in results:
+            persistence = self.library_controller.accept_artwork_review_result(result)
+            accepted += persistence.accepted
+            self.persistent_artwork_review_results.pop(str(result.get("item_id") or ""), None)
+        self.apply_library_snapshot(self.library_controller.snapshot())
+        self.status_var.set(f"Accepted {accepted} artwork candidate(s).")
+        self.logger.info("Accepted %s artwork candidate(s) from review.", accepted)
+
+    def reject_selected_artwork_reviews(self) -> None:
+        results = self._selected_artwork_review_results()
+        if not results:
+            messagebox.showinfo(__app_name__, "No selected rows have pending artwork review results.")
+            return
+        rejected = 0
+        for result in results:
+            persistence = self.library_controller.reject_artwork_review_result(result)
+            rejected += persistence.rejected
+            self.persistent_artwork_review_results.pop(str(result.get("item_id") or ""), None)
+        self.status_var.set(f"Rejected {rejected} artwork candidate(s).")
+        self.logger.info("Rejected %s artwork candidate(s) from review.", rejected)
+
     def _schedule_library_controller_poll(self) -> None:
         if self.library_scan_poll_after_id is None:
             self.library_scan_poll_after_id = self.after(180, self._poll_library_controller_events)
@@ -2617,6 +2658,8 @@ class MainWindow(tk.Tk):
             persistence = self.library_controller.persist_artwork_job_result(event.result)
             requested = ", ".join(event.result.get("requested_slots", [])) if event.result else ""
             decision = str(event.result.get("decision") or event.state.value) if event.result else event.state.value
+            if decision == "review" and event.result:
+                self.persistent_artwork_review_results[event.item_id] = dict(event.result)
             status = f"Artwork {decision}"
             if requested:
                 status += f" ({requested})"

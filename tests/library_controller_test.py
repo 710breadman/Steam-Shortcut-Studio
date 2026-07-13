@@ -308,6 +308,41 @@ def test_artwork_decision_summary_and_clear_rejections_use_selected_scope() -> N
             controller.close()
 
 
+def test_artwork_review_accept_and_reject_actions_persist_choices() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = LibraryStore(Path(tmp) / "library.sqlite3")
+        item = _item("review-art", "Review Art")
+        store.replace_source_snapshot("epic", [item])
+        controller = LibraryController(store)
+        result = {
+            "item_id": item.stable_id,
+            "decision": "review",
+            "provider": "fixture",
+            "candidate_ids": {"grid": "grid-review", "hero": "hero-review"},
+            "details": {
+                "validated_files": {
+                    "grid": {"path": str(Path(tmp) / "grid.png")},
+                    "hero": {"path": str(Path(tmp) / "hero.png")},
+                }
+            },
+        }
+        try:
+            accepted = controller.accept_artwork_review_result(result)
+            assert accepted.accepted == 2
+            assert store.list_artwork_locks(item.stable_id)[0].source == "fixture"
+
+            rejected = controller.reject_artwork_review_result(result, reason="User rejected review")
+            assert rejected.rejected == 2
+            rejections = store.list_rejected_matches(item.stable_id)
+            assert {rejection.candidate_id for rejection in rejections} == {
+                "grid-review",
+                "hero-review",
+            }
+            assert all(rejection.reason == "User rejected review" for rejection in rejections)
+        finally:
+            controller.close()
+
+
 if __name__ == "__main__":
     test_controller_builds_immutable_effective_rows_and_selection()
     test_successful_async_scan_persists_and_refreshes_rows()
@@ -316,4 +351,5 @@ if __name__ == "__main__":
     test_adapter_exception_becomes_isolated_failed_job()
     test_artwork_job_results_persist_accepts_and_rejections()
     test_artwork_decision_summary_and_clear_rejections_use_selected_scope()
+    test_artwork_review_accept_and_reject_actions_persist_choices()
     print("Library controller tests passed.")

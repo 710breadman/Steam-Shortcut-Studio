@@ -342,6 +342,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork result persistence; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added production table controls to show persisted artwork decision counts and clear rejected artwork candidates for selected persistent rows
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork decision controls; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added production accept/reject actions for latest review-needed artwork results on selected persistent rows
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review actions; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 
@@ -358,7 +360,7 @@ Connect the production modern library table and selected-item actions incrementa
 
 Next controller-backed UI work:
 
-1. Add explicit accept/reject review actions for persisted artwork candidates.
+1. Build the fuller artwork review workspace around persisted candidates and slot previews.
 2. Preserve stored-row read-only behavior in all Steam write paths.
 3. Keep the legacy scan/write workflows available during migration.
 4. Add no new Steam writes.

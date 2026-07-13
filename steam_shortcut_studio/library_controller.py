@@ -244,11 +244,17 @@ class LibraryController:
                 for row in self._rows
             }
 
-    def persist_artwork_job_result(self, result: Mapping[str, object]) -> ArtworkResultPersistence:
+    def persist_artwork_job_result(
+        self,
+        result: Mapping[str, object],
+        *,
+        decision_override: str = "",
+        reason_override: str = "",
+    ) -> ArtworkResultPersistence:
         item_id = str(result.get("item_id") or "")
         if not item_id:
             return ArtworkResultPersistence()
-        decision = str(result.get("decision") or "")
+        decision = decision_override or str(result.get("decision") or "")
         provider = str(result.get("provider") or "provider")
         candidate_ids = {
             str(slot): str(candidate_id)
@@ -265,7 +271,7 @@ class LibraryController:
         if isinstance(raw_reasons, str):
             raw_reasons = (raw_reasons,)
         reasons = tuple(str(reason) for reason in raw_reasons if str(reason).strip())
-        reason_text = "; ".join(reasons)
+        reason_text = reason_override or "; ".join(reasons)
 
         accepted = 0
         rejected = 0
@@ -302,6 +308,21 @@ class LibraryController:
         if accepted or rejected:
             self.refresh()
         return ArtworkResultPersistence(accepted=accepted, rejected=rejected)
+
+    def accept_artwork_review_result(self, result: Mapping[str, object]) -> ArtworkResultPersistence:
+        return self.persist_artwork_job_result(result, decision_override="auto_accept")
+
+    def reject_artwork_review_result(
+        self,
+        result: Mapping[str, object],
+        *,
+        reason: str = "Rejected during artwork review.",
+    ) -> ArtworkResultPersistence:
+        return self.persist_artwork_job_result(
+            result,
+            decision_override="reject",
+            reason_override=reason,
+        )
 
     @staticmethod
     def _scan_result_payload(execution: PersistedSourceScan) -> dict[str, object]:
