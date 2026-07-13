@@ -21,6 +21,7 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     games_from_library_snapshot,
     is_persistent_library_game,
     library_launch_target_for_game,
+    selected_visible_library_item_ids,
     source_scan_adapters,
     source_scan_event_summary,
     source_scan_progress_summary,
@@ -148,6 +149,18 @@ def test_library_selection_helpers_use_stable_ids() -> None:
     assert [first.selected, second.selected, third.selected] == [False, True, False]
 
 
+def test_selected_visible_library_item_ids_intersects_display_and_selection_order() -> None:
+    first = game_from_library_row(_row("one", "One"))
+    second = game_from_library_row(_row("two", "Two"))
+    third = game_from_library_row(_row("three", "Three"))
+
+    assert selected_visible_library_item_ids(
+        [first, second, third],
+        [2, 0],
+        frozenset({"one", "two", "three"}),
+    ) == ("three", "one")
+
+
 def test_source_scan_event_summary_surfaces_review_codes() -> None:
     summary = source_scan_event_summary(
         source="epic",
@@ -182,6 +195,7 @@ if __name__ == "__main__":
     test_snapshot_selection_is_preserved()
     test_source_scan_adapters_cover_controller_backed_sources()
     test_library_selection_helpers_use_stable_ids()
+    test_selected_visible_library_item_ids_intersects_display_and_selection_order()
     test_source_scan_event_summary_surfaces_review_codes()
     test_source_scan_progress_summary_formats_sources()
     print("UI library adapter tests passed.")

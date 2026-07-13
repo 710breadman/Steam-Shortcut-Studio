@@ -74,6 +74,7 @@ from .ui_library_adapter import (
     library_size_for_game,
     library_source_for_game,
     library_status_for_game,
+    selected_visible_library_item_ids,
 )
 from .vdf import VdfParseError
 
@@ -2641,9 +2642,11 @@ class MainWindow(tk.Tk):
         self.logger.info("Cleared %s source review job(s).", count)
 
     def selected_persistent_item_ids(self) -> tuple[str, ...]:
-        selected = set(self.library_controller.snapshot().selected_ids)
-        visible = tuple(library_item_ids_for_games(self.games, self.displayed_game_indices))
-        return tuple(item_id for item_id in visible if item_id in selected)
+        return selected_visible_library_item_ids(
+            self.games,
+            self.displayed_game_indices,
+            self.library_controller.snapshot().selected_ids,
+        )
 
     def show_selected_artwork_decisions(self) -> None:
         item_ids = self.selected_persistent_item_ids()

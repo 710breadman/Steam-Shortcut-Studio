@@ -89,6 +89,16 @@ def library_item_ids_for_games(
     return tuple(ids)
 
 
+def selected_visible_library_item_ids(
+    games: list[DetectedGame],
+    displayed_indices: list[int],
+    selected_ids: frozenset[str] | set[str],
+) -> tuple[str, ...]:
+    visible = library_item_ids_for_games(games, displayed_indices)
+    selected = set(selected_ids)
+    return tuple(item_id for item_id in visible if item_id in selected)
+
+
 def library_item_ids_between(
     games: list[DetectedGame],
     ordered_indices: list[int],
