@@ -224,12 +224,13 @@ Implemented:
 - [x] Provider result conversion has a UI-independent adapter for real provider wiring
 - [x] Current real artwork provider search orchestration is extracted behind a UI-independent `ArtworkProviderSearchService`
 - [x] Metadata refresh target selection is extracted from `ui.py`
+- [x] Metadata provider selection and `MetadataService` construction are extracted from `ui.py`
 - [x] Artwork review dialog is backed by a UI-independent row mapper and shows selected slot previews
 - [x] Artwork review queue can skip pending candidates without persisting accept/reject decisions
 - [x] Backups action shows transaction history through a UI-independent view model
 - [x] Transaction/history controller exposes backup and manifest open targets without Tk dependencies
 - [ ] Extract scan orchestration from `ui.py`
-- [ ] Extract metadata/provider orchestration from `ui.py`
+- [x] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
 - [x] Extract transaction/history controller
 - [ ] Build production modern library table using `LibraryStore`
@@ -309,6 +310,7 @@ python tests/job_queue_test.py
 python tests/bulk_artwork_test.py
 python tests/artwork_provider_adapter_test.py
 python tests/metadata_targets_test.py
+python tests/metadata_service_factory_test.py
 python tests/artwork_review_workspace_test.py
 python tests/epic_source_test.py
 python tests/steam_folder_source_test.py
@@ -386,6 +388,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selection summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `metadata_targets.py` so selected/current metadata-refresh target selection and native Steam exclusion are tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after metadata target extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `metadata_service_factory.py` so metadata provider toggles and `MetadataService` construction are tested outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after metadata service factory extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 

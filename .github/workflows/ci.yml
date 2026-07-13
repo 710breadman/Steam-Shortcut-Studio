@@ -81,6 +81,9 @@ jobs:
       - name: Run metadata target tests
         run: python tests/metadata_targets_test.py
 
+      - name: Run metadata service factory tests
+        run: python tests/metadata_service_factory_test.py
+
       - name: Run artwork review workspace tests
         run: python tests/artwork_review_workspace_test.py
 

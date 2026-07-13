@@ -32,15 +32,8 @@ from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
 from .jobs import TERMINAL_JOB_STATES
 from .library_controller import LibraryController, LibraryControllerEvent
 from .library_store import LibraryStore
-from .metadata import (
-    build_metadata_notes,
-    LocalExecutableMetadataProvider,
-    MetadataService,
-    PcGamingWikiMetadataProvider,
-    SteamGridDbMetadataProvider,
-    SteamStoreMetadataProvider,
-    WikipediaMetadataProvider,
-)
+from .metadata import build_metadata_notes, MetadataService
+from .metadata_service_factory import build_metadata_service
 from .metadata_targets import metadata_refresh_indices, selected_or_current_indices
 from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfile
 from .reporting import export_csv, export_json
@@ -3805,18 +3798,7 @@ class MainWindow(tk.Tk):
     def make_metadata_service(self, client: SteamGridDbClient | None = None) -> MetadataService:
         client = client or self.make_sgdb_client()
         sources = {key: var.get() for key, var in self.metadata_source_vars.items()}
-        providers: list[Any] = []
-        if sources.get("executable", True):
-            providers.append(LocalExecutableMetadataProvider())
-        if sources.get("steam", True):
-            providers.append(SteamStoreMetadataProvider())
-        if client.configured and sources.get("steamgriddb", True):
-            providers.append(SteamGridDbMetadataProvider(client))
-        if sources.get("pcgamingwiki", True):
-            providers.append(PcGamingWikiMetadataProvider())
-        if sources.get("wikipedia", True):
-            providers.append(WikipediaMetadataProvider())
-        return MetadataService(providers, self.logger)
+        return build_metadata_service(sources, client, self.logger)
 
     def selected_or_current_games(self) -> list[DetectedGame]:
         indices = selected_or_current_indices(
