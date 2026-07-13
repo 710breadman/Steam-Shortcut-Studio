@@ -45,6 +45,7 @@ from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfil
 from .reporting import export_csv, export_json
 from .scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
 from .scan_plan import build_combined_scan_plan
+from .selection_summary import build_selection_summary
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
 from .source_scan_ui_state import SourceScanUiState
@@ -3313,20 +3314,11 @@ class MainWindow(tk.Tk):
         self.update_bulk_action_status()
 
     def update_bulk_action_status(self) -> None:
-        total = len(self.games)
-        selected = sum(1 for game in self.games if game.selected)
-        visible_total = len(self.displayed_game_indices)
-        visible_selected = sum(
-            1
-            for index in self.displayed_game_indices
-            if 0 <= index < len(self.games) and self.games[index].selected
+        summary = build_selection_summary(
+            tuple(game.selected for game in self.games),
+            tuple(self.displayed_game_indices),
         )
-        if not total:
-            self.bulk_status_var.set("0 selected")
-            return
-        self.bulk_status_var.set(
-            f"{selected}/{total} selected; {visible_selected}/{visible_total} visible"
-        )
+        self.bulk_status_var.set(summary.label)
 
     def set_all_games_selected(self, selected: bool) -> None:
         self.set_games_selected(selected, visible_only=False)
