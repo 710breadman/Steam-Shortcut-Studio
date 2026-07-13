@@ -15,6 +15,7 @@ from steam_shortcut_studio.modern_library_view import (  # noqa: E402
     library_sort_key,
     library_sort_preset_key,
     modern_library_row_for_game,
+    modern_library_table_row_for_game,
     view_filter_status_message,
     visible_library_indices,
 )
@@ -191,6 +192,54 @@ def test_sort_model_matches_production_table_columns_and_presets() -> None:
     assert library_sort_preset_key(selected, "Title A-Z") == "selected"
 
 
+def test_table_row_model_matches_production_values() -> None:
+    folder = DetectedGame(
+        title="Folder Game",
+        root_path=Path(r"C:\Games\Folder Game"),
+        selected=True,
+        selected_exe=Path(r"C:\Games\Folder Game\Game.exe"),
+    )
+    steam = DetectedGame(title="Steam Game", root_path=Path(), source_type="steam", steam_appid=456, existing_appid=789)
+    stored = DetectedGame(
+        title="Stored",
+        root_path=Path(),
+        metadata=GameMetadata(
+            clean_title="Stored",
+            extra={
+                LIBRARY_ITEM_ID_META: "item-stored",
+                LIBRARY_SOURCE_META: "epic",
+                LIBRARY_STATUS_META: "ready",
+                LIBRARY_LAUNCH_TARGET_META: r"C:\Games\Stored\Stored.exe",
+                LIBRARY_PLATFORM_META: "windows",
+                LIBRARY_SIZE_META: "1024",
+            },
+        ),
+        source_type="library",
+    )
+
+    assert modern_library_table_row_for_game(folder, artwork_status="Queued").values == (
+        "[x]",
+        "Folder Game",
+        "Folder",
+        "PC",
+        "Selected",
+        r"C:\Games\Folder Game\Game.exe",
+        "Queued",
+        "New non-Steam",
+    )
+    assert modern_library_table_row_for_game(steam).existing == "Installed Steam + non-Steam (title)"
+    assert modern_library_table_row_for_game(stored).values == (
+        "[ ]",
+        "Stored",
+        "Epic",
+        "Windows / 1 KB",
+        "Ready",
+        r"C:\Games\Stored\Stored.exe",
+        "Not fetched",
+        "Stored Epic (Ready)",
+    )
+
+
 if __name__ == "__main__":
     test_persistent_library_maps_to_modern_library_rows()
     test_missing_items_are_hidden_by_default_and_optional()
@@ -198,4 +247,5 @@ if __name__ == "__main__":
     test_modern_library_row_for_game_matches_production_table_fields()
     test_view_filter_model_matches_production_table_filters()
     test_sort_model_matches_production_table_columns_and_presets()
+    test_table_row_model_matches_production_values()
     print("Modern library view tests passed.")

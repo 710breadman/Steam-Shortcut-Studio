@@ -56,7 +56,7 @@ from .modern_library_view import (
     game_matches_view_filter,
     library_sort_key,
     library_sort_preset_key,
-    modern_library_row_for_game,
+    modern_library_table_row_for_game,
     view_filter_status_message,
     visible_library_indices,
 )
@@ -3214,43 +3214,10 @@ class MainWindow(tk.Tk):
         return game_identity_keys(game)
 
     def game_row_values(self, game: DetectedGame) -> tuple[str, str, str, str, str, str, str, str]:
-        exe = str(game.selected_exe or "")
-        source = game.source_type.replace("_", " ").title() if game.source_type else "Folder"
-        platform = "PC"
-        status = "Selected" if game.selected else "Ready"
-        if is_persistent_library_game(game):
-            row = modern_library_row_for_game(game)
-            exe = library_launch_target_for_game(game) or exe
-            source = row.source
-            platform = row.platform_size_label
-            status = row.status
-        if game.is_native_steam_game:
-            exe = f"Steam AppID {game.steam_appid}"
-            source = "Steam"
-            platform = "PC"
-            status = "Installed"
-        if is_persistent_library_game(game):
-            existing = f"Stored {source} ({status})"
-        elif game.is_native_steam_game:
-            existing = "Installed Steam"
-            if game.existing_appid is not None:
-                existing += f" + non-Steam ({game.existing_match or 'title'})"
-        elif game.existing_appid is not None:
-            existing = "Existing non-Steam"
-            if game.existing_match:
-                existing += f" ({game.existing_match})"
-        else:
-            existing = "New non-Steam"
-        return (
-            "[x]" if game.selected else "[ ]",
-            game.display_title,
-            source,
-            platform,
-            status,
-            exe,
-            self.artwork_job_status.get(id(game), game.artwork_status),
-            existing,
-        )
+        return modern_library_table_row_for_game(
+            game,
+            artwork_status=self.artwork_job_status.get(id(game)),
+        ).values
 
     def sync_library_selection_state(self) -> None:
         active_id = ""

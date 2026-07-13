@@ -11,6 +11,7 @@ from .ui_library_adapter import (
     LIBRARY_SIZE_META,
     is_persistent_library_game,
     library_item_id_for_game,
+    library_launch_target_for_game,
     library_platform_for_game,
     library_source_for_game,
     library_status_for_game,
@@ -32,6 +33,31 @@ class ModernLibraryRow:
         if self.size and self.size != "\u2014":
             return f"{self.platform} / {self.size}"
         return self.platform
+
+
+@dataclass(frozen=True, slots=True)
+class ModernLibraryTableRow:
+    checkbox: str
+    title: str
+    source: str
+    platform: str
+    status: str
+    executable: str
+    artwork: str
+    existing: str
+
+    @property
+    def values(self) -> tuple[str, str, str, str, str, str, str, str]:
+        return (
+            self.checkbox,
+            self.title,
+            self.source,
+            self.platform,
+            self.status,
+            self.executable,
+            self.artwork,
+            self.existing,
+        )
 
 
 def format_size(size_bytes: int) -> str:
@@ -103,6 +129,54 @@ def modern_library_row_for_game(game: DetectedGame) -> ModernLibraryRow:
         last_played="\u2014",
         size=size,
         status=library_status_for_game(game),
+    )
+
+
+def existing_status_label(game: DetectedGame, *, source: str, status: str) -> str:
+    if is_persistent_library_game(game):
+        return f"Stored {source} ({status})"
+    if game.is_native_steam_game:
+        label = "Installed Steam"
+        if game.existing_appid is not None:
+            label += f" + non-Steam ({game.existing_match or 'title'})"
+        return label
+    if game.existing_appid is not None:
+        label = "Existing non-Steam"
+        if game.existing_match:
+            label += f" ({game.existing_match})"
+        return label
+    return "New non-Steam"
+
+
+def modern_library_table_row_for_game(
+    game: DetectedGame,
+    *,
+    artwork_status: str | None = None,
+) -> ModernLibraryTableRow:
+    executable = str(game.selected_exe or "")
+    source = game.source_type.replace("_", " ").title() if game.source_type else "Folder"
+    platform = "PC"
+    status = "Selected" if game.selected else "Ready"
+    if is_persistent_library_game(game):
+        row = modern_library_row_for_game(game)
+        executable = library_launch_target_for_game(game) or executable
+        source = row.source
+        platform = row.platform_size_label
+        status = row.status
+    if game.is_native_steam_game:
+        executable = f"Steam AppID {game.steam_appid}"
+        source = "Steam"
+        platform = "PC"
+        status = "Installed"
+    return ModernLibraryTableRow(
+        checkbox="[x]" if game.selected else "[ ]",
+        title=game.display_title,
+        source=source,
+        platform=platform,
+        status=status,
+        executable=executable,
+        artwork=artwork_status or game.artwork_status,
+        existing=existing_status_label(game, source=source, status=status),
     )
 
 
