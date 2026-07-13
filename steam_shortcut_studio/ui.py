@@ -2534,15 +2534,89 @@ class MainWindow(tk.Tk):
             messagebox.showinfo(__app_name__, "Select stored library rows before reviewing artwork decisions.")
             return
         summary = self.library_controller.artwork_decision_summary(item_ids)
-        message = (
-            f"Selected rows: {summary.item_count}\n"
-            f"Accepted/locked slots: {summary.locked_slots}\n"
-            f"Rejected provider candidates: {summary.rejected_matches}"
-        )
+        pending = [
+            self.persistent_artwork_review_results[item_id]
+            for item_id in item_ids
+            if item_id in self.persistent_artwork_review_results
+        ]
+        window = tk.Toplevel(self)
+        window.title("Artwork Decisions")
+        window.geometry("840x420")
+        window.transient(self)
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(1, weight=1)
+
+        ttk.Label(
+            window,
+            text=(
+                f"Selected rows: {summary.item_count}    "
+                f"Accepted/locked slots: {summary.locked_slots}    "
+                f"Rejected candidates: {summary.rejected_matches}    "
+                f"Pending review rows: {len(pending)}"
+            ),
+            style="Subtle.TLabel",
+        ).grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 6))
+
+        tree = ttk.Treeview(window, columns=("item", "slot", "candidate", "path"), show="headings")
+        tree.heading("item", text="Item")
+        tree.heading("slot", text="Slot")
+        tree.heading("candidate", text="Candidate")
+        tree.heading("path", text="Validated File")
+        tree.column("item", width=220, anchor=tk.W)
+        tree.column("slot", width=80, anchor=tk.W)
+        tree.column("candidate", width=180, anchor=tk.W)
+        tree.column("path", width=320, anchor=tk.W)
+        tree.grid(row=1, column=0, sticky="nsew", padx=10)
+        scrollbar = ttk.Scrollbar(window, orient=tk.VERTICAL, command=tree.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 10))
+        tree.configure(yscrollcommand=scrollbar.set)
+
+        row_count = 0
+        row_titles = {row.item_id: row.title for row in self.library_controller.snapshot().rows}
+        for result in pending:
+            item_id = str(result.get("item_id") or "")
+            candidate_ids = dict(result.get("candidate_ids") or {})
+            details = dict(result.get("details") or {})
+            validated_files = dict(details.get("validated_files") or {})
+            for slot, candidate_id in candidate_ids.items():
+                file_info = dict(validated_files.get(slot) or {})
+                tree.insert(
+                    "",
+                    tk.END,
+                    values=(
+                        row_titles.get(item_id, item_id),
+                        str(slot),
+                        str(candidate_id),
+                        str(file_info.get("path") or ""),
+                    ),
+                )
+                row_count += 1
+        if row_count == 0:
+            tree.insert("", tk.END, values=("(none)", "", "", "No pending artwork review candidates for selected rows."))
+
+        buttons = ttk.Frame(window, padding=10)
+        buttons.grid(row=2, column=0, columnspan=2, sticky="ew")
+        buttons.columnconfigure(0, weight=1)
+        ttk.Button(
+            buttons,
+            text="Accept Selected Review",
+            command=lambda: (self.accept_selected_artwork_reviews(), window.destroy()),
+        ).grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(
+            buttons,
+            text="Reject Selected Review",
+            command=lambda: (self.reject_selected_artwork_reviews(), window.destroy()),
+        ).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(
+            buttons,
+            text="Clear Rejections",
+            command=lambda: (self.clear_selected_artwork_rejections(), window.destroy()),
+        ).grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(buttons, text="Close", command=window.destroy).grid(row=0, column=4)
+        self._theme_child(window, self.palette())
         self.status_var.set(
-            f"Artwork decisions: {summary.locked_slots} accepted/locked, {summary.rejected_matches} rejected."
+            f"Artwork decisions: {summary.locked_slots} accepted/locked, {summary.rejected_matches} rejected, {len(pending)} pending."
         )
-        messagebox.showinfo(__app_name__, message)
 
     def clear_selected_artwork_rejections(self) -> None:
         item_ids = self.selected_persistent_item_ids()

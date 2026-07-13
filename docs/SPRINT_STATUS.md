@@ -158,8 +158,8 @@ Every new adapter must remain read-only and use the shared `SourceAdapter` model
 
 Remaining:
 
-- [ ] Extract current provider searches from `ui.py`
-- [ ] Convert provider responses into validated coordinator outcomes
+- [x] Extract current provider searches from `ui.py`
+- [x] Convert provider responses into validated coordinator outcomes
 - [x] Persist accepted/rejected candidate decisions through the library store
 - [ ] Connect progress, review, retry, and apply controls to the production modern UI
 
@@ -344,6 +344,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork decision controls; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added production accept/reject actions for latest review-needed artwork results on selected persistent rows
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review actions; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added an artwork decisions dialog that lists pending review candidates with slot, candidate ID, and validated file path for selected persistent rows
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after the artwork decisions dialog; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 
