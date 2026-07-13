@@ -226,6 +226,7 @@ Implemented:
 - [x] Combined Steam/folder scan readiness and step-count planning are extracted from `ui.py`
 - [x] Combined Steam/folder scan progress and final status messages are extracted from `ui.py`
 - [x] Folder-only scan root planning and status messages are extracted from `ui.py`
+- [x] Steam-only scan path validation and status messages are extracted from `ui.py`
 - [x] Selected persistent rows can be queued through `BulkArtworkCoordinator` using real provider search and review-safe validated outcomes
 - [x] Provider result conversion has a UI-independent adapter for real provider wiring
 - [x] Current real artwork provider search orchestration is extracted behind a UI-independent `ArtworkProviderSearchService`
@@ -405,6 +406,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after combined scan status extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `FolderScanPlan` and folder scan message helpers so folder-only scan planning/status text is tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after folder scan plan extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `SteamScanPlan` and Steam scan message helpers so Steam-only scan validation/status text is tested outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after Steam scan plan extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added a Tk-free `SelectionSummary` model for selected/visible table status text
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selection summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `selection_actions.py` so selection command status labels are tested outside `ui.py`

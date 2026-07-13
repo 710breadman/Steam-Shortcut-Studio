@@ -42,6 +42,7 @@ from .scan_plan import (
     CombinedScanCounts,
     build_combined_scan_plan,
     build_folder_scan_plan,
+    build_steam_scan_plan,
     combined_scan_done_message,
     combined_scan_folder_cross_check_message,
     combined_scan_folder_start_message,
@@ -54,6 +55,10 @@ from .scan_plan import (
     folder_scan_initial_message,
     folder_scan_ready_message,
     folder_scan_start_message,
+    steam_scan_done_message,
+    steam_scan_found_message,
+    steam_scan_ready_message,
+    steam_scan_start_message,
 )
 from .selection_actions import selection_action_result
 from .selection_summary import build_selection_summary
@@ -3099,23 +3104,25 @@ class MainWindow(tk.Tk):
     def scan_steam_games(self) -> None:
         self.save_current_detail()
         self.save_settings_from_ui(log=False)
-        steam_text = self.steam_path_var.get().strip()
-        if not steam_text:
+        plan = build_steam_scan_plan(
+            self.steam_path_var.get(),
+            is_valid_steam_path=is_valid_steam_path,
+        )
+        if not plan.has_path or plan.steam_path is None:
             messagebox.showwarning(__app_name__, "Detect or choose your Steam folder first.")
             return
-        steam_path = Path(steam_text)
-        if not is_valid_steam_path(steam_path):
+        if not plan.steam_ready:
             messagebox.showwarning(__app_name__, "The Steam folder does not look valid yet.")
             return
         profile = self.current_profile()
 
         def task() -> list[DetectedGame]:
-            self.set_task_progress("Reading Steam's installed game shelves...", 0, 3)
+            self.set_task_progress(steam_scan_start_message(), 0, 3)
             self.raise_if_cancelled()
-            games = scan_installed_steam_games(steam_path)
+            games = scan_installed_steam_games(plan.steam_path)
             self.post_ui(lambda data=list(games): self.replace_live_scan_games(self.merge_game_lists(self.games, data), f"Found {len(data)} installed Steam game(s)."))
             self.raise_if_cancelled()
-            self.set_task_progress(f"Found {len(games)} installed Steam game(s); checking shortcuts and existing art...", 1, 3)
+            self.set_task_progress(steam_scan_found_message(len(games)), 1, 3)
             if profile:
                 try:
                     records = load_shortcuts(profile.shortcuts_path)
@@ -3128,7 +3135,7 @@ class MainWindow(tk.Tk):
                         self.logger.info("Loaded %s existing Steam artwork file(s) while scanning Steam library.", loaded)
                 except Exception as exc:
                     self.logger.warning("Could not read existing shortcuts for Steam library comparison: %s", exc)
-            self.set_task_progress("Steam library scan ready for artwork editing.", 3, 3)
+            self.set_task_progress(steam_scan_ready_message(), 3, 3)
             return games
 
         def done(games: list[DetectedGame]) -> None:
@@ -3143,7 +3150,7 @@ class MainWindow(tk.Tk):
             else:
                 self.refresh_game_table()
             added = len(self.games) - before
-            self.status_var.set(f"Added {added} Steam library item(s) to the list.")
+            self.status_var.set(steam_scan_done_message(added))
             self.prefetch_artwork_for_games(games, reason="Steam library scan")
 
         self.run_background("Scanning Steam library", task, done)

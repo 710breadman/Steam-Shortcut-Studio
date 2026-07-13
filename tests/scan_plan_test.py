@@ -10,6 +10,7 @@ from steam_shortcut_studio.scan_plan import (  # noqa: E402
     CombinedScanCounts,
     build_combined_scan_plan,
     build_folder_scan_plan,
+    build_steam_scan_plan,
     combined_scan_done_message,
     combined_scan_folder_cross_check_message,
     combined_scan_folder_start_message,
@@ -22,6 +23,10 @@ from steam_shortcut_studio.scan_plan import (  # noqa: E402
     folder_scan_initial_message,
     folder_scan_ready_message,
     folder_scan_start_message,
+    steam_scan_done_message,
+    steam_scan_found_message,
+    steam_scan_ready_message,
+    steam_scan_start_message,
 )
 
 
@@ -78,9 +83,31 @@ def test_folder_scan_plan_and_messages() -> None:
     assert folder_scan_done_message(6) == "Scanned 6 game folder(s)."
 
 
+def test_steam_scan_plan_and_messages() -> None:
+    plan = build_steam_scan_plan(
+        r"C:\Steam",
+        is_valid_steam_path=lambda path: str(path) == r"C:\Steam",
+    )
+    invalid = build_steam_scan_plan(
+        r"C:\BadSteam",
+        is_valid_steam_path=lambda _path: False,
+    )
+
+    assert plan.has_path is True
+    assert plan.steam_ready is True
+    assert invalid.has_path is True
+    assert invalid.steam_ready is False
+    assert build_steam_scan_plan("", is_valid_steam_path=lambda _path: False).has_path is False
+    assert steam_scan_start_message() == "Reading Steam's installed game shelves..."
+    assert steam_scan_found_message(9) == "Found 9 installed Steam game(s); checking shortcuts and existing art..."
+    assert steam_scan_ready_message() == "Steam library scan ready for artwork editing."
+    assert steam_scan_done_message(4) == "Added 4 Steam library item(s) to the list."
+
+
 if __name__ == "__main__":
     test_combined_scan_plan_counts_enabled_sources()
     test_combined_scan_plan_rejects_missing_sources()
     test_combined_scan_messages_match_scan_counts()
     test_folder_scan_plan_and_messages()
+    test_steam_scan_plan_and_messages()
     print("Combined scan plan tests passed.")

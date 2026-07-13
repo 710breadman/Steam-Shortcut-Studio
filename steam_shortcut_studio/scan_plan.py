@@ -37,6 +37,16 @@ class FolderScanPlan:
         return self.collection_root is not None
 
 
+@dataclass(frozen=True, slots=True)
+class SteamScanPlan:
+    steam_path: Path | None
+    steam_ready: bool
+
+    @property
+    def has_path(self) -> bool:
+        return self.steam_path is not None
+
+
 def combined_scan_initial_message() -> str:
     return "Scanning Steam and folders..."
 
@@ -85,9 +95,37 @@ def folder_scan_done_message(folder_count: int) -> str:
     return f"Scanned {folder_count} game folder(s)."
 
 
+def steam_scan_start_message() -> str:
+    return "Reading Steam's installed game shelves..."
+
+
+def steam_scan_found_message(steam_count: int) -> str:
+    return f"Found {steam_count} installed Steam game(s); checking shortcuts and existing art..."
+
+
+def steam_scan_ready_message() -> str:
+    return "Steam library scan ready for artwork editing."
+
+
+def steam_scan_done_message(added_count: int) -> str:
+    return f"Added {added_count} Steam library item(s) to the list."
+
+
 def build_folder_scan_plan(collection_root_text: str) -> FolderScanPlan:
     collection_root = Path(collection_root_text.strip()) if collection_root_text.strip() else None
     return FolderScanPlan(collection_root=collection_root)
+
+
+def build_steam_scan_plan(
+    steam_text: str,
+    *,
+    is_valid_steam_path: Callable[[Path], bool],
+) -> SteamScanPlan:
+    steam_path = Path(steam_text.strip()) if steam_text.strip() else None
+    return SteamScanPlan(
+        steam_path=steam_path,
+        steam_ready=bool(steam_path and is_valid_steam_path(steam_path)),
+    )
 
 
 def build_combined_scan_plan(
