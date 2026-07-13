@@ -241,6 +241,7 @@ Implemented:
 - [x] Artwork review queue can retry selected pending items without rerunning accepted rows
 - [x] Artwork queue item/submission status messages are produced outside `ui.py`
 - [x] Selection target and review-clear status messages are produced outside `ui.py`
+- [x] Select-needing-artwork and select-new-shortcut target planning is extracted from `ui.py`
 - [x] Backups action shows transaction history through a UI-independent view model
 - [x] Transaction/history controller exposes backup and manifest open targets without Tk dependencies
 - [ ] Extract scan orchestration from `ui.py`

@@ -48,6 +48,9 @@ jobs:
       - name: Run selection action tests
         run: python tests/selection_actions_test.py
 
+      - name: Run selection target tests
+        run: python tests/selection_targets_test.py
+
       - name: Run transaction contract tests
         run: python tests/transaction_test.py
 

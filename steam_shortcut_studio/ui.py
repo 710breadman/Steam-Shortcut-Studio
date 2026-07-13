@@ -72,6 +72,7 @@ from .scan_plan import (
 )
 from .selection_actions import selection_action_result, selection_target_label
 from .selection_summary import build_selection_summary
+from .selection_targets import build_selection_target_plan
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
 from .source_scan_ui_state import SourceScanUiState
@@ -3416,34 +3417,24 @@ class MainWindow(tk.Tk):
         self.status_var.set(selection_action_result("invert", "all", len(self.games)).label)
 
     def select_needing_artwork(self) -> None:
-        count = 0
-        library_ids_to_clear: list[str] = []
-        for game in self.games:
-            item_id = library_item_id_for_game(game)
-            if item_id:
-                library_ids_to_clear.append(item_id)
-                continue
-            game.selected = game.artwork.selected_count() < len(game.artwork.slot_names())
-            if game.selected:
-                count += 1
-        self.set_library_items_selected(tuple(library_ids_to_clear), False)
+        plan = build_selection_target_plan(self.games, "needing_artwork")
+        selected_indices = set(plan.selected_indices)
+        for index, game in enumerate(self.games):
+            if not library_item_id_for_game(game):
+                game.selected = index in selected_indices
+        self.set_library_items_selected(plan.persistent_item_ids_to_clear, False)
         self.refresh_all_game_rows()
-        self.status_var.set(selection_target_label("needing_artwork", count))
+        self.status_var.set(selection_target_label("needing_artwork", plan.selected_count))
 
     def select_new_nonsteam(self) -> None:
-        count = 0
-        library_ids_to_clear: list[str] = []
-        for game in self.games:
-            item_id = library_item_id_for_game(game)
-            if item_id:
-                library_ids_to_clear.append(item_id)
-                continue
-            game.selected = not game.is_native_steam_game and game.existing_appid is None
-            if game.selected:
-                count += 1
-        self.set_library_items_selected(tuple(library_ids_to_clear), False)
+        plan = build_selection_target_plan(self.games, "new_nonsteam")
+        selected_indices = set(plan.selected_indices)
+        for index, game in enumerate(self.games):
+            if not library_item_id_for_game(game):
+                game.selected = index in selected_indices
+        self.set_library_items_selected(plan.persistent_item_ids_to_clear, False)
         self.refresh_all_game_rows()
-        self.status_var.set(selection_target_label("new_nonsteam", count))
+        self.status_var.set(selection_target_label("new_nonsteam", plan.selected_count))
 
     def sort_key_for_game(self, game: DetectedGame, column: str) -> Any:
         if column == "add":
