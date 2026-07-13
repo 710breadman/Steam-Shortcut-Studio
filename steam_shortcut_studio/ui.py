@@ -25,7 +25,14 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
-from .artwork_queue_status import artwork_queue_item_status, artwork_queue_submission_message
+from .artwork_queue_status import (
+    artwork_cleared_message,
+    artwork_editor_opened_message,
+    artwork_preview_refreshed_message,
+    artwork_queue_item_status,
+    artwork_queue_submission_message,
+    custom_artwork_selected_message,
+)
 from .artwork_review_workspace import (
     ArtworkReviewRow,
     artwork_rejection_clear_message,
@@ -4616,7 +4623,7 @@ class MainWindow(tk.Tk):
         self.forget_preview_cache_for_path(path)
         self.update_artwork_previews()
         self.refresh_game_row(self.current_game_index)
-        self.status_var.set(f"Custom {kind} artwork selected for {game.display_title}.")
+        self.status_var.set(custom_artwork_selected_message(kind, game.display_title))
         self.logger.info("Custom %s artwork selected for %s: %s", kind, game.display_title, path)
 
     def clear_selected_artwork_image(self, kind: str) -> None:
@@ -4630,7 +4637,7 @@ class MainWindow(tk.Tk):
         self.manual_artwork_slots.discard((id(game), kind))
         self.update_artwork_previews()
         self.refresh_game_row(self.current_game_index)
-        self.status_var.set(f"Cleared {kind} artwork for {game.display_title}.")
+        self.status_var.set(artwork_cleared_message(kind, game.display_title))
         self.logger.info("Cleared %s artwork for %s.", kind, game.display_title)
 
     def refresh_artwork_after_external_edit(self, path: Path, kind: str) -> None:
@@ -4639,7 +4646,7 @@ class MainWindow(tk.Tk):
         if self.current_game_index is not None:
             self.refresh_game_row(self.current_game_index)
             game = self.games[self.current_game_index]
-            self.status_var.set(f"Refreshed {kind} artwork preview for {game.display_title}.")
+            self.status_var.set(artwork_preview_refreshed_message(kind, game.display_title))
 
     def edit_selected_artwork_in_paint(self, kind: str) -> None:
         path = self.selected_artwork_path_for_kind(kind)
@@ -4664,7 +4671,7 @@ class MainWindow(tk.Tk):
             self.logger.warning("Could not open external image editor for %s: %s", path, exc)
             messagebox.showerror(__app_name__, f"Could not open {app_name}:\n\n{exc}")
             return
-        self.status_var.set(f"Opened {kind} artwork in {app_name}.")
+        self.status_var.set(artwork_editor_opened_message(kind, app_name))
 
         if os.name != "nt":
             self.after(1500, lambda: self.refresh_artwork_after_external_edit(path, kind))

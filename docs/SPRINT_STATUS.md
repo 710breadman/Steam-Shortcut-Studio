@@ -243,6 +243,7 @@ Implemented:
 - [x] Artwork review queue can skip pending candidates without persisting accept/reject decisions
 - [x] Artwork review queue can retry selected pending items without rerunning accepted rows
 - [x] Artwork queue item/submission status messages are produced outside `ui.py`
+- [x] Artwork slot select/clear/refresh/open status messages are produced outside `ui.py`
 - [x] Selection target and review-clear status messages are produced outside `ui.py`
 - [x] Select-needing-artwork and select-new-shortcut target planning is extracted from `ui.py`
 - [x] Select-needing-artwork and select-new-shortcut target application is extracted from `ui.py`
