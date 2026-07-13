@@ -1666,6 +1666,9 @@ class MainWindow(tk.Tk):
                 ("Select visible", lambda: self.set_games_selected(True, visible_only=True)),
                 ("Clear visible", lambda: self.set_games_selected(False, visible_only=True)),
                 ("Invert visible", self.invert_visible_selection),
+                ("Select current filter", lambda: self.set_current_filter_selected(True)),
+                ("Clear current filter", lambda: self.set_current_filter_selected(False)),
+                ("Invert current filter", self.invert_current_filter_selection),
                 None,
                 ("Select games needing artwork", self.select_needing_artwork),
                 ("Select new non-Steam shortcuts", self.select_new_nonsteam),
@@ -3346,6 +3349,15 @@ class MainWindow(tk.Tk):
                 self.games[index].selected = not self.games[index].selected
         self.refresh_all_game_rows()
         self.status_var.set(f"Inverted {len(self.displayed_game_indices)} visible game row(s).")
+
+    def set_current_filter_selected(self, selected: bool) -> None:
+        self.set_games_selected(selected, visible_only=True)
+        action = "Selected" if selected else "Cleared"
+        self.status_var.set(f"{action} {len(self.displayed_game_indices)} row(s) matching current filter.")
+
+    def invert_current_filter_selection(self) -> None:
+        self.invert_visible_selection()
+        self.status_var.set(f"Inverted {len(self.displayed_game_indices)} row(s) matching current filter.")
 
     def invert_all_selection(self) -> None:
         self.invert_library_item_selection(library_item_ids_for_games(self.games))

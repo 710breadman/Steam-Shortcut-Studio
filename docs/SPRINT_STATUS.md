@@ -210,6 +210,7 @@ Implemented:
 - [x] Ctrl-clicking persistent table rows toggles stable-ID selection through `SelectionState`
 - [x] Space toggles the focused persistent row through the same stable-ID selection path
 - [x] Selection menu exposes explicit visible-scope actions and the table shows selected/visible counts
+- [x] Selection menu exposes explicit current-filter actions alongside visible/all scopes
 - [x] Bulk stable-ID selection, inversion, and range selection are exposed through `LibraryController`
 - [x] Source-scan terminal events surface review/failure issue codes from the Tk thread
 - [x] Production table has a selected-row source refresh action backed by `LibraryController.selected_sources`
@@ -367,6 +368,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after connecting the Backups view to transaction history; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `Skip Art Review` controls that dismiss pending review candidates without storing accept/reject decisions, backed by a UI-independent slot-count helper
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review skip controls; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added explicit current-filter select/clear/invert commands so matching-filter scope is visible alongside all/visible scopes
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after current-filter selection commands; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 
