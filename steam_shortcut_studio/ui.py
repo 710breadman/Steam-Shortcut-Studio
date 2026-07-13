@@ -122,6 +122,7 @@ ARTWORK_SEARCH_CACHE_VERSION = 3
 STEAMGRIDDB_API_URL = "https://www.steamgriddb.com/profile/preferences"
 RAWG_API_URL = "https://rawg.io/apidocs"
 TK_SHIFT_MASK = 0x0001
+TK_CONTROL_MASK = 0x0004
 APP_ICON_PNG = "sss.png"
 APP_ICON_ICO = "sss.ico"
 DEFAULT_COMPAT_TOOL_LABEL = "Steam default (clear forced tool)"
@@ -3361,6 +3362,11 @@ class MainWindow(tk.Tk):
         if row_id and clicked_column == "add":
             index = int(row_id)
             self.toggle_game_selection_at_index(index, range_select=bool(event.state & TK_SHIFT_MASK))
+            self.games_tree.selection_set(row_id)
+            self.games_tree.focus(row_id)
+        elif row_id and (event.state & TK_CONTROL_MASK):
+            index = int(row_id)
+            self.toggle_game_selection_at_index(index)
             self.games_tree.selection_set(row_id)
             self.games_tree.focus(row_id)
 

@@ -207,6 +207,7 @@ Implemented:
 - [x] Production table exposes persistent source, platform/size, and status columns for controller-backed rows
 - [x] Persistent row checkbox and selection-menu actions mutate `SelectionState` by stable library ID
 - [x] Shift-clicking persistent row checkboxes selects visible stable-ID ranges without touching hidden rows
+- [x] Ctrl-clicking persistent table rows toggles stable-ID selection through `SelectionState`
 - [x] Space toggles the focused persistent row through the same stable-ID selection path
 - [x] Selection menu exposes explicit visible-scope actions and the table shows selected/visible counts
 - [x] Source-scan terminal events surface review/failure issue codes from the Tk thread
@@ -346,6 +347,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review actions; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added an artwork decisions dialog that lists pending review candidates with slot, candidate ID, and validated file path for selected persistent rows
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after the artwork decisions dialog; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added Ctrl-click additive selection for persistent table rows through the controller-backed stable-ID selection path
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after Ctrl-click selection wiring; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 
