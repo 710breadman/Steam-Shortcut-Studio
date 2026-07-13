@@ -45,3 +45,13 @@ def build_selection_target_plan(
         selected_indices=tuple(selected_indices),
         persistent_item_ids_to_clear=tuple(persistent_item_ids_to_clear),
     )
+
+
+def apply_selection_target_plan(
+    games: Sequence[DetectedGame],
+    plan: SelectionTargetPlan,
+) -> None:
+    selected_indices = set(plan.selected_indices)
+    for index, game in enumerate(games):
+        if not library_item_id_for_game(game):
+            game.selected = index in selected_indices
