@@ -11,41 +11,12 @@ if str(ROOT) not in sys.path:
 
 import customtkinter as ctk  # noqa: E402
 
-from steam_shortcut_studio.library_store import (  # noqa: E402
-    LibraryStore,
-    default_library_database,
+from steam_shortcut_studio.library_store import default_library_database  # noqa: E402
+from steam_shortcut_studio.modern_library_view import (  # noqa: E402
+    format_size,
+    load_modern_library_rows,
 )
 from prototypes import modern_shell  # noqa: E402
-
-
-def format_size(size_bytes: int) -> str:
-    value = max(0, int(size_bytes))
-    if value == 0:
-        return "—"
-    units = ("B", "KB", "MB", "GB", "TB")
-    amount = float(value)
-    unit = units[0]
-    for candidate in units:
-        unit = candidate
-        if amount < 1024.0 or candidate == units[-1]:
-            break
-        amount /= 1024.0
-    precision = 0 if unit in {"B", "KB"} else 1
-    return f"{amount:.{precision}f} {unit}"
-
-
-def status_for_record(store: LibraryStore, item_id: str) -> str:
-    resolved = store.resolve_item(item_id)
-    if resolved is None:
-        return "Review"
-    record = resolved.record
-    if not record.is_present:
-        return "Missing"
-    if not resolved.launch_target or record.launch_target_exists is False:
-        return "Review"
-    if resolved.overridden_fields or store.list_artwork_locks(item_id):
-        return "Customized"
-    return "Ready"
 
 
 def load_library_games(
@@ -53,27 +24,18 @@ def load_library_games(
     *,
     include_missing: bool = False,
 ) -> list[modern_shell.MockGame]:
-    store = LibraryStore(database or default_library_database())
-    games: list[modern_shell.MockGame] = []
-    for record in store.list_records(include_missing=include_missing):
-        resolved = store.resolve_item(record.stable_id)
-        if resolved is None:
-            continue
-        source = record.source.replace("_", " ").title()
-        platform = record.platform.title() if record.platform else "PC"
-        games.append(
-            modern_shell.MockGame(
-                game_id=record.stable_id,
-                title=resolved.display_title,
-                source=source,
-                platform=platform,
-                last_played="—",
-                size=format_size(record.size_bytes),
-                status=status_for_record(store, record.stable_id),
-            )
+    return [
+        modern_shell.MockGame(
+            game_id=row.item_id,
+            title=row.title,
+            source=row.source,
+            platform=row.platform,
+            last_played=row.last_played,
+            size=row.size,
+            status=row.status,
         )
-    games.sort(key=lambda game: (game.title.casefold(), game.game_id))
-    return games
+        for row in load_modern_library_rows(database, include_missing=include_missing)
+    ]
 
 
 def build_parser() -> argparse.ArgumentParser:

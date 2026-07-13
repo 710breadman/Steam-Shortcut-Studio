@@ -108,6 +108,9 @@ jobs:
       - name: Run library persistence tests
         run: python tests/library_store_test.py
 
+      - name: Run modern library view tests
+        run: python tests/modern_library_view_test.py
+
       - name: Run source scan persistence tests
         run: python tests/source_scan_test.py
 

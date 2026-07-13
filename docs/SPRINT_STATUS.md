@@ -187,6 +187,7 @@ Implemented:
 - [x] Accent palette selector
 - [x] Left navigation and compact command bar
 - [x] Persistent library titles, source, platform, size, and status
+- [x] Persistent library row mapping is shared through a production package view model
 - [x] Manual-title-aware ordering
 - [x] Multi-game selection
 - [x] Prototype selection state uses shared `SelectionState`
@@ -206,6 +207,7 @@ Implemented:
 - [x] Legacy UI can queue Epic, Steam, and folder source scans through `LibraryController`
 - [x] Poll `BackgroundJobQueue` events from the UI thread for source-scan jobs
 - [x] Production table exposes persistent source, platform/size, and status columns for controller-backed rows
+- [x] Persistent library table row mapping is available outside the prototype package
 - [x] Persistent row checkbox and selection-menu actions mutate `SelectionState` by stable library ID
 - [x] Shift-clicking persistent row checkboxes selects visible stable-ID ranges without touching hidden rows
 - [x] Ctrl-clicking persistent table rows toggles stable-ID selection through `SelectionState`
