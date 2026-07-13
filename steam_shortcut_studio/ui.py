@@ -61,7 +61,12 @@ from .library_controller import LibraryController, LibraryControllerEvent
 from .library_store import LibraryStore
 from .metadata import build_metadata_notes, MetadataService
 from .metadata_service_factory import build_metadata_service
-from .metadata_targets import metadata_refresh_indices, selected_or_current_indices
+from .metadata_targets import (
+    metadata_refresh_complete_message,
+    metadata_refresh_empty_message,
+    metadata_refresh_indices,
+    selected_or_current_indices,
+)
 from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfile
 from .modern_library_view import (
     game_matches_view_filter,
@@ -4578,7 +4583,7 @@ class MainWindow(tk.Tk):
         )
         selected = [self.games[index] for index in indices]
         if not selected:
-            messagebox.showwarning(__app_name__, "Select at least one non-Steam game.")
+            messagebox.showwarning(__app_name__, metadata_refresh_empty_message())
             return
         service = self.make_metadata_service()
         index_by_game_id = {id(game): index for index, game in enumerate(self.games)}
@@ -4603,7 +4608,7 @@ class MainWindow(tk.Tk):
             self.refresh_all_game_rows()
             if self.current_game_index is not None:
                 self.load_game_detail(self.current_game_index)
-            self.status_var.set(f"Updated notes for {count} game(s).")
+            self.status_var.set(metadata_refresh_complete_message(count))
 
         self.run_background("Refreshing Steam notes", task, done)
 

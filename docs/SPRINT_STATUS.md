@@ -421,6 +421,7 @@ Latest local integration evidence, 2026-07-12:
 - Moved artwork decisions dialog header, empty-state, detail, and status text into `artwork_review_workspace.py`
 - Added explicit current-filter select/clear/invert commands so matching-filter scope is visible alongside all/visible scopes
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after current-filter selection commands; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Moved selected metadata refresh empty-state and completion text into `metadata_targets.py`
 - Added `TransactionHistoryController` so the Backups UI gets history rows, backup folder targets, and manifest targets through a Tk-free controller
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after transaction/history controller extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `CombinedScanPlan` so combined Steam/folder scan readiness and progress step counts are decided outside `ui.py`

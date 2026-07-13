@@ -26,3 +26,11 @@ def metadata_refresh_indices(
         for index in candidates
         if index < len(native_steam_flags) and not native_steam_flags[index]
     )
+
+
+def metadata_refresh_empty_message() -> str:
+    return "Select at least one non-Steam game."
+
+
+def metadata_refresh_complete_message(game_count: int) -> str:
+    return f"Updated notes for {game_count} game(s)."

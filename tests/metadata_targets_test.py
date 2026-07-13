@@ -6,6 +6,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from steam_shortcut_studio.metadata_targets import (  # noqa: E402
+    metadata_refresh_complete_message,
+    metadata_refresh_empty_message,
     metadata_refresh_indices,
     selected_or_current_indices,
 )
@@ -28,8 +30,14 @@ def test_metadata_refresh_indices_skip_native_steam_games() -> None:
     ) == (0, 3)
 
 
+def test_metadata_refresh_messages() -> None:
+    assert metadata_refresh_empty_message() == "Select at least one non-Steam game."
+    assert metadata_refresh_complete_message(4) == "Updated notes for 4 game(s)."
+
+
 if __name__ == "__main__":
     test_selected_or_current_prefers_selected_indices()
     test_selected_or_current_falls_back_to_current_index()
     test_metadata_refresh_indices_skip_native_steam_games()
+    test_metadata_refresh_messages()
     print("Metadata target tests passed.")
