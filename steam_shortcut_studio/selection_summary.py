@@ -35,3 +35,27 @@ def build_selection_summary(
         visible_total=len(visible_indices),
         visible_selected=visible_selected,
     )
+
+
+def build_mixed_selection_summary(
+    selected_flags: Sequence[bool],
+    item_ids: Sequence[str],
+    visible_indices: Sequence[int],
+    selected_item_ids: set[str] | frozenset[str],
+) -> SelectionSummary:
+    total = len(selected_flags)
+
+    def is_selected(index: int) -> bool:
+        if not 0 <= index < total:
+            return False
+        item_id = item_ids[index] if index < len(item_ids) else ""
+        return item_id in selected_item_ids if item_id else selected_flags[index]
+
+    selected = sum(1 for index in range(total) if is_selected(index))
+    visible_selected = sum(1 for index in visible_indices if is_selected(index))
+    return SelectionSummary(
+        total=total,
+        selected=selected,
+        visible_total=len(visible_indices),
+        visible_selected=visible_selected,
+    )

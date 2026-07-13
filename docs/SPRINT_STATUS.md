@@ -435,6 +435,7 @@ Latest local integration evidence, 2026-07-12:
 - Moved scan validation warning text for combined, folder, and Steam scans into `scan_plan.py`
 - Added a Tk-free `SelectionSummary` model for selected/visible table status text
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selection summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added mixed selection summary counting so persistent rows use controller `SelectionState` IDs while transient scan rows keep local flags
 - Added `selection_actions.py` so selection command status labels are tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selection action status extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `selected_visible_library_item_ids` so visible selected persistent-row scope is tested outside `ui.py`

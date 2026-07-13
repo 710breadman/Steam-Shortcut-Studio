@@ -111,7 +111,7 @@ from .scan_plan import (
     steam_scan_start_message,
 )
 from .selection_actions import selection_action_result, selection_target_label
-from .selection_summary import build_selection_summary
+from .selection_summary import build_mixed_selection_summary
 from .selection_targets import apply_selection_target_plan, build_selection_target_plan
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
@@ -3204,9 +3204,11 @@ class MainWindow(tk.Tk):
         self.update_bulk_action_status()
 
     def update_bulk_action_status(self) -> None:
-        summary = build_selection_summary(
+        summary = build_mixed_selection_summary(
             tuple(game.selected for game in self.games),
+            tuple(library_item_id_for_game(game) for game in self.games),
             tuple(self.displayed_game_indices),
+            self.library_controller.snapshot().selected_ids,
         )
         self.bulk_status_var.set(summary.label)
 
