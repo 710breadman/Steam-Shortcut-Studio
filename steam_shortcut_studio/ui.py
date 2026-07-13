@@ -39,6 +39,7 @@ from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfil
 from .reporting import export_csv, export_json
 from .scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
 from .scan_plan import build_combined_scan_plan
+from .selection_actions import selection_action_result
 from .selection_summary import build_selection_summary
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
@@ -3329,7 +3330,8 @@ class MainWindow(tk.Tk):
             count += 1
         self.refresh_all_game_rows()
         scope = "visible" if visible_only else "all"
-        self.status_var.set(f"{'Selected' if selected else 'Cleared'} {count} {scope} game row(s).")
+        action = "select" if selected else "clear"
+        self.status_var.set(selection_action_result(action, scope, count).label)
 
     def invert_visible_selection(self) -> None:
         self.invert_library_item_selection(library_item_ids_for_games(self.games, self.displayed_game_indices))
@@ -3337,16 +3339,16 @@ class MainWindow(tk.Tk):
             if not is_persistent_library_game(self.games[index]):
                 self.games[index].selected = not self.games[index].selected
         self.refresh_all_game_rows()
-        self.status_var.set(f"Inverted {len(self.displayed_game_indices)} visible game row(s).")
+        self.status_var.set(selection_action_result("invert", "visible", len(self.displayed_game_indices)).label)
 
     def set_current_filter_selected(self, selected: bool) -> None:
         self.set_games_selected(selected, visible_only=True)
-        action = "Selected" if selected else "Cleared"
-        self.status_var.set(f"{action} {len(self.displayed_game_indices)} row(s) matching current filter.")
+        action = "select" if selected else "clear"
+        self.status_var.set(selection_action_result(action, "current_filter", len(self.displayed_game_indices)).label)
 
     def invert_current_filter_selection(self) -> None:
         self.invert_visible_selection()
-        self.status_var.set(f"Inverted {len(self.displayed_game_indices)} row(s) matching current filter.")
+        self.status_var.set(selection_action_result("invert", "current_filter", len(self.displayed_game_indices)).label)
 
     def invert_all_selection(self) -> None:
         self.invert_library_item_selection(library_item_ids_for_games(self.games))
@@ -3354,7 +3356,7 @@ class MainWindow(tk.Tk):
             if not is_persistent_library_game(game):
                 game.selected = not game.selected
         self.refresh_all_game_rows()
-        self.status_var.set(f"Inverted {len(self.games)} game selection(s).")
+        self.status_var.set(selection_action_result("invert", "all", len(self.games)).label)
 
     def select_needing_artwork(self) -> None:
         count = 0

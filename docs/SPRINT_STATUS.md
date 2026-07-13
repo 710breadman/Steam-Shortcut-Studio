@@ -212,6 +212,7 @@ Implemented:
 - [x] Selection menu exposes explicit visible-scope actions and the table shows selected/visible counts
 - [x] Selection menu exposes explicit current-filter actions alongside visible/all scopes
 - [x] Selected/visible summary text is produced by a Tk-free selection summary model
+- [x] Selection action status labels are produced by a Tk-free selection action model
 - [x] Bulk stable-ID selection, inversion, and range selection are exposed through `LibraryController`
 - [x] Source-scan terminal events surface review/failure issue codes from the Tk thread
 - [x] Production table has a selected-row source refresh action backed by `LibraryController.selected_sources`
@@ -299,6 +300,7 @@ python -m compileall -q steam_shortcut_studio tests main.py
 python tests/smoke_test.py
 python tests/foundation_test.py
 python tests/selection_summary_test.py
+python tests/selection_actions_test.py
 python tests/transaction_test.py
 python tests/file_transaction_test.py
 python tests/shortcut_transaction_test.py
@@ -386,6 +388,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after combined scan plan extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added a Tk-free `SelectionSummary` model for selected/visible table status text
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selection summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `selection_actions.py` so selection command status labels are tested outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after selection action status extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `metadata_targets.py` so selected/current metadata-refresh target selection and native Steam exclusion are tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after metadata target extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `metadata_service_factory.py` so metadata provider toggles and `MetadataService` construction are tested outside `ui.py`
