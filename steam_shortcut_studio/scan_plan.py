@@ -51,6 +51,10 @@ def combined_scan_initial_message() -> str:
     return "Scanning Steam and folders..."
 
 
+def combined_scan_missing_sources_message() -> str:
+    return "Choose a valid Steam folder, a game collection folder, or both before scanning."
+
+
 def combined_scan_steam_start_message() -> str:
     return "Reading Steam shelves and installed-game manifests..."
 
@@ -79,6 +83,10 @@ def folder_scan_initial_message() -> str:
     return "Scanning games..."
 
 
+def folder_scan_missing_source_message() -> str:
+    return "Choose a game collection folder first."
+
+
 def folder_scan_start_message() -> str:
     return "Opening the folder shelves..."
 
@@ -97,6 +105,14 @@ def folder_scan_done_message(folder_count: int) -> str:
 
 def steam_scan_start_message() -> str:
     return "Reading Steam's installed game shelves..."
+
+
+def steam_scan_missing_path_message() -> str:
+    return "Detect or choose your Steam folder first."
+
+
+def steam_scan_invalid_path_message() -> str:
+    return "The Steam folder does not look valid yet."
 
 
 def steam_scan_found_message(steam_count: int) -> str:

@@ -432,6 +432,7 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after folder scan plan extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `SteamScanPlan` and Steam scan message helpers so Steam-only scan validation/status text is tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after Steam scan plan extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Moved scan validation warning text for combined, folder, and Steam scans into `scan_plan.py`
 - Added a Tk-free `SelectionSummary` model for selected/visible table status text
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selection summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `selection_actions.py` so selection command status labels are tested outside `ui.py`

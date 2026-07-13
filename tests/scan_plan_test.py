@@ -15,17 +15,21 @@ from steam_shortcut_studio.scan_plan import (  # noqa: E402
     combined_scan_folder_cross_check_message,
     combined_scan_folder_start_message,
     combined_scan_initial_message,
+    combined_scan_missing_sources_message,
     combined_scan_ready_message,
     combined_scan_steam_found_message,
     combined_scan_steam_start_message,
     folder_scan_cross_check_message,
     folder_scan_done_message,
     folder_scan_initial_message,
+    folder_scan_missing_source_message,
     folder_scan_ready_message,
     folder_scan_start_message,
     steam_scan_done_message,
     steam_scan_found_message,
+    steam_scan_invalid_path_message,
     steam_scan_live_found_message,
+    steam_scan_missing_path_message,
     steam_scan_ready_message,
     steam_scan_start_message,
 )
@@ -63,6 +67,7 @@ def test_combined_scan_messages_match_scan_counts() -> None:
     counts = CombinedScanCounts(steam=2, shortcuts=3, folders=4)
 
     assert combined_scan_initial_message() == "Scanning Steam and folders..."
+    assert combined_scan_missing_sources_message() == "Choose a valid Steam folder, a game collection folder, or both before scanning."
     assert combined_scan_steam_start_message() == "Reading Steam shelves and installed-game manifests..."
     assert combined_scan_steam_found_message(2) == "Found 2 installed Steam game(s); checking existing shortcuts and art..."
     assert combined_scan_folder_start_message() == "Opening the folder shelves and ranking executables..."
@@ -78,6 +83,7 @@ def test_folder_scan_plan_and_messages() -> None:
     assert str(plan.collection_root) == r"D:\Games"
     assert build_folder_scan_plan("").has_work is False
     assert folder_scan_initial_message() == "Scanning games..."
+    assert folder_scan_missing_source_message() == "Choose a game collection folder first."
     assert folder_scan_start_message() == "Opening the folder shelves..."
     assert folder_scan_cross_check_message(6) == "Cross-checking 6 folder game(s) with Steam shortcuts..."
     assert folder_scan_ready_message(6) == "Folder scan ready: 6 game(s) found."
@@ -99,6 +105,8 @@ def test_steam_scan_plan_and_messages() -> None:
     assert invalid.has_path is True
     assert invalid.steam_ready is False
     assert build_steam_scan_plan("", is_valid_steam_path=lambda _path: False).has_path is False
+    assert steam_scan_missing_path_message() == "Detect or choose your Steam folder first."
+    assert steam_scan_invalid_path_message() == "The Steam folder does not look valid yet."
     assert steam_scan_start_message() == "Reading Steam's installed game shelves..."
     assert steam_scan_found_message(9) == "Found 9 installed Steam game(s); checking shortcuts and existing art..."
     assert steam_scan_live_found_message(9) == "Found 9 installed Steam game(s)."

@@ -92,17 +92,21 @@ from .scan_plan import (
     combined_scan_folder_cross_check_message,
     combined_scan_folder_start_message,
     combined_scan_initial_message,
+    combined_scan_missing_sources_message,
     combined_scan_ready_message,
     combined_scan_steam_found_message,
     combined_scan_steam_start_message,
     folder_scan_cross_check_message,
     folder_scan_done_message,
     folder_scan_initial_message,
+    folder_scan_missing_source_message,
     folder_scan_ready_message,
     folder_scan_start_message,
     steam_scan_done_message,
     steam_scan_found_message,
+    steam_scan_invalid_path_message,
     steam_scan_live_found_message,
+    steam_scan_missing_path_message,
     steam_scan_ready_message,
     steam_scan_start_message,
 )
@@ -2875,7 +2879,7 @@ class MainWindow(tk.Tk):
             is_valid_steam_path=is_valid_steam_path,
         )
         if not plan.has_work:
-            messagebox.showwarning(__app_name__, "Choose a valid Steam folder, a game collection folder, or both before scanning.")
+            messagebox.showwarning(__app_name__, combined_scan_missing_sources_message())
             return
         profile = self.current_profile()
         self.replace_live_scan_games([], combined_scan_initial_message())
@@ -2961,7 +2965,7 @@ class MainWindow(tk.Tk):
         self.save_settings_from_ui(log=False)
         plan = build_folder_scan_plan(self.collection_path_var.get())
         if not plan.has_work or plan.collection_root is None:
-            messagebox.showwarning(__app_name__, "Choose a game collection folder first.")
+            messagebox.showwarning(__app_name__, folder_scan_missing_source_message())
             return
         profile = self.current_profile()
         preserved_games = [game for game in self.games if game.source_type in {"steam", "shortcut"}]
@@ -3012,10 +3016,10 @@ class MainWindow(tk.Tk):
             is_valid_steam_path=is_valid_steam_path,
         )
         if not plan.has_path or plan.steam_path is None:
-            messagebox.showwarning(__app_name__, "Detect or choose your Steam folder first.")
+            messagebox.showwarning(__app_name__, steam_scan_missing_path_message())
             return
         if not plan.steam_ready:
-            messagebox.showwarning(__app_name__, "The Steam folder does not look valid yet.")
+            messagebox.showwarning(__app_name__, steam_scan_invalid_path_message())
             return
         profile = self.current_profile()
 
