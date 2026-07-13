@@ -135,15 +135,14 @@ from .steamgrid import SteamGridDbClient, SteamGridDbError
 from .transaction_history_controller import TransactionHistoryController
 from .transaction_history_view import transaction_history_detail_text
 from .ui_library_adapter import (
-    LIBRARY_SOURCE_META,
-    LIBRARY_STATUS_META,
     apply_library_selection_to_games,
     build_library_display_update,
     is_persistent_library_game,
     library_item_ids_for_games,
     library_item_id_for_game,
     library_games_by_item_id,
-    library_launch_target_for_game,
+    persistent_library_notes_text,
+    persistent_library_reason_text,
     selected_visible_library_item_ids,
 )
 from .vdf import VdfParseError
@@ -3370,13 +3369,7 @@ class MainWindow(tk.Tk):
 
     def notes_text_for_game(self, game: DetectedGame) -> str:
         if is_persistent_library_game(game):
-            source = str(game.metadata.extra.get(LIBRARY_SOURCE_META) or "library").replace("_", " ").title()
-            status = str(game.metadata.extra.get(LIBRARY_STATUS_META) or "stored").replace("_", " ").title()
-            return (
-                f"Persistent {source} library row - {status}.\n\n"
-                "This legacy view is read-only for stored library rows. "
-                "Use source scans to refresh library data; Steam writes remain disabled for these rows."
-            )
+            return persistent_library_notes_text(game)
         if game.is_native_steam_game:
             return (
                 "Installed Steam game - protected reference row.\n\n"
@@ -3521,17 +3514,7 @@ class MainWindow(tk.Tk):
         game = self.games[self.current_game_index]
         candidate = game.selected_candidate
         if is_persistent_library_game(game):
-            lines = [
-                "Persistent library row.",
-                f"Source: {game.metadata.extra.get(LIBRARY_SOURCE_META, 'library')}",
-                f"Status: {game.metadata.extra.get(LIBRARY_STATUS_META, 'stored')}",
-                f"Install folder: {game.root_path}",
-            ]
-            launch_target = library_launch_target_for_game(game)
-            if launch_target:
-                lines.append(f"Launch target: {launch_target}")
-            lines.append("Read-only in the legacy view; no Steam writes are enabled for this row.")
-            self.reason_text.insert("1.0", "\n".join(lines))
+            self.reason_text.insert("1.0", persistent_library_reason_text(game))
         elif game.is_native_steam_game:
             lines = [
                 "Installed Steam game.",

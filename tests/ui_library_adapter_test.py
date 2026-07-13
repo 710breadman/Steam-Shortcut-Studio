@@ -17,6 +17,8 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     library_item_ids_for_games,
     library_games_by_item_id,
     library_platform_for_game,
+    persistent_library_notes_text,
+    persistent_library_reason_text,
     library_size_for_game,
     library_source_for_game,
     library_status_for_game,
@@ -78,6 +80,21 @@ def test_library_row_maps_to_read_only_legacy_game() -> None:
     assert library_status_for_game(game) == "Ready"
     assert library_size_for_game(game) == "1 KB"
     assert is_persistent_library_game(game)
+    assert persistent_library_notes_text(game) == (
+        "Persistent Folder library row - Ready.\n\n"
+        "This legacy view is read-only for stored library rows. "
+        "Use source scans to refresh library data; Steam writes remain disabled for these rows."
+    )
+    assert persistent_library_reason_text(game) == (
+        "Persistent library row.\n"
+        "Source: folder\n"
+        "Status: ready\n"
+        r"Install folder: C:\Games\Example Game"
+        "\n"
+        r"Launch target: C:\Games\Example\Example.exe"
+        "\n"
+        "Read-only in the legacy view; no Steam writes are enabled for this row."
+    )
 
 
 def test_native_steam_library_row_does_not_become_writable_native_game() -> None:

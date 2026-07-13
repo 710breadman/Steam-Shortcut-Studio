@@ -245,6 +245,30 @@ def library_size_for_game(game: DetectedGame) -> str:
         return ""
 
 
+def persistent_library_notes_text(game: DetectedGame) -> str:
+    source = library_source_for_game(game)
+    status = library_status_for_game(game)
+    return (
+        f"Persistent {source} library row - {status}.\n\n"
+        "This legacy view is read-only for stored library rows. "
+        "Use source scans to refresh library data; Steam writes remain disabled for these rows."
+    )
+
+
+def persistent_library_reason_text(game: DetectedGame) -> str:
+    lines = [
+        "Persistent library row.",
+        f"Source: {game.metadata.extra.get(LIBRARY_SOURCE_META, 'library')}",
+        f"Status: {game.metadata.extra.get(LIBRARY_STATUS_META, 'stored')}",
+        f"Install folder: {game.root_path}",
+    ]
+    launch_target = library_launch_target_for_game(game)
+    if launch_target:
+        lines.append(f"Launch target: {launch_target}")
+    lines.append("Read-only in the legacy view; no Steam writes are enabled for this row.")
+    return "\n".join(lines)
+
+
 def source_scan_adapters(
     *,
     steam_path: Path | str | None = None,
