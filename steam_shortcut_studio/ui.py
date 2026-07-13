@@ -25,7 +25,13 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
-from .artwork_review_workspace import ArtworkReviewRow, build_artwork_review_rows, build_artwork_review_summary, review_result_slot_count
+from .artwork_review_workspace import (
+    ArtworkReviewRow,
+    artwork_review_action_message,
+    build_artwork_review_rows,
+    build_artwork_review_summary,
+    review_result_slot_count,
+)
 from .artwork_search_service import ArtworkProviderSearchService
 from .artwork_sources import ARTWORK_SOURCE_LABELS
 from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
@@ -2840,7 +2846,7 @@ class MainWindow(tk.Tk):
             accepted += persistence.accepted
             self.persistent_artwork_review_results.pop(str(result.get("item_id") or ""), None)
         self.apply_library_snapshot(self.library_controller.snapshot())
-        self.status_var.set(f"Accepted {accepted} artwork candidate(s).")
+        self.status_var.set(artwork_review_action_message("accept", accepted))
         self.logger.info("Accepted %s artwork candidate(s) from review.", accepted)
 
     def reject_selected_artwork_reviews(self) -> None:
@@ -2853,7 +2859,7 @@ class MainWindow(tk.Tk):
             persistence = self.library_controller.reject_artwork_review_result(result)
             rejected += persistence.rejected
             self.persistent_artwork_review_results.pop(str(result.get("item_id") or ""), None)
-        self.status_var.set(f"Rejected {rejected} artwork candidate(s).")
+        self.status_var.set(artwork_review_action_message("reject", rejected))
         self.logger.info("Rejected %s artwork candidate(s) from review.", rejected)
 
     def skip_selected_artwork_reviews(self) -> None:
@@ -2865,7 +2871,7 @@ class MainWindow(tk.Tk):
         for result in results:
             skipped += review_result_slot_count(result)
             self.persistent_artwork_review_results.pop(str(result.get("item_id") or ""), None)
-        self.status_var.set(f"Skipped {skipped} artwork review candidate(s).")
+        self.status_var.set(artwork_review_action_message("skip", skipped))
         self.logger.info("Skipped %s artwork review candidate(s).", skipped)
 
     def retry_selected_artwork_reviews(self) -> None:

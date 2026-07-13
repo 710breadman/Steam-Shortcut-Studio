@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from .bulk_artwork import ARTWORK_SLOTS
+
+ArtworkReviewAction = Literal["accept", "reject", "skip"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +63,15 @@ def _int_value(value: object) -> int:
 def review_result_slot_count(result: Mapping[str, object]) -> int:
     candidate_ids = _object_mapping(result.get("candidate_ids"))
     return sum(1 for slot in ARTWORK_SLOTS if slot in candidate_ids)
+
+
+def artwork_review_action_message(action: ArtworkReviewAction, candidate_count: int) -> str:
+    action_text = {
+        "accept": "Accepted",
+        "reject": "Rejected",
+        "skip": "Skipped",
+    }[action]
+    return f"{action_text} {candidate_count} artwork candidate(s)."
 
 
 def pending_review_item_ids(
