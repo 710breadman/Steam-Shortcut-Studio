@@ -41,6 +41,7 @@ from .scanner import GameScanner, clean_display_title, is_specific_title_match, 
 from .scan_plan import (
     CombinedScanCounts,
     build_combined_scan_plan,
+    build_folder_scan_plan,
     combined_scan_done_message,
     combined_scan_folder_cross_check_message,
     combined_scan_folder_start_message,
@@ -48,6 +49,11 @@ from .scan_plan import (
     combined_scan_ready_message,
     combined_scan_steam_found_message,
     combined_scan_steam_start_message,
+    folder_scan_cross_check_message,
+    folder_scan_done_message,
+    folder_scan_initial_message,
+    folder_scan_ready_message,
+    folder_scan_start_message,
 )
 from .selection_actions import selection_action_result
 from .selection_summary import build_selection_summary
@@ -3044,26 +3050,25 @@ class MainWindow(tk.Tk):
     def scan_games(self) -> None:
         self.save_current_detail()
         self.save_settings_from_ui(log=False)
-        root_text = self.collection_path_var.get().strip()
-        if not root_text:
+        plan = build_folder_scan_plan(self.collection_path_var.get())
+        if not plan.has_work or plan.collection_root is None:
             messagebox.showwarning(__app_name__, "Choose a game collection folder first.")
             return
-        root = Path(root_text)
         profile = self.current_profile()
         preserved_games = [game for game in self.games if game.source_type in {"steam", "shortcut"}]
-        self.replace_live_scan_games(preserved_games, "Scanning games...")
+        self.replace_live_scan_games(preserved_games, folder_scan_initial_message())
 
         def task() -> list[DetectedGame]:
-            self.set_task_progress("Opening the folder shelves...", 0, 2)
+            self.set_task_progress(folder_scan_start_message(), 0, 2)
             scanner = GameScanner(
                 self.logger,
                 cancel_check=self.raise_if_cancelled,
                 progress_callback=lambda message: self.set_task_progress(message),
                 game_callback=lambda game: self.post_ui(lambda g=game: self.add_live_scan_game(g)),
             )
-            games = scanner.scan(root)
+            games = scanner.scan(plan.collection_root)
             self.raise_if_cancelled()
-            self.set_task_progress(f"Cross-checking {len(games)} folder game(s) with Steam shortcuts...", 1, 2)
+            self.set_task_progress(folder_scan_cross_check_message(len(games)), 1, 2)
             if profile:
                 try:
                     records = load_shortcuts(profile.shortcuts_path)
@@ -3074,7 +3079,7 @@ class MainWindow(tk.Tk):
                         self.logger.info("Loaded %s existing Steam artwork file(s) for scanned folder games.", loaded)
                 except Exception as exc:
                     self.logger.warning("Could not read existing shortcuts for duplicate detection: %s", exc)
-            self.set_task_progress(f"Folder scan ready: {len(games)} game(s) found.", 2, 2)
+            self.set_task_progress(folder_scan_ready_message(len(games)), 2, 2)
             return games
 
         def done(games: list[DetectedGame]) -> None:
@@ -3086,7 +3091,7 @@ class MainWindow(tk.Tk):
                     self.load_game_detail(self.displayed_game_indices[0])
             else:
                 self.refresh_game_table()
-            self.status_var.set(f"Scanned {len(games)} game folder(s).")
+            self.status_var.set(folder_scan_done_message(len(games)))
             self.prefetch_artwork_for_games(games, reason="folder scan")
 
         self.run_background("Scanning games", task, done)

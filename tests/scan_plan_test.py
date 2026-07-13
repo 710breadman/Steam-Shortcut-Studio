@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from steam_shortcut_studio.scan_plan import (  # noqa: E402
     CombinedScanCounts,
     build_combined_scan_plan,
+    build_folder_scan_plan,
     combined_scan_done_message,
     combined_scan_folder_cross_check_message,
     combined_scan_folder_start_message,
@@ -16,6 +17,11 @@ from steam_shortcut_studio.scan_plan import (  # noqa: E402
     combined_scan_ready_message,
     combined_scan_steam_found_message,
     combined_scan_steam_start_message,
+    folder_scan_cross_check_message,
+    folder_scan_done_message,
+    folder_scan_initial_message,
+    folder_scan_ready_message,
+    folder_scan_start_message,
 )
 
 
@@ -59,8 +65,22 @@ def test_combined_scan_messages_match_scan_counts() -> None:
     assert combined_scan_done_message(counts) == "Scanned 2 Steam, 3 existing shortcut, and 4 folder game(s)."
 
 
+def test_folder_scan_plan_and_messages() -> None:
+    plan = build_folder_scan_plan(r"D:\Games")
+
+    assert plan.has_work is True
+    assert str(plan.collection_root) == r"D:\Games"
+    assert build_folder_scan_plan("").has_work is False
+    assert folder_scan_initial_message() == "Scanning games..."
+    assert folder_scan_start_message() == "Opening the folder shelves..."
+    assert folder_scan_cross_check_message(6) == "Cross-checking 6 folder game(s) with Steam shortcuts..."
+    assert folder_scan_ready_message(6) == "Folder scan ready: 6 game(s) found."
+    assert folder_scan_done_message(6) == "Scanned 6 game folder(s)."
+
+
 if __name__ == "__main__":
     test_combined_scan_plan_counts_enabled_sources()
     test_combined_scan_plan_rejects_missing_sources()
     test_combined_scan_messages_match_scan_counts()
+    test_folder_scan_plan_and_messages()
     print("Combined scan plan tests passed.")

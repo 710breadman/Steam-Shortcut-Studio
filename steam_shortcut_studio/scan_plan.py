@@ -28,6 +28,15 @@ class CombinedScanCounts:
     folders: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class FolderScanPlan:
+    collection_root: Path | None
+
+    @property
+    def has_work(self) -> bool:
+        return self.collection_root is not None
+
+
 def combined_scan_initial_message() -> str:
     return "Scanning Steam and folders..."
 
@@ -54,6 +63,31 @@ def combined_scan_ready_message(counts: CombinedScanCounts) -> str:
 
 def combined_scan_done_message(counts: CombinedScanCounts) -> str:
     return f"Scanned {counts.steam} Steam, {counts.shortcuts} existing shortcut, and {counts.folders} folder game(s)."
+
+
+def folder_scan_initial_message() -> str:
+    return "Scanning games..."
+
+
+def folder_scan_start_message() -> str:
+    return "Opening the folder shelves..."
+
+
+def folder_scan_cross_check_message(folder_count: int) -> str:
+    return f"Cross-checking {folder_count} folder game(s) with Steam shortcuts..."
+
+
+def folder_scan_ready_message(folder_count: int) -> str:
+    return f"Folder scan ready: {folder_count} game(s) found."
+
+
+def folder_scan_done_message(folder_count: int) -> str:
+    return f"Scanned {folder_count} game folder(s)."
+
+
+def build_folder_scan_plan(collection_root_text: str) -> FolderScanPlan:
+    collection_root = Path(collection_root_text.strip()) if collection_root_text.strip() else None
+    return FolderScanPlan(collection_root=collection_root)
 
 
 def build_combined_scan_plan(
