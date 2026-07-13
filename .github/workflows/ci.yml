@@ -81,6 +81,9 @@ jobs:
       - name: Run artwork search service tests
         run: python tests/artwork_search_service_test.py
 
+      - name: Run artwork queue status tests
+        run: python tests/artwork_queue_status_test.py
+
       - name: Run metadata target tests
         run: python tests/metadata_targets_test.py
 

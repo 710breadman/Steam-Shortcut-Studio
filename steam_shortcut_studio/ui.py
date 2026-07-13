@@ -25,6 +25,7 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
+from .artwork_queue_status import artwork_queue_item_status, artwork_queue_submission_message
 from .artwork_review_workspace import (
     ArtworkReviewRow,
     artwork_review_action_message,
@@ -2624,8 +2625,8 @@ class MainWindow(tk.Tk):
             return
         for job in submission.jobs:
             self.persistent_artwork_job_ids.add(job.job_id)
-            self.set_persistent_artwork_status(job.item_id, f"Queued {status_label}")
-        self.status_var.set(f"Queued {len(submission.jobs)} {status_label} job(s).")
+            self.set_persistent_artwork_status(job.item_id, artwork_queue_item_status(status_label))
+        self.status_var.set(artwork_queue_submission_message(len(submission.jobs), status_label))
         self.set_busy_controls()
         self._schedule_library_controller_poll()
 

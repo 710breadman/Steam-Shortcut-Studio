@@ -238,6 +238,7 @@ Implemented:
 - [x] Artwork review accept/reject/skip result messages are produced outside `ui.py`
 - [x] Artwork review queue can skip pending candidates without persisting accept/reject decisions
 - [x] Artwork review queue can retry selected pending items without rerunning accepted rows
+- [x] Artwork queue item/submission status messages are produced outside `ui.py`
 - [x] Backups action shows transaction history through a UI-independent view model
 - [x] Transaction/history controller exposes backup and manifest open targets without Tk dependencies
 - [ ] Extract scan orchestration from `ui.py`
@@ -321,6 +322,7 @@ python tests/transaction_history_view_test.py
 python tests/job_queue_test.py
 python tests/bulk_artwork_test.py
 python tests/artwork_provider_adapter_test.py
+python tests/artwork_queue_status_test.py
 python tests/metadata_targets_test.py
 python tests/metadata_service_factory_test.py
 python tests/artwork_review_workspace_test.py
@@ -390,6 +392,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added artwork review action message helpers so accept/reject/skip result text is tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review action summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `artwork_queue_status.py` so artwork queue item/submission status text is tested outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork queue status extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `SourceScanUiState` to own source-scan job tracking, progress summaries, retry state, and finish summaries outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after source-scan UI state extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added a production `Backups` action that reads verified transaction history through a UI-independent view model and lists restore-backup availability plus manifest paths
