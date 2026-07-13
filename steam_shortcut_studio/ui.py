@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
-from .artwork_review_workspace import ArtworkReviewRow, build_artwork_review_rows, review_result_slot_count
+from .artwork_review_workspace import ArtworkReviewRow, build_artwork_review_rows, pending_review_item_ids, review_result_slot_count
 from .artwork_search_service import ArtworkProviderSearchService
 from .artwork_sources import ARTWORK_SOURCE_LABELS
 from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
@@ -1724,6 +1724,9 @@ class MainWindow(tk.Tk):
         skip_art_button = ttk.Button(table_actions, text="Skip Art Review", command=self.skip_selected_artwork_reviews)
         skip_art_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(skip_art_button, "Dismiss latest review-needed provider candidates for selected rows without persisting a decision.")
+        retry_art_button = ttk.Button(table_actions, text="Retry Art Review", command=self.retry_selected_artwork_reviews)
+        retry_art_button.pack(side=tk.LEFT, padx=(0, 10))
+        ToolTip(retry_art_button, "Retry selected pending artwork reviews without rerunning already accepted rows.")
         clear_art_rejections_button = ttk.Button(table_actions, text="Clear Art Rejections", command=self.clear_selected_artwork_rejections)
         clear_art_rejections_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(clear_art_rejections_button, "Clear persisted rejected artwork candidates for selected persistent rows after review.")
@@ -2543,7 +2546,9 @@ class MainWindow(tk.Tk):
         if not selected_ordered_ids:
             messagebox.showinfo(__app_name__, "Select stored library rows before planning artwork.")
             return
+        self._queue_persistent_artwork_searches_for_ids(tuple(selected_ordered_ids), "persistent artwork plan")
 
+    def _queue_persistent_artwork_searches_for_ids(self, item_ids: tuple[str, ...], status_label: str) -> None:
         client = self.make_sgdb_client()
         enabled_sources = self.active_artwork_sources()
         self.show_missing_artwork_api_prompt(enabled_sources)
@@ -2597,7 +2602,7 @@ class MainWindow(tk.Tk):
 
         submission = BulkArtworkCoordinator(self.library_controller.job_queue).submit_selected(
             self.library_controller.selection,
-            ordered_ids,
+            item_ids,
             self.library_controller.bulk_artwork_items(),
             provider_searcher,
             mode=ArtworkSearchMode.ALL_UNLOCKED,
@@ -2607,8 +2612,8 @@ class MainWindow(tk.Tk):
             return
         for job in submission.jobs:
             self.persistent_artwork_job_ids.add(job.job_id)
-            self.set_persistent_artwork_status(job.item_id, "Queued artwork plan")
-        self.status_var.set(f"Queued {len(submission.jobs)} persistent artwork plan job(s).")
+            self.set_persistent_artwork_status(job.item_id, f"Queued {status_label}")
+        self.status_var.set(f"Queued {len(submission.jobs)} {status_label} job(s).")
         self.set_busy_controls()
         self._schedule_library_controller_poll()
 
@@ -2780,10 +2785,15 @@ class MainWindow(tk.Tk):
         ).grid(row=0, column=3, padx=(0, 8))
         ttk.Button(
             buttons,
+            text="Retry Selected Review",
+            command=lambda: (self.retry_selected_artwork_reviews(), window.destroy()),
+        ).grid(row=0, column=4, padx=(0, 8))
+        ttk.Button(
+            buttons,
             text="Clear Rejections",
             command=lambda: (self.clear_selected_artwork_rejections(), window.destroy()),
-        ).grid(row=0, column=4, padx=(0, 8))
-        ttk.Button(buttons, text="Close", command=window.destroy).grid(row=0, column=5)
+        ).grid(row=0, column=5, padx=(0, 8))
+        ttk.Button(buttons, text="Close", command=window.destroy).grid(row=0, column=6)
         self._theme_child(window, self.palette())
         self.status_var.set(
             f"Artwork decisions: {summary.locked_slots} accepted/locked, {summary.rejected_matches} rejected, {len(review_rows)} pending slot(s)."
@@ -2843,6 +2853,19 @@ class MainWindow(tk.Tk):
             self.persistent_artwork_review_results.pop(str(result.get("item_id") or ""), None)
         self.status_var.set(f"Skipped {skipped} artwork review candidate(s).")
         self.logger.info("Skipped %s artwork review candidate(s).", skipped)
+
+    def retry_selected_artwork_reviews(self) -> None:
+        item_ids = pending_review_item_ids(
+            self.selected_persistent_item_ids(),
+            self.persistent_artwork_review_results,
+        )
+        if not item_ids:
+            messagebox.showinfo(__app_name__, "No selected rows have pending artwork review results to retry.")
+            return
+        for item_id in item_ids:
+            self.persistent_artwork_review_results.pop(item_id, None)
+        self._queue_persistent_artwork_searches_for_ids(item_ids, "artwork review retry")
+        self.logger.info("Retried %s selected artwork review item(s).", len(item_ids))
 
     def _schedule_library_controller_poll(self) -> None:
         if self.library_scan_poll_after_id is None:

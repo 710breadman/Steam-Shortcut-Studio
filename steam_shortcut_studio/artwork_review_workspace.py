@@ -51,6 +51,13 @@ def review_result_slot_count(result: Mapping[str, object]) -> int:
     return sum(1 for slot in ARTWORK_SLOTS if slot in candidate_ids)
 
 
+def pending_review_item_ids(
+    item_ids: Sequence[str],
+    review_results: Mapping[str, Mapping[str, object]],
+) -> tuple[str, ...]:
+    return tuple(item_id for item_id in item_ids if item_id in review_results)
+
+
 def build_artwork_review_rows(
     item_ids: Sequence[str],
     row_titles: Mapping[str, str],
