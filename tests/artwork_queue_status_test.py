@@ -8,6 +8,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from steam_shortcut_studio.artwork_queue_status import (  # noqa: E402
     artwork_cleared_message,
     artwork_editor_opened_message,
+    artwork_plan_no_jobs_message,
+    artwork_plan_selection_required_message,
     artwork_queue_item_status,
     artwork_queue_submission_message,
     artwork_preview_refreshed_message,
@@ -18,6 +20,8 @@ from steam_shortcut_studio.artwork_queue_status import (  # noqa: E402
 def test_artwork_queue_status_messages() -> None:
     assert artwork_queue_item_status("persistent artwork plan") == "Queued persistent artwork plan"
     assert artwork_queue_submission_message(3, "artwork review retry") == "Queued 3 artwork review retry job(s)."
+    assert artwork_plan_selection_required_message() == "Select stored library rows before planning artwork."
+    assert artwork_plan_no_jobs_message() == "No selected persistent artwork rows were available to queue."
 
 
 def test_artwork_slot_status_messages() -> None:

@@ -28,6 +28,8 @@ from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
 from .artwork_queue_status import (
     artwork_cleared_message,
     artwork_editor_opened_message,
+    artwork_plan_no_jobs_message,
+    artwork_plan_selection_required_message,
     artwork_preview_refreshed_message,
     artwork_queue_item_status,
     artwork_queue_submission_message,
@@ -2477,7 +2479,7 @@ class MainWindow(tk.Tk):
         self.save_settings_from_ui(log=False)
         item_ids = self.selected_persistent_item_ids()
         if not item_ids:
-            messagebox.showinfo(__app_name__, "Select stored library rows before planning artwork.")
+            messagebox.showinfo(__app_name__, artwork_plan_selection_required_message())
             return
         self._queue_persistent_artwork_searches_for_ids(item_ids, "persistent artwork plan")
 
@@ -2537,7 +2539,7 @@ class MainWindow(tk.Tk):
             mode=ArtworkSearchMode.ALL_UNLOCKED,
         )
         if not submission.jobs:
-            messagebox.showinfo(__app_name__, "No selected persistent artwork rows were available to queue.")
+            messagebox.showinfo(__app_name__, artwork_plan_no_jobs_message())
             return
         for job in submission.jobs:
             self.persistent_artwork_job_ids.add(job.job_id)

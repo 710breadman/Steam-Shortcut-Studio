@@ -9,6 +9,14 @@ def artwork_queue_submission_message(job_count: int, status_label: str) -> str:
     return f"Queued {job_count} {status_label} job(s)."
 
 
+def artwork_plan_selection_required_message() -> str:
+    return "Select stored library rows before planning artwork."
+
+
+def artwork_plan_no_jobs_message() -> str:
+    return "No selected persistent artwork rows were available to queue."
+
+
 def custom_artwork_selected_message(kind: str, title: str) -> str:
     return f"Custom {kind} artwork selected for {title}."
 
