@@ -2515,25 +2515,24 @@ class MainWindow(tk.Tk):
             return
         steam_text = self.steam_path_var.get().strip()
         root_text = self.collection_path_var.get().strip()
-        adapters = self.source_scan_state.configured_adapters(
+        plan = self.source_scan_state.selected_source_plan(
+            sources,
             steam_path=steam_text or None,
             collection_root=root_text or None,
             include_epic=True,
-            sources=sources,
         )
-        unavailable = sorted(sources - {adapter.source_name for adapter in adapters})
-        if unavailable:
+        if plan.unavailable_sources:
             self.logger.info(
                 "Selected source scan skipped unavailable source(s): %s",
-                ", ".join(unavailable),
+                ", ".join(plan.unavailable_sources),
             )
-        if not adapters:
+        if not plan.adapters:
             messagebox.showinfo(
                 __app_name__,
                 "Selected rows need a configured Steam folder or game collection folder before their source can be refreshed.",
             )
             return
-        for queued in self.source_scan_state.queue_adapters(adapters):
+        for queued in self.source_scan_state.queue_adapters(plan.adapters):
             self.logger.info("Queued selected persistent %s source scan: %s", queued.source, queued.job_id)
         self.status_var.set(self.source_scan_state.progress_summary())
         self.set_busy_controls()

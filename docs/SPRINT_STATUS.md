@@ -218,6 +218,7 @@ Implemented:
 - [x] Bulk stable-ID selection, inversion, and range selection are exposed through `LibraryController`
 - [x] Source-scan terminal events surface review/failure issue codes from the Tk thread
 - [x] Production table has a selected-row source refresh action backed by `LibraryController.selected_sources`
+- [x] Selected source refresh adapter/unavailable planning is outside `ui.py`
 - [x] Source refresh jobs show per-source queued/running progress from UI-polled job events
 - [x] Reviewed/failed source refresh jobs can be retried through the controller queue
 - [x] Reviewed source refresh jobs can be cleared after handling
@@ -355,6 +356,8 @@ Latest local integration evidence, 2026-07-12:
 - Added explicit Select/Clear/Invert visible commands plus a selected/visible count affordance in the production table toolbar
 - Added source-scan event summaries that include review/failure issue codes in UI-thread status/log updates
 - Added `Refresh Selected Sources`, which derives selected persistent source types from stable IDs and queues only those controller-backed scans
+- Added `SelectedSourceScanPlan` so selected source refresh availability is computed outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after selected source scan plan extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added per-source progress summaries for queued/running source refresh jobs from immutable job events
 - Added `LibraryController.retry_scan` plus a production `Retry Source Reviews` action for source refresh jobs that ended in review or failure
 - Added `Clear Source Reviews` to dismiss remembered source refresh review/failure jobs after handling

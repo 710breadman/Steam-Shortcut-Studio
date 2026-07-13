@@ -30,6 +30,12 @@ class SourceScanEventUpdate:
     message: str = ""
 
 
+@dataclass(frozen=True, slots=True)
+class SelectedSourceScanPlan:
+    adapters: tuple[SourceAdapter, ...]
+    unavailable_sources: tuple[str, ...]
+
+
 class SourceScanUiState:
     def __init__(self, controller: LibraryController) -> None:
         self.controller = controller
@@ -51,6 +57,25 @@ class SourceScanUiState:
             include_epic=include_epic,
             sources=sources,
         )
+
+    def selected_source_plan(
+        self,
+        sources: Iterable[str],
+        *,
+        steam_path: str | Path | None,
+        collection_root: str | Path | None,
+        include_epic: bool = True,
+    ) -> SelectedSourceScanPlan:
+        requested = {str(source).casefold() for source in sources if str(source).strip()}
+        adapters = self.configured_adapters(
+            steam_path=steam_path,
+            collection_root=collection_root,
+            include_epic=include_epic,
+            sources=requested,
+        )
+        available = {adapter.source_name.casefold() for adapter in adapters}
+        unavailable = tuple(sorted(requested - available))
+        return SelectedSourceScanPlan(adapters=adapters, unavailable_sources=unavailable)
 
     def queue_adapters(self, adapters: Iterable[SourceAdapter]) -> tuple[QueuedSourceScan, ...]:
         queued: list[QueuedSourceScan] = []

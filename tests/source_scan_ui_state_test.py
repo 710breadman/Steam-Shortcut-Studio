@@ -89,6 +89,21 @@ def test_source_scan_ui_state_tracks_queue_progress_and_finish_summary() -> None
     assert state.finish_summary() == "Persistent source scans finished: 1/3 complete, 1 review"
 
 
+def test_selected_source_plan_reports_unavailable_sources() -> None:
+    state = SourceScanUiState(FakeController())  # type: ignore[arg-type]
+
+    plan = state.selected_source_plan(
+        {"epic", "steam", "folder"},
+        steam_path=None,
+        collection_root=None,
+        include_epic=True,
+    )
+
+    assert [adapter.source_name for adapter in plan.adapters] == ["epic"]
+    assert plan.unavailable_sources == ("folder", "steam")
+
+
 if __name__ == "__main__":
     test_source_scan_ui_state_tracks_queue_progress_and_finish_summary()
+    test_selected_source_plan_reports_unavailable_sources()
     print("Source scan UI state tests passed.")
