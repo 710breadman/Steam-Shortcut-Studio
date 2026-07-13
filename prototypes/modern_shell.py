@@ -5,6 +5,8 @@ from tkinter import StringVar
 
 import customtkinter as ctk
 
+from steam_shortcut_studio.selection import SelectionState
+
 
 PALETTES = {
     "Ocean Blue": {
@@ -81,6 +83,14 @@ GAMES = [
 ]
 
 
+def initial_selection_state(games: list[MockGame]) -> SelectionState:
+    selection = SelectionState()
+    if games:
+        selection.replace((games[0].game_id,))
+        selection.set_active(games[0].game_id)
+    return selection
+
+
 class ModernShell(ctk.CTk):
     def __init__(self) -> None:
         super().__init__(fg_color=COLORS["window"])
@@ -90,8 +100,7 @@ class ModernShell(ctk.CTk):
 
         self.palette_name = "Ocean Blue"
         self.palette = PALETTES[self.palette_name]
-        self.selected_ids: set[str] = {"gow"}
-        self.active_id = "gow"
+        self.selection = initial_selection_state(GAMES)
         self.row_frames: dict[str, ctk.CTkFrame] = {}
         self.row_checks: dict[str, ctk.CTkCheckBox] = {}
         self.status_text = StringVar(value="Read-only prototype — no Steam files can be changed")
@@ -107,6 +116,22 @@ class ModernShell(ctk.CTk):
         self._build_inspector()
         self._build_footer()
         self._refresh_selection_ui()
+
+    @property
+    def selected_ids(self) -> set[str]:
+        return self.selection.selected_ids
+
+    @selected_ids.setter
+    def selected_ids(self, item_ids: set[str]) -> None:
+        self.selection.replace(item_ids)
+
+    @property
+    def active_id(self) -> str:
+        return self.selection.active_id or ""
+
+    @active_id.setter
+    def active_id(self, item_id: str) -> None:
+        self.selection.set_active(item_id or None)
 
     def _font(self, size: int, weight: str = "normal") -> ctk.CTkFont:
         return ctk.CTkFont(family="Segoe UI", size=size, weight=weight)
@@ -478,14 +503,11 @@ class ModernShell(ctk.CTk):
         ctk.CTkLabel(footer, text="●  Steam connection: mock", text_color=COLORS["success"], font=self._font(10)).grid(row=0, column=1, padx=14)
 
     def _toggle_selected(self, game_id: str) -> None:
-        if game_id in self.selected_ids:
-            self.selected_ids.remove(game_id)
-        else:
-            self.selected_ids.add(game_id)
+        self.selection.toggle(game_id)
         self._refresh_selection_ui()
 
     def _activate(self, game_id: str) -> None:
-        self.active_id = game_id
+        self.selection.set_active(game_id)
         game = next(item for item in GAMES if item.game_id == game_id)
         self.inspector_title.configure(text=game.title)
         self._refresh_selection_ui()

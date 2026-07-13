@@ -158,3 +158,6 @@ jobs:
 
       - name: Run persistent library prototype mapping tests
         run: python tests/prototype_library_test.py
+
+      - name: Run prototype shell selection tests
+        run: python tests/prototype_shell_selection_test.py

@@ -189,6 +189,7 @@ Implemented:
 - [x] Persistent library titles, source, platform, size, and status
 - [x] Manual-title-aware ordering
 - [x] Multi-game selection
+- [x] Prototype selection state uses shared `SelectionState`
 - [x] Contextual bulk action bar
 - [x] Visible `Find Art` action
 - [x] Artwork inspector and match panel
@@ -334,7 +335,7 @@ python tests/artwork_transaction_test.py
 python tests/artwork_live_transaction_test.py
 ```
 
-Optional modern UI import and persistent-library mapping are tested separately on Windows and Ubuntu.
+Optional modern UI import, persistent-library mapping, and prototype shell selection are tested separately on Windows and Ubuntu.
 
 Latest local integration evidence, 2026-07-12:
 
@@ -402,6 +403,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selection action status extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `selected_visible_library_item_ids` so visible selected persistent-row scope is tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after selected persistent scope extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Replaced prototype-local selected ID storage with shared `SelectionState` while keeping the read-only modern shell behavior intact
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after prototype `SelectionState` wiring; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `metadata_targets.py` so selected/current metadata-refresh target selection and native Steam exclusion are tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after metadata target extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `metadata_service_factory.py` so metadata provider toggles and `MetadataService` construction are tested outside `ui.py`
