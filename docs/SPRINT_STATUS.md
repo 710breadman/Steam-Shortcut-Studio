@@ -407,6 +407,7 @@ Latest local integration evidence, 2026-07-12:
 - Moved selected pending artwork review result lookup into `artwork_review_workspace.py`
 - Added artwork review action message helpers so accept/reject/skip result text is tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review action summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Moved artwork review selection-required and no-pending messages into `artwork_review_workspace.py`
 - Added `artwork_queue_status.py` so artwork queue item/submission status text is tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork queue status extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `SourceScanUiState` to own source-scan job tracking, progress summaries, retry state, and finish summaries outside `ui.py`

@@ -40,6 +40,8 @@ from .artwork_review_workspace import (
     artwork_review_detail_text,
     artwork_review_empty_message,
     artwork_review_header_text,
+    artwork_review_no_pending_message,
+    artwork_review_selection_required_message,
     artwork_review_status_text,
     build_artwork_review_rows,
     build_artwork_review_summary,
@@ -2574,7 +2576,7 @@ class MainWindow(tk.Tk):
     def show_selected_artwork_decisions(self) -> None:
         item_ids = self.selected_persistent_item_ids()
         if not item_ids:
-            messagebox.showinfo(__app_name__, "Select stored library rows before reviewing artwork decisions.")
+            messagebox.showinfo(__app_name__, artwork_review_selection_required_message("review"))
             return
         summary = self.library_controller.artwork_decision_summary(item_ids)
         review_summary = build_artwork_review_summary(item_ids, self.persistent_artwork_review_results)
@@ -2724,7 +2726,7 @@ class MainWindow(tk.Tk):
     def clear_selected_artwork_rejections(self) -> None:
         item_ids = self.selected_persistent_item_ids()
         if not item_ids:
-            messagebox.showinfo(__app_name__, "Select stored library rows before clearing artwork rejections.")
+            messagebox.showinfo(__app_name__, artwork_review_selection_required_message("clear_rejections"))
             return
         cleared = self.library_controller.clear_rejected_artwork_matches(item_ids)
         self.status_var.set(artwork_rejection_clear_message(cleared))
@@ -2736,7 +2738,7 @@ class MainWindow(tk.Tk):
     def accept_selected_artwork_reviews(self) -> None:
         results = self._selected_artwork_review_results()
         if not results:
-            messagebox.showinfo(__app_name__, "No selected rows have pending artwork review results.")
+            messagebox.showinfo(__app_name__, artwork_review_no_pending_message())
             return
         accepted = 0
         for result in results:
@@ -2750,7 +2752,7 @@ class MainWindow(tk.Tk):
     def reject_selected_artwork_reviews(self) -> None:
         results = self._selected_artwork_review_results()
         if not results:
-            messagebox.showinfo(__app_name__, "No selected rows have pending artwork review results.")
+            messagebox.showinfo(__app_name__, artwork_review_no_pending_message())
             return
         rejected = 0
         for result in results:
@@ -2763,7 +2765,7 @@ class MainWindow(tk.Tk):
     def skip_selected_artwork_reviews(self) -> None:
         results = self._selected_artwork_review_results()
         if not results:
-            messagebox.showinfo(__app_name__, "No selected rows have pending artwork review results.")
+            messagebox.showinfo(__app_name__, artwork_review_no_pending_message())
             return
         skipped = 0
         for result in results:
@@ -2779,7 +2781,7 @@ class MainWindow(tk.Tk):
         )
         item_ids = review_summary.pending_item_ids
         if not item_ids:
-            messagebox.showinfo(__app_name__, "No selected rows have pending artwork review results to retry.")
+            messagebox.showinfo(__app_name__, artwork_review_no_pending_message(retry=True))
             return
         for item_id in item_ids:
             self.persistent_artwork_review_results.pop(item_id, None)

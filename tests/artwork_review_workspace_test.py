@@ -12,6 +12,8 @@ from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
     artwork_review_detail_text,
     artwork_review_empty_message,
     artwork_review_header_text,
+    artwork_review_no_pending_message,
+    artwork_review_selection_required_message,
     artwork_review_status_text,
     build_artwork_review_rows,
     build_artwork_review_summary,
@@ -108,6 +110,13 @@ def test_artwork_review_dialog_text_helpers() -> None:
         == "Artwork decisions: 2 accepted/locked, 3 rejected, 5 pending slot(s)."
     )
     assert artwork_review_empty_message() == "No pending artwork review candidates for selected rows."
+    assert artwork_review_selection_required_message("review") == "Select stored library rows before reviewing artwork decisions."
+    assert (
+        artwork_review_selection_required_message("clear_rejections")
+        == "Select stored library rows before clearing artwork rejections."
+    )
+    assert artwork_review_no_pending_message() == "No selected rows have pending artwork review results."
+    assert artwork_review_no_pending_message(retry=True) == "No selected rows have pending artwork review results to retry."
     assert artwork_review_detail_text(row) == (
         "One\n"
         "grid / fixture / grid-one\n"

@@ -7,6 +7,7 @@ from typing import Literal
 from .bulk_artwork import ARTWORK_SLOTS
 
 ArtworkReviewAction = Literal["accept", "reject", "skip"]
+ArtworkReviewSelectionAction = Literal["review", "clear_rejections"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +98,18 @@ def artwork_review_status_text(locked_slots: int, rejected_matches: int, pending
 
 def artwork_review_empty_message() -> str:
     return "No pending artwork review candidates for selected rows."
+
+
+def artwork_review_selection_required_message(action: ArtworkReviewSelectionAction) -> str:
+    if action == "clear_rejections":
+        return "Select stored library rows before clearing artwork rejections."
+    return "Select stored library rows before reviewing artwork decisions."
+
+
+def artwork_review_no_pending_message(*, retry: bool = False) -> str:
+    if retry:
+        return "No selected rows have pending artwork review results to retry."
+    return "No selected rows have pending artwork review results."
 
 
 def artwork_review_detail_text(row: ArtworkReviewRow) -> str:
