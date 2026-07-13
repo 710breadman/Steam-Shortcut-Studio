@@ -216,6 +216,7 @@ Implemented:
 - [x] Reviewed source refresh jobs can be cleared after handling
 - [x] Selected persistent rows can be queued through `BulkArtworkCoordinator` with provider extraction still gated off
 - [x] Provider result conversion has a UI-independent adapter for future real provider wiring
+- [x] Current real artwork provider search orchestration is extracted behind a UI-independent `ArtworkProviderSearchService`
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
@@ -333,11 +334,13 @@ Latest local integration evidence, 2026-07-12:
 - Added `Plan Selected Art`, which maps selected persistent rows to `BulkArtworkItem` records and runs them through the existing coordinator without Steam writes or live provider coupling
 - Added `steam_shortcut_studio/artwork_provider_adapter.py` to convert provider assets into `ArtworkSearchOutcome` outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite on 2026-07-13; all production, source CLI, and optional prototype checks passed after installing `requirements-ui-prototype.txt` in the user site
+- Added `steam_shortcut_studio/artwork_search_service.py` as a Tk-free real provider search boundary for Steam, SteamGridDB, Wikimedia, and RAWG candidates, plus `tests/artwork_search_service_test.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after the provider-service extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 
 - `ui.py` still contains too many responsibilities
-- Current provider matching/search orchestration remains coupled to the legacy UI
+- Current provider download, auto-selection, and review presentation still run through the legacy UI path
 - The prototype must not become a second implementation of domain logic
 - Native Steam setting ownership varies by platform and may be overwritten by Steam
 - The custom VDF parser needs broader fixtures before supporting unknown future field types
@@ -349,7 +352,7 @@ Connect the production modern library table and selected-item actions incrementa
 
 Next controller-backed UI work:
 
-1. Replace the provider-pending artwork searcher with extracted real provider search adapters.
+1. Convert provider service assets into validated `ArtworkSearchOutcome` records for `BulkArtworkCoordinator`.
 2. Preserve stored-row read-only behavior in all Steam write paths.
 3. Add production bulk action controls for selected persistent rows.
 4. Keep the legacy scan/write workflows available during migration.

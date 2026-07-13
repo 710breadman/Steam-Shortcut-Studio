@@ -25,7 +25,8 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_provider_adapter import provider_pending_outcome
-from .artwork_sources import ARTWORK_SOURCE_LABELS, rawg_artwork_assets, wikimedia_artwork_assets
+from .artwork_search_service import ArtworkProviderSearchService
+from .artwork_sources import ARTWORK_SOURCE_LABELS
 from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
 from .jobs import TERMINAL_JOB_STATES
 from .library_controller import LibraryController, LibraryControllerEvent
@@ -41,14 +42,13 @@ from .metadata import (
 )
 from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfile
 from .reporting import export_csv, export_json
-from .scanner import GameScanner, clean_display_title, is_specific_title_match, should_accept_matched_title, similarity
+from .scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
 from .steam_detection import detect_steam_install, find_steam_profiles, is_steam_running, is_valid_steam_path, reopen_steam, shutdown_steam_for_write
 from .steam_compat import CompatToolWriteResult, write_compat_tool_mappings
 from .steam_library import games_from_nonsteam_shortcuts, scan_installed_steam_games
 from .steam_notes import write_metadata_notes
-from .steam_store import find_steam_app, get_steam_app_details, official_steam_assets, steam_store_media_assets
 from .steam_shortcuts import load_shortcuts, mark_existing_shortcuts, matching_record_for_game, preview_changes, upsert_games
 from .steamgrid import SteamGridDbClient, SteamGridDbError
 from .ui_library_adapter import (
@@ -290,21 +290,6 @@ def artwork_candidate_score(game: DetectedGame, search_term: str, item: dict[str
         elif candidate_year:
             score -= 0.08
     return score
-
-
-def add_steamgriddb_assets_to_slots(assets_by_kind: dict[str, list[ArtworkAsset]], kind: str, fetched: list[ArtworkAsset]) -> None:
-    if kind == "grid":
-        for asset in fetched:
-            if asset.width and asset.height and asset.width >= asset.height:
-                assets_by_kind["wide"].append(replace(asset, kind="wide", asset_id=f"{asset.asset_id}-wide"))
-            else:
-                assets_by_kind["grid"].append(asset)
-        if not assets_by_kind["wide"]:
-            assets_by_kind["wide"].extend(replace(asset, kind="wide", asset_id=f"{asset.asset_id}-wide-fallback") for asset in fetched[:3])
-        if not assets_by_kind["grid"]:
-            assets_by_kind["grid"].extend(fetched[:3])
-    else:
-        assets_by_kind[kind].extend(fetched)
 
 
 def artwork_asset_is_ready(asset: ArtworkAsset | None) -> bool:
@@ -3998,179 +3983,18 @@ class MainWindow(tk.Tk):
         sgdb_game_id: int | None = None,
         allow_metadata_updates: bool = True,
     ) -> dict[str, list[ArtworkAsset]]:
-        assets_by_kind: dict[str, list[ArtworkAsset]] = {kind: [] for kind in ARTWORK_KINDS}
-        enabled_sources = dict(enabled_sources or self.active_artwork_sources())
-        if not use_extended_sources:
-            enabled_sources = {**enabled_sources, "wikimedia": False, "rawg": False}
-        self.raise_if_cancelled()
-        search_terms = self.artwork_search_terms(game, term)
-        if not search_terms:
-            return assets_by_kind
-        broad_lookup_term = next((item for item in search_terms if "launcher" not in item.casefold()), search_terms[0])
-        release_year = release_year_from_text(game.metadata.release_year)
-        year_lookup_term = f"{broad_lookup_term} {release_year}".strip() if release_year and release_year not in broad_lookup_term else broad_lookup_term
-        steam_appid = game.steam_appid if game.is_native_steam_game and game.steam_appid else game.metadata.steam_appid
-        if enabled_sources.get("steam", True) and not steam_appid:
-            steam_match = None
-            for search_term in search_terms:
-                try:
-                    steam_match = find_steam_app(search_term, minimum_similarity=0.58)
-                except Exception as exc:
-                    self.logger.info("Steam Store artwork lookup failed for %s: %s", search_term, exc)
-                    steam_match = None
-                if steam_match:
-                    self.logger.info("Steam Store artwork match for %s using term %s.", game.display_title, search_term)
-                    break
-            if steam_match:
-                steam_appid = int(steam_match.get("id") or 0) or None
-                if allow_metadata_updates:
-                    game.metadata.steam_appid = steam_appid
-                steam_name = str(steam_match.get("name") or "")
-                if allow_metadata_updates and not game.metadata.title_locked and should_accept_matched_title(game.title, game.metadata.clean_title, steam_name):
-                    game.metadata.clean_title = steam_name
-        if enabled_sources.get("steam", True) and steam_appid:
-            self.raise_if_cancelled()
-            official = official_steam_assets(steam_appid, game.display_title)
-            for kind, assets in official.items():
-                assets_by_kind[kind].extend(assets)
-            try:
-                steam_detail = get_steam_app_details(int(steam_appid))
-            except Exception as exc:
-                self.logger.info("Steam Store media lookup failed for %s: %s", game.display_title, exc)
-                steam_detail = {}
-            if steam_detail:
-                store_media = steam_store_media_assets(int(steam_appid), game.display_title, steam_detail)
-                for kind, assets in store_media.items():
-                    assets_by_kind[kind].extend(assets)
-
-        sgdb_direct_found = False
-        if enabled_sources.get("steamgriddb", True) and client.configured and sgdb_game_id:
-            direct_count = 0
-            for kind in ("grid", "hero", "logo", "icon"):
-                self.raise_if_cancelled()
-                try:
-                    fetched = client.get_assets(int(sgdb_game_id), kind)
-                except SteamGridDbError as exc:
-                    self.logger.info("SteamGridDB %s lookup by selected game ID %s failed: %s", kind, sgdb_game_id, exc)
-                    continue
-                direct_count += len(fetched)
-                add_steamgriddb_assets_to_slots(assets_by_kind, kind, fetched)
-            if direct_count:
-                sgdb_direct_found = True
-                if allow_metadata_updates:
-                    game.metadata.sgdb_id = int(sgdb_game_id)
-                self.logger.info("SteamGridDB artwork match for %s using selected game ID %s.", game.display_title, sgdb_game_id)
-
-        if enabled_sources.get("steamgriddb", True) and client.configured and steam_appid and not sgdb_direct_found:
-            steam_appid = int(steam_appid)
-            direct_count = 0
-            for kind in ("grid", "hero", "logo", "icon"):
-                self.raise_if_cancelled()
-                try:
-                    fetched = client.get_assets_by_platform("steam", steam_appid, kind)
-                except SteamGridDbError as exc:
-                    self.logger.info("SteamGridDB %s lookup by Steam AppID %s failed: %s", kind, steam_appid, exc)
-                    continue
-                direct_count += len(fetched)
-                add_steamgriddb_assets_to_slots(assets_by_kind, kind, fetched)
-            if direct_count:
-                sgdb_direct_found = True
-                self.logger.info("SteamGridDB artwork match for %s using Steam AppID %s.", game.display_title, steam_appid)
-                try:
-                    detail = client.get_game_by_steam_appid(steam_appid)
-                except SteamGridDbError:
-                    detail = {}
-                sgdb_id = int(detail.get("id") or 0) if isinstance(detail, dict) else 0
-                if sgdb_id and allow_metadata_updates:
-                    game.metadata.sgdb_id = sgdb_id
-
-        if enabled_sources.get("wikimedia", True):
-            self.raise_if_cancelled()
-            try:
-                wikimedia = wikimedia_artwork_assets(year_lookup_term)
-            except Exception as exc:
-                self.logger.info("Wikipedia/Wikimedia artwork lookup failed for %s: %s", year_lookup_term, exc)
-            else:
-                for kind, assets in wikimedia.items():
-                    assets_by_kind[kind].extend(assets)
-
-        if enabled_sources.get("rawg", False):
-            self.raise_if_cancelled()
-            try:
-                rawg = rawg_artwork_assets(broad_lookup_term, rawg_api_key, release_year=release_year)
-            except Exception as exc:
-                self.logger.info("RAWG artwork lookup failed for %s: %s", broad_lookup_term, exc)
-            else:
-                for kind, assets in rawg.items():
-                    assets_by_kind[kind].extend(assets)
-
-        if enabled_sources.get("steamgriddb", True) and client.configured and not sgdb_direct_found:
-            self.raise_if_cancelled()
-            sgdb_games: list[dict[str, Any]] = []
-            matched_term = search_terms[0]
-            for search_term in search_terms:
-                try:
-                    candidates = client.search_games(search_term, use_cache=use_sgdb_cache)
-                except SteamGridDbError as exc:
-                    self.logger.warning("SteamGridDB lookup failed for %s: %s", search_term, exc)
-                    continue
-                if not candidates:
-                    continue
-                detailed_candidates: list[dict[str, Any]] = []
-                for candidate in candidates[:8]:
-                    game_id = int(candidate.get("id") or 0)
-                    if not game_id:
-                        detailed_candidates.append(candidate)
-                        continue
-                    try:
-                        detail = client.get_game(game_id)
-                    except SteamGridDbError:
-                        detail = {}
-                    detailed_candidates.append({**candidate, **detail} if isinstance(detail, dict) else candidate)
-                ranked_candidates = detailed_candidates or candidates
-                best_candidate = max(ranked_candidates, key=lambda item: artwork_candidate_score(game, search_term, item))
-                best_candidate_name = str(best_candidate.get("name") or "")
-                best_score = artwork_candidate_score(game, search_term, best_candidate)
-                title_match_term = search_term.replace(release_year, "").strip() if release_year else search_term
-                if best_score >= 0.52 and is_specific_title_match(title_match_term, best_candidate_name, minimum_similarity=0.52):
-                    sgdb_games = ranked_candidates
-                    matched_term = search_term
-                    self.logger.info("SteamGridDB artwork match for %s using term %s.", game.display_title, search_term)
-                    break
-                self.logger.info("SteamGridDB candidate skipped for %s; best candidate was %s.", search_term, best_candidate_name or "(none)")
-            if sgdb_games:
-                best = max(sgdb_games, key=lambda item: artwork_candidate_score(game, matched_term, item))
-                best_name = str(best.get("name") or "")
-                title_match_term = matched_term.replace(release_year, "").strip() if release_year else matched_term
-                if artwork_candidate_score(game, matched_term, best) < 0.52 or not is_specific_title_match(title_match_term, best_name, minimum_similarity=0.52):
-                    self.logger.info("SteamGridDB match skipped for %s; best candidate was %s.", matched_term, best_name or "(none)")
-                    best = {}
-                game_id = int(best.get("id") or 0)
-                if game_id:
-                    if allow_metadata_updates:
-                        game.metadata.sgdb_id = game.metadata.sgdb_id or game_id
-                    if allow_metadata_updates and not game.metadata.title_locked and should_accept_matched_title(game.title, game.metadata.clean_title, best_name):
-                        game.metadata.clean_title = best_name
-                    for kind in ("grid", "hero", "logo", "icon"):
-                        self.raise_if_cancelled()
-                        try:
-                            fetched = client.get_assets(game_id, kind)
-                        except SteamGridDbError as exc:
-                            self.logger.warning("SteamGridDB %s lookup failed for %s: %s", kind, matched_term, exc)
-                            continue
-                        add_steamgriddb_assets_to_slots(assets_by_kind, kind, fetched)
-
-        for kind, assets in assets_by_kind.items():
-            seen: set[str] = set()
-            deduped: list[ArtworkAsset] = []
-            for asset in assets:
-                dedupe_key = f"{asset.kind}:{asset.url}"
-                if dedupe_key in seen:
-                    continue
-                seen.add(dedupe_key)
-                deduped.append(asset)
-            assets_by_kind[kind] = deduped
-        return assets_by_kind
+        return ArtworkProviderSearchService(self.logger).collect_assets(
+            game,
+            term,
+            client,
+            use_sgdb_cache=use_sgdb_cache,
+            use_extended_sources=use_extended_sources,
+            enabled_sources=enabled_sources or self.active_artwork_sources(),
+            rawg_api_key=rawg_api_key,
+            sgdb_game_id=sgdb_game_id,
+            allow_metadata_updates=allow_metadata_updates,
+            cancellation_checkpoint=self.raise_if_cancelled,
+        )
 
     def display_cached_artwork_kind(self) -> None:
         if self.current_game_index is None:

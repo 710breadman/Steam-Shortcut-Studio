@@ -66,6 +66,9 @@ jobs:
       - name: Run artwork provider adapter tests
         run: python tests/artwork_provider_adapter_test.py
 
+      - name: Run artwork search service tests
+        run: python tests/artwork_search_service_test.py
+
       - name: Run Epic manifest source tests
         run: python tests/epic_source_test.py
 
