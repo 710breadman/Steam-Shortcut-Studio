@@ -21,6 +21,41 @@ class CombinedScanPlan:
         return (2 if self.steam_ready else 0) + (2 if self.folder_ready else 0) + 1
 
 
+@dataclass(frozen=True, slots=True)
+class CombinedScanCounts:
+    steam: int = 0
+    shortcuts: int = 0
+    folders: int = 0
+
+
+def combined_scan_initial_message() -> str:
+    return "Scanning Steam and folders..."
+
+
+def combined_scan_steam_start_message() -> str:
+    return "Reading Steam shelves and installed-game manifests..."
+
+
+def combined_scan_steam_found_message(steam_count: int) -> str:
+    return f"Found {steam_count} installed Steam game(s); checking existing shortcuts and art..."
+
+
+def combined_scan_folder_start_message() -> str:
+    return "Opening the folder shelves and ranking executables..."
+
+
+def combined_scan_folder_cross_check_message(folder_count: int) -> str:
+    return f"Cross-checking {folder_count} folder game(s) with Steam shortcuts and existing art..."
+
+
+def combined_scan_ready_message(counts: CombinedScanCounts) -> str:
+    return f"Scan ready: {counts.steam} Steam, {counts.shortcuts} existing shortcut, {counts.folders} folder game(s)."
+
+
+def combined_scan_done_message(counts: CombinedScanCounts) -> str:
+    return f"Scanned {counts.steam} Steam, {counts.shortcuts} existing shortcut, and {counts.folders} folder game(s)."
+
+
 def build_combined_scan_plan(
     steam_text: str,
     collection_root_text: str,

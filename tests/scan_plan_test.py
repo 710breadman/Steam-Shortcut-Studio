@@ -6,7 +6,17 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from steam_shortcut_studio.scan_plan import build_combined_scan_plan  # noqa: E402
+from steam_shortcut_studio.scan_plan import (  # noqa: E402
+    CombinedScanCounts,
+    build_combined_scan_plan,
+    combined_scan_done_message,
+    combined_scan_folder_cross_check_message,
+    combined_scan_folder_start_message,
+    combined_scan_initial_message,
+    combined_scan_ready_message,
+    combined_scan_steam_found_message,
+    combined_scan_steam_start_message,
+)
 
 
 def test_combined_scan_plan_counts_enabled_sources() -> None:
@@ -37,7 +47,20 @@ def test_combined_scan_plan_rejects_missing_sources() -> None:
     assert plan.total_steps == 1
 
 
+def test_combined_scan_messages_match_scan_counts() -> None:
+    counts = CombinedScanCounts(steam=2, shortcuts=3, folders=4)
+
+    assert combined_scan_initial_message() == "Scanning Steam and folders..."
+    assert combined_scan_steam_start_message() == "Reading Steam shelves and installed-game manifests..."
+    assert combined_scan_steam_found_message(2) == "Found 2 installed Steam game(s); checking existing shortcuts and art..."
+    assert combined_scan_folder_start_message() == "Opening the folder shelves and ranking executables..."
+    assert combined_scan_folder_cross_check_message(4) == "Cross-checking 4 folder game(s) with Steam shortcuts and existing art..."
+    assert combined_scan_ready_message(counts) == "Scan ready: 2 Steam, 3 existing shortcut, 4 folder game(s)."
+    assert combined_scan_done_message(counts) == "Scanned 2 Steam, 3 existing shortcut, and 4 folder game(s)."
+
+
 if __name__ == "__main__":
     test_combined_scan_plan_counts_enabled_sources()
     test_combined_scan_plan_rejects_missing_sources()
+    test_combined_scan_messages_match_scan_counts()
     print("Combined scan plan tests passed.")

@@ -38,7 +38,17 @@ from .metadata_targets import metadata_refresh_indices, selected_or_current_indi
 from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfile
 from .reporting import export_csv, export_json
 from .scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
-from .scan_plan import build_combined_scan_plan
+from .scan_plan import (
+    CombinedScanCounts,
+    build_combined_scan_plan,
+    combined_scan_done_message,
+    combined_scan_folder_cross_check_message,
+    combined_scan_folder_start_message,
+    combined_scan_initial_message,
+    combined_scan_ready_message,
+    combined_scan_steam_found_message,
+    combined_scan_steam_start_message,
+)
 from .selection_actions import selection_action_result
 from .selection_summary import build_selection_summary
 from .settings_store import AppSettings, SettingsStore
@@ -2923,7 +2933,7 @@ class MainWindow(tk.Tk):
             messagebox.showwarning(__app_name__, "Choose a valid Steam folder, a game collection folder, or both before scanning.")
             return
         profile = self.current_profile()
-        self.replace_live_scan_games([], "Scanning Steam and folders...")
+        self.replace_live_scan_games([], combined_scan_initial_message())
 
         def task() -> tuple[list[DetectedGame], int, int, int]:
             games: list[DetectedGame] = []
@@ -2934,12 +2944,12 @@ class MainWindow(tk.Tk):
             step = 0
             records = None
             if plan.steam_ready and plan.steam_path is not None:
-                self.set_task_progress("Reading Steam shelves and installed-game manifests...", step, total_steps)
+                self.set_task_progress(combined_scan_steam_start_message(), step, total_steps)
                 self.raise_if_cancelled()
                 steam_games = scan_installed_steam_games(plan.steam_path)
                 steam_count = len(steam_games)
                 step += 1
-                self.set_task_progress(f"Found {steam_count} installed Steam game(s); checking existing shortcuts and art...", step, total_steps)
+                self.set_task_progress(combined_scan_steam_found_message(steam_count), step, total_steps)
                 if profile:
                     try:
                         records = load_shortcuts(profile.shortcuts_path)
@@ -2958,7 +2968,7 @@ class MainWindow(tk.Tk):
                 step += 1
 
             if plan.folder_ready and plan.collection_root is not None:
-                self.set_task_progress("Opening the folder shelves and ranking executables...", step, total_steps)
+                self.set_task_progress(combined_scan_folder_start_message(), step, total_steps)
                 scanner = GameScanner(
                     self.logger,
                     cancel_check=self.raise_if_cancelled,
@@ -2969,7 +2979,7 @@ class MainWindow(tk.Tk):
                 folder_count = len(folder_games)
                 self.raise_if_cancelled()
                 step += 1
-                self.set_task_progress(f"Cross-checking {folder_count} folder game(s) with Steam shortcuts and existing art...", step, total_steps)
+                self.set_task_progress(combined_scan_folder_cross_check_message(folder_count), step, total_steps)
                 if profile:
                     try:
                         if records is None:
@@ -2984,11 +2994,8 @@ class MainWindow(tk.Tk):
                 games = self.merge_game_lists(games, folder_games)
                 step += 1
 
-            self.set_task_progress(
-                f"Scan ready: {steam_count} Steam, {shortcut_count} existing shortcut, {folder_count} folder game(s).",
-                total_steps,
-                total_steps,
-            )
+            counts = CombinedScanCounts(steam=steam_count, shortcuts=shortcut_count, folders=folder_count)
+            self.set_task_progress(combined_scan_ready_message(counts), total_steps, total_steps)
             return games, steam_count, shortcut_count, folder_count
 
         def done(result: tuple[list[DetectedGame], int, int, int]) -> None:
@@ -3001,7 +3008,8 @@ class MainWindow(tk.Tk):
                     self.load_game_detail(self.displayed_game_indices[0])
             else:
                 self.refresh_game_table()
-            self.status_var.set(f"Scanned {steam_count} Steam, {shortcut_count} existing shortcut, and {folder_count} folder game(s).")
+            counts = CombinedScanCounts(steam=steam_count, shortcuts=shortcut_count, folders=folder_count)
+            self.status_var.set(combined_scan_done_message(counts))
             self.prefetch_artwork_for_games(self.games, reason="combined scan")
 
         self.run_background("Scanning Steam and folders", task, done)
