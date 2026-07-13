@@ -214,8 +214,8 @@ Implemented:
 - [x] Source refresh jobs show per-source queued/running progress from UI-polled job events
 - [x] Reviewed/failed source refresh jobs can be retried through the controller queue
 - [x] Reviewed source refresh jobs can be cleared after handling
-- [x] Selected persistent rows can be queued through `BulkArtworkCoordinator` with provider extraction still gated off
-- [x] Provider result conversion has a UI-independent adapter for future real provider wiring
+- [x] Selected persistent rows can be queued through `BulkArtworkCoordinator` using real provider search and review-safe validated outcomes
+- [x] Provider result conversion has a UI-independent adapter for real provider wiring
 - [x] Current real artwork provider search orchestration is extracted behind a UI-independent `ArtworkProviderSearchService`
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
@@ -336,6 +336,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite on 2026-07-13; all production, source CLI, and optional prototype checks passed after installing `requirements-ui-prototype.txt` in the user site
 - Added `steam_shortcut_studio/artwork_search_service.py` as a Tk-free real provider search boundary for Steam, SteamGridDB, Wikimedia, and RAWG candidates, plus `tests/artwork_search_service_test.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after the provider-service extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Connected `Plan Selected Art` to real provider search, download, and `validate_artwork_file` before producing review-safe `ArtworkSearchOutcome` records for `BulkArtworkCoordinator`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after validated provider outcomes were wired; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 
@@ -352,7 +354,7 @@ Connect the production modern library table and selected-item actions incrementa
 
 Next controller-backed UI work:
 
-1. Convert provider service assets into validated `ArtworkSearchOutcome` records for `BulkArtworkCoordinator`.
+1. Persist accepted/rejected provider candidates and review outcomes through `LibraryStore`.
 2. Preserve stored-row read-only behavior in all Steam write paths.
 3. Add production bulk action controls for selected persistent rows.
 4. Keep the legacy scan/write workflows available during migration.

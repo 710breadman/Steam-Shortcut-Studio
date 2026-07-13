@@ -24,7 +24,7 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
-from .artwork_provider_adapter import provider_pending_outcome
+from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
 from .artwork_search_service import ArtworkProviderSearchService
 from .artwork_sources import ARTWORK_SOURCE_LABELS
 from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
@@ -2397,6 +2397,7 @@ class MainWindow(tk.Tk):
         self._schedule_library_controller_poll()
 
     def queue_persistent_artwork_searches(self) -> None:
+        self.save_settings_from_ui(log=False)
         ordered_ids = list(library_item_ids_for_games(self.games, self.displayed_game_indices))
         selected_ids = set(self.library_controller.snapshot().selected_ids)
         selected_ordered_ids = [item_id for item_id in ordered_ids if item_id in selected_ids]
@@ -2404,16 +2405,62 @@ class MainWindow(tk.Tk):
             messagebox.showinfo(__app_name__, "Select stored library rows before planning artwork.")
             return
 
-        def provider_pending_searcher(item, requested_slots, token, report_progress):
+        client = self.make_sgdb_client()
+        enabled_sources = self.active_artwork_sources()
+        self.show_missing_artwork_api_prompt(enabled_sources)
+        rawg_api_key = self.rawg_api_key_var.get().strip()
+        cache_dir = Path(self.settings.cache_dir)
+        provider_service = ArtworkProviderSearchService(self.logger)
+        game_by_item_id = {
+            item_id: game
+            for game in self.games
+            if (item_id := library_item_id_for_game(game))
+        }
+
+        def provider_searcher(item, requested_slots, token, report_progress):
             token.raise_if_cancelled()
-            report_progress(0.5, f"Provider extraction pending for {item.title}")
-            return provider_pending_outcome()
+            game = game_by_item_id.get(item.item_id)
+            if game is None:
+                return validated_artwork_assets_to_search_outcome(
+                    {},
+                    requested_slots,
+                    cache_dir=cache_dir,
+                    provider="real-providers",
+                    identity_score=0,
+                    set_coherence_score=0,
+                    reasons=("Stored row is no longer visible in the production table.",),
+                    logger=self.logger,
+                )
+            report_progress(0.15, f"Searching providers for {item.title}")
+            term = game.source_title or game.title or game.display_title
+            assets_by_kind = provider_service.collect_assets(
+                game,
+                term,
+                client,
+                use_sgdb_cache=True,
+                enabled_sources=enabled_sources,
+                rawg_api_key=rawg_api_key,
+                allow_metadata_updates=False,
+                cancellation_checkpoint=token.raise_if_cancelled,
+            )
+            token.raise_if_cancelled()
+            report_progress(0.65, f"Validating artwork candidates for {item.title}")
+            return validated_artwork_assets_to_search_outcome(
+                assets_by_kind,
+                requested_slots,
+                cache_dir=cache_dir,
+                provider="real-providers",
+                identity_score=70,
+                set_coherence_score=60,
+                reasons=("Provider candidates are decoded and cached; identity scoring still requires review.",),
+                logger=self.logger,
+            )
 
         submission = BulkArtworkCoordinator(self.library_controller.job_queue).submit_selected(
             self.library_controller.selection,
             ordered_ids,
             self.library_controller.bulk_artwork_items(),
-            provider_pending_searcher,
+            provider_searcher,
             mode=ArtworkSearchMode.ALL_UNLOCKED,
         )
         if not submission.jobs:
