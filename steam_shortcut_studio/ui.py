@@ -44,6 +44,7 @@ from .metadata import (
 from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfile
 from .reporting import export_csv, export_json
 from .scanner import GameScanner, clean_display_title, is_specific_title_match, similarity
+from .scan_plan import build_combined_scan_plan
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
 from .source_scan_ui_state import SourceScanUiState
@@ -2917,13 +2918,12 @@ class MainWindow(tk.Tk):
     def scan_all_libraries(self) -> None:
         self.save_current_detail()
         self.save_settings_from_ui(log=False)
-        steam_text = self.steam_path_var.get().strip()
-        root_text = self.collection_path_var.get().strip()
-        steam_path = Path(steam_text) if steam_text else None
-        root = Path(root_text) if root_text else None
-        steam_ready = bool(steam_path and is_valid_steam_path(steam_path))
-        folder_ready = bool(root and root.exists())
-        if not steam_ready and not folder_ready:
+        plan = build_combined_scan_plan(
+            self.steam_path_var.get(),
+            self.collection_path_var.get(),
+            is_valid_steam_path=is_valid_steam_path,
+        )
+        if not plan.has_work:
             messagebox.showwarning(__app_name__, "Choose a valid Steam folder, a game collection folder, or both before scanning.")
             return
         profile = self.current_profile()
@@ -2934,13 +2934,13 @@ class MainWindow(tk.Tk):
             steam_count = 0
             shortcut_count = 0
             folder_count = 0
-            total_steps = (2 if steam_ready else 0) + (2 if folder_ready else 0) + 1
+            total_steps = plan.total_steps
             step = 0
             records = None
-            if steam_ready and steam_path is not None:
+            if plan.steam_ready and plan.steam_path is not None:
                 self.set_task_progress("Reading Steam shelves and installed-game manifests...", step, total_steps)
                 self.raise_if_cancelled()
-                steam_games = scan_installed_steam_games(steam_path)
+                steam_games = scan_installed_steam_games(plan.steam_path)
                 steam_count = len(steam_games)
                 step += 1
                 self.set_task_progress(f"Found {steam_count} installed Steam game(s); checking existing shortcuts and art...", step, total_steps)
@@ -2961,7 +2961,7 @@ class MainWindow(tk.Tk):
                 self.post_ui(lambda data=list(games), count=steam_count: self.replace_live_scan_games(data, f"Found {count} installed Steam game(s)."))
                 step += 1
 
-            if folder_ready and root is not None:
+            if plan.folder_ready and plan.collection_root is not None:
                 self.set_task_progress("Opening the folder shelves and ranking executables...", step, total_steps)
                 scanner = GameScanner(
                     self.logger,
@@ -2969,7 +2969,7 @@ class MainWindow(tk.Tk):
                     progress_callback=lambda message: self.set_task_progress(message),
                     game_callback=lambda game: self.post_ui(lambda g=game: self.add_live_scan_game(g)),
                 )
-                folder_games = scanner.scan(root)
+                folder_games = scanner.scan(plan.collection_root)
                 folder_count = len(folder_games)
                 self.raise_if_cancelled()
                 step += 1

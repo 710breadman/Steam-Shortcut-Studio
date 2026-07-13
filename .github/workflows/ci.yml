@@ -84,6 +84,9 @@ jobs:
       - name: Run Steam and folder source tests
         run: python tests/steam_folder_source_test.py
 
+      - name: Run combined scan plan tests
+        run: python tests/scan_plan_test.py
+
       - name: Run library persistence tests
         run: python tests/library_store_test.py
 

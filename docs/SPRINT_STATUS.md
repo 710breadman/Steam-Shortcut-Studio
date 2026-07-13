@@ -218,6 +218,7 @@ Implemented:
 - [x] Reviewed/failed source refresh jobs can be retried through the controller queue
 - [x] Reviewed source refresh jobs can be cleared after handling
 - [x] Source-scan job IDs, progress, retry state, and finish summaries are extracted from `ui.py`
+- [x] Combined Steam/folder scan readiness and step-count planning are extracted from `ui.py`
 - [x] Selected persistent rows can be queued through `BulkArtworkCoordinator` using real provider search and review-safe validated outcomes
 - [x] Provider result conversion has a UI-independent adapter for real provider wiring
 - [x] Current real artwork provider search orchestration is extracted behind a UI-independent `ArtworkProviderSearchService`
@@ -307,6 +308,7 @@ python tests/artwork_provider_adapter_test.py
 python tests/artwork_review_workspace_test.py
 python tests/epic_source_test.py
 python tests/steam_folder_source_test.py
+python tests/scan_plan_test.py
 python tests/library_store_test.py
 python tests/source_scan_test.py
 python tests/source_scan_ui_state_test.py
@@ -374,6 +376,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after current-filter selection commands; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `TransactionHistoryController` so the Backups UI gets history rows, backup folder targets, and manifest targets through a Tk-free controller
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after transaction/history controller extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `CombinedScanPlan` so combined Steam/folder scan readiness and progress step counts are decided outside `ui.py`
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after combined scan plan extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 
