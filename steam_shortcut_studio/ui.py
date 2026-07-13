@@ -53,7 +53,7 @@ from .steam_library import games_from_nonsteam_shortcuts, scan_installed_steam_g
 from .steam_notes import write_metadata_notes
 from .steam_shortcuts import load_shortcuts, mark_existing_shortcuts, matching_record_for_game, preview_changes, upsert_games
 from .steamgrid import SteamGridDbClient, SteamGridDbError
-from .transaction_history_view import build_transaction_history_view
+from .transaction_history_controller import TransactionHistoryController
 from .ui_library_adapter import (
     LIBRARY_SOURCE_META,
     LIBRARY_STATUS_META,
@@ -762,6 +762,7 @@ class MainWindow(tk.Tk):
         self.log_path = self.settings_store.settings_dir / "logs" / "steam_shortcut_studio.log"
         self.library_store = LibraryStore()
         self.library_controller = LibraryController(self.library_store)
+        self.transaction_history_controller = TransactionHistoryController()
         self.games: list[DetectedGame] = []
         self.profiles: list[SteamProfile] = []
         self.current_game_index: int | None = None
@@ -2333,7 +2334,7 @@ class MainWindow(tk.Tk):
             messagebox.showerror(__app_name__, f"Could not open path:\n\n{exc}")
 
     def show_transaction_history(self) -> None:
-        view = build_transaction_history_view()
+        view = self.transaction_history_controller.history_view()
         window = tk.Toplevel(self)
         window.title("Backups")
         window.geometry("1080x460")
@@ -2411,16 +2412,18 @@ class MainWindow(tk.Tk):
 
         def open_backup() -> None:
             row = selected_row()
-            if row is None or not row.backup_path:
+            target = self.transaction_history_controller.backup_folder_target(row) if row is not None else None
+            if target is None:
                 messagebox.showinfo(__app_name__, "Selected transaction has no restore backup.")
                 return
-            self.open_filesystem_path(str(Path(row.backup_path).parent))
+            self.open_filesystem_path(str(target.path))
 
         def open_manifest() -> None:
             row = selected_row()
             if row is None:
                 return
-            self.open_filesystem_path(row.manifest_path)
+            target = self.transaction_history_controller.manifest_target(row)
+            self.open_filesystem_path(str(target.path))
 
         tree.bind("<<TreeviewSelect>>", update_detail)
         if rows_by_id:

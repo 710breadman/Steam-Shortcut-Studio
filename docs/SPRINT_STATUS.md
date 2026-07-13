@@ -224,10 +224,11 @@ Implemented:
 - [x] Artwork review dialog is backed by a UI-independent row mapper and shows selected slot previews
 - [x] Artwork review queue can skip pending candidates without persisting accept/reject decisions
 - [x] Backups action shows transaction history through a UI-independent view model
+- [x] Transaction/history controller exposes backup and manifest open targets without Tk dependencies
 - [ ] Extract scan orchestration from `ui.py`
 - [ ] Extract metadata/provider orchestration from `ui.py`
 - [ ] Extract selection and bulk-action controllers
-- [ ] Extract transaction/history controller
+- [x] Extract transaction/history controller
 - [ ] Build production modern library table using `LibraryStore`
 - [ ] Use `SelectionState` instead of widget-local IDs
 - [x] Connect the Backups view to transaction history
@@ -298,6 +299,7 @@ python tests/file_transaction_test.py
 python tests/shortcut_transaction_test.py
 python tests/app_transaction_wiring_test.py
 python tests/transaction_history_test.py
+python tests/transaction_history_controller_test.py
 python tests/transaction_history_view_test.py
 python tests/job_queue_test.py
 python tests/bulk_artwork_test.py
@@ -370,6 +372,8 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review skip controls; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added explicit current-filter select/clear/invert commands so matching-filter scope is visible alongside all/visible scopes
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after current-filter selection commands; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Added `TransactionHistoryController` so the Backups UI gets history rows, backup folder targets, and manifest targets through a Tk-free controller
+- Re-ran the full local Windows Python 3.11 CI-equivalent suite after transaction/history controller extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
 ## Known Risks
 

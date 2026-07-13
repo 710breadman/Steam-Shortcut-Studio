@@ -57,6 +57,9 @@ jobs:
       - name: Run transaction history tests
         run: python tests/transaction_history_test.py
 
+      - name: Run transaction history controller tests
+        run: python tests/transaction_history_controller_test.py
+
       - name: Run transaction history view tests
         run: python tests/transaction_history_view_test.py
 
