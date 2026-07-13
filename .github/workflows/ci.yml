@@ -105,6 +105,9 @@ jobs:
       - name: Run combined scan plan tests
         run: python tests/scan_plan_test.py
 
+      - name: Run game merge tests
+        run: python tests/game_merge_test.py
+
       - name: Run library persistence tests
         run: python tests/library_store_test.py
 
