@@ -17,6 +17,7 @@ from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
     build_artwork_review_summary,
     pending_review_item_ids,
     review_result_slot_count,
+    selected_artwork_review_results,
     source_review_clear_message,
 )
 
@@ -133,6 +134,19 @@ def test_pending_review_item_ids_preserves_selected_order() -> None:
     ) == ("second", "first")
 
 
+def test_selected_artwork_review_results_preserves_selected_order() -> None:
+    first = {"item_id": "first", "candidate_ids": {"grid": "grid-1"}}
+    second = {"item_id": "second", "candidate_ids": {"logo": "logo-2"}}
+
+    assert selected_artwork_review_results(
+        ("missing", "second", "first"),
+        {
+            "first": first,
+            "second": second,
+        },
+    ) == (second, first)
+
+
 def test_build_artwork_review_summary_counts_items_and_slots() -> None:
     summary = build_artwork_review_summary(
         ("missing", "second", "first"),
@@ -155,5 +169,6 @@ if __name__ == "__main__":
     test_artwork_review_dialog_text_helpers()
     test_review_clear_messages()
     test_pending_review_item_ids_preserves_selected_order()
+    test_selected_artwork_review_results_preserves_selected_order()
     test_build_artwork_review_summary_counts_items_and_slots()
     print("Artwork review workspace tests passed.")

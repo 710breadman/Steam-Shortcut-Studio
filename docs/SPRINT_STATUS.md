@@ -404,6 +404,7 @@ Latest local integration evidence, 2026-07-12:
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review slot previews; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `ArtworkReviewSummary` so selected item, pending item, and pending slot counts are tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
+- Moved selected pending artwork review result lookup into `artwork_review_workspace.py`
 - Added artwork review action message helpers so accept/reject/skip result text is tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after artwork review action summary extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 - Added `artwork_queue_status.py` so artwork queue item/submission status text is tested outside `ui.py`

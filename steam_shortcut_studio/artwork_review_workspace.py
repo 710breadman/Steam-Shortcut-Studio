@@ -127,6 +127,17 @@ def pending_review_item_ids(
     return tuple(item_id for item_id in item_ids if item_id in review_results)
 
 
+def selected_artwork_review_results(
+    item_ids: Sequence[str],
+    review_results: Mapping[str, Mapping[str, object]],
+) -> tuple[Mapping[str, object], ...]:
+    return tuple(
+        result
+        for item_id in item_ids
+        if (result := review_results.get(item_id)) is not None
+    )
+
+
 def build_artwork_review_summary(
     item_ids: Sequence[str],
     review_results: Mapping[str, Mapping[str, object]],

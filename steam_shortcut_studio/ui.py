@@ -44,6 +44,7 @@ from .artwork_review_workspace import (
     build_artwork_review_rows,
     build_artwork_review_summary,
     review_result_slot_count,
+    selected_artwork_review_results,
     source_review_clear_message,
 )
 from .artwork_search_service import ArtworkProviderSearchService
@@ -2734,11 +2735,7 @@ class MainWindow(tk.Tk):
         self.logger.info("Cleared %s rejected artwork candidate(s) for %s selected item(s).", cleared, len(item_ids))
 
     def _selected_artwork_review_results(self) -> list[dict[str, object]]:
-        return [
-            result
-            for item_id in self.selected_persistent_item_ids()
-            if (result := self.persistent_artwork_review_results.get(item_id)) is not None
-        ]
+        return list(selected_artwork_review_results(self.selected_persistent_item_ids(), self.persistent_artwork_review_results))
 
     def accept_selected_artwork_reviews(self) -> None:
         results = self._selected_artwork_review_results()
