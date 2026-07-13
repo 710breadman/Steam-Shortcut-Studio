@@ -180,6 +180,56 @@ def modern_library_table_row_for_game(
     )
 
 
+def modern_library_table_row_tags(game: DetectedGame) -> tuple[str, ...]:
+    return () if game.selected else ("unselected",)
+
+
+def normalized_table_column_order(
+    configured_order: list[str],
+    all_columns: tuple[str, ...],
+) -> list[str]:
+    order = [column for column in configured_order if column in all_columns]
+    order.extend(column for column in all_columns if column not in order)
+    return order
+
+
+def normalized_visible_table_columns(
+    configured_visible: list[str],
+    all_columns: tuple[str, ...],
+    *,
+    fallback: tuple[str, ...] = ("add", "title", "exe"),
+) -> list[str]:
+    visible = [column for column in configured_visible if column in all_columns]
+    if not visible:
+        visible = [column for column in fallback if column in all_columns]
+    return visible
+
+
+def selected_column_id_for_label(
+    label: str,
+    column_labels: dict[str, str],
+    *,
+    fallback: str = "title",
+) -> str:
+    for column, column_label in column_labels.items():
+        if column_label == label:
+            return column
+    return fallback
+
+
+def display_columns_for_table(
+    order: list[str],
+    visible: list[str],
+    *,
+    fallback: str = "title",
+) -> list[str]:
+    visible_set = set(visible)
+    display = [column for column in order if column in visible_set]
+    if not display:
+        display = [fallback]
+    return display
+
+
 def game_matches_view_filter(game: DetectedGame, selected_filter: str) -> bool:
     if selected_filter == "Checked":
         return game.selected

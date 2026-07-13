@@ -56,7 +56,12 @@ from .modern_library_view import (
     game_matches_view_filter,
     library_sort_key,
     library_sort_preset_key,
+    display_columns_for_table,
     modern_library_table_row_for_game,
+    modern_library_table_row_tags,
+    normalized_table_column_order,
+    normalized_visible_table_columns,
+    selected_column_id_for_label,
     view_filter_status_message,
     visible_library_indices,
 )
@@ -1795,35 +1800,24 @@ class MainWindow(tk.Tk):
         self.games_tree.tag_configure("unselected", foreground=palette["muted"])
 
     def game_row_tags(self, game: DetectedGame) -> tuple[str, ...]:
-        return () if game.selected else ("unselected",)
+        return modern_library_table_row_tags(game)
 
     def normalized_column_order(self) -> list[str]:
-        order = [column for column in self.settings.game_column_order if column in GAME_COLUMNS]
-        order.extend(column for column in GAME_COLUMNS if column not in order)
-        return order
+        return normalized_table_column_order(self.settings.game_column_order, GAME_COLUMNS)
 
     def normalized_visible_columns(self) -> list[str]:
-        visible = [column for column in self.settings.visible_game_columns if column in GAME_COLUMNS]
-        if not visible:
-            visible = ["add", "title", "exe"]
-        return visible
+        return normalized_visible_table_columns(self.settings.visible_game_columns, GAME_COLUMNS)
 
     def selected_column_id(self) -> str:
-        label = self.column_choice_var.get()
-        for column, column_label in GAME_COLUMN_LABELS.items():
-            if column_label == label:
-                return column
-        return "title"
+        return selected_column_id_for_label(self.column_choice_var.get(), GAME_COLUMN_LABELS)
 
     def sync_column_visible_var(self) -> None:
         self.column_visible_var.set(self.selected_column_id() in self.normalized_visible_columns())
 
     def apply_game_columns(self) -> None:
         order = self.normalized_column_order()
-        visible = set(self.normalized_visible_columns())
-        display = [column for column in order if column in visible]
-        if not display:
-            display = ["title"]
+        visible = self.normalized_visible_columns()
+        display = display_columns_for_table(order, visible)
         if hasattr(self, "games_tree"):
             self.games_tree["displaycolumns"] = display
         self.settings.game_column_order = order

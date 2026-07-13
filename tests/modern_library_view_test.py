@@ -11,11 +11,16 @@ from steam_shortcut_studio.models import ArtworkAsset, ArtworkSelection, Detecte
 from steam_shortcut_studio.modern_library_view import (  # noqa: E402
     format_size,
     game_matches_view_filter,
+    display_columns_for_table,
     load_modern_library_rows,
     library_sort_key,
     library_sort_preset_key,
     modern_library_row_for_game,
     modern_library_table_row_for_game,
+    modern_library_table_row_tags,
+    normalized_table_column_order,
+    normalized_visible_table_columns,
+    selected_column_id_for_label,
     view_filter_status_message,
     visible_library_indices,
 )
@@ -240,6 +245,22 @@ def test_table_row_model_matches_production_values() -> None:
     )
 
 
+def test_table_row_tags_and_column_state_helpers() -> None:
+    selected = DetectedGame(title="Selected", root_path=Path(), selected=True)
+    unselected = DetectedGame(title="Unselected", root_path=Path(), selected=False)
+    all_columns = ("add", "title", "source", "exe")
+
+    assert modern_library_table_row_tags(selected) == ()
+    assert modern_library_table_row_tags(unselected) == ("unselected",)
+    assert normalized_table_column_order(["exe", "bogus", "title"], all_columns) == ["exe", "title", "add", "source"]
+    assert normalized_visible_table_columns(["bogus"], all_columns) == ["add", "title", "exe"]
+    assert normalized_visible_table_columns(["source", "bogus"], all_columns) == ["source"]
+    assert selected_column_id_for_label("Game Title", {"title": "Game Title", "exe": "Detected Executable"}) == "title"
+    assert selected_column_id_for_label("Missing", {"title": "Game Title"}) == "title"
+    assert display_columns_for_table(["exe", "title", "add"], ["title", "add"]) == ["title", "add"]
+    assert display_columns_for_table(["exe"], []) == ["title"]
+
+
 if __name__ == "__main__":
     test_persistent_library_maps_to_modern_library_rows()
     test_missing_items_are_hidden_by_default_and_optional()
@@ -248,4 +269,5 @@ if __name__ == "__main__":
     test_view_filter_model_matches_production_table_filters()
     test_sort_model_matches_production_table_columns_and_presets()
     test_table_row_model_matches_production_values()
+    test_table_row_tags_and_column_state_helpers()
     print("Modern library view tests passed.")
