@@ -25,6 +25,7 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
 from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
+from .artwork_review_workspace import ArtworkReviewRow, build_artwork_review_rows
 from .artwork_search_service import ArtworkProviderSearchService
 from .artwork_sources import ARTWORK_SOURCE_LABELS
 from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
@@ -2534,16 +2535,19 @@ class MainWindow(tk.Tk):
             messagebox.showinfo(__app_name__, "Select stored library rows before reviewing artwork decisions.")
             return
         summary = self.library_controller.artwork_decision_summary(item_ids)
-        pending = [
-            self.persistent_artwork_review_results[item_id]
-            for item_id in item_ids
-            if item_id in self.persistent_artwork_review_results
-        ]
+        row_titles = {row.item_id: row.title for row in self.library_controller.snapshot().rows}
+        review_rows = build_artwork_review_rows(
+            item_ids,
+            row_titles,
+            self.persistent_artwork_review_results,
+        )
         window = tk.Toplevel(self)
         window.title("Artwork Decisions")
-        window.geometry("840x420")
+        window.geometry("1080x560")
         window.transient(self)
         window.columnconfigure(0, weight=1)
+        window.columnconfigure(1, weight=0)
+        window.columnconfigure(2, weight=0)
         window.rowconfigure(1, weight=1)
 
         ttk.Label(
@@ -2552,50 +2556,101 @@ class MainWindow(tk.Tk):
                 f"Selected rows: {summary.item_count}    "
                 f"Accepted/locked slots: {summary.locked_slots}    "
                 f"Rejected candidates: {summary.rejected_matches}    "
-                f"Pending review rows: {len(pending)}"
+                f"Pending review slots: {len(review_rows)}"
             ),
             style="Subtle.TLabel",
-        ).grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 6))
+        ).grid(row=0, column=0, columnspan=3, sticky="ew", padx=10, pady=(10, 6))
 
-        tree = ttk.Treeview(window, columns=("item", "slot", "candidate", "path"), show="headings")
+        tree = ttk.Treeview(window, columns=("item", "slot", "candidate", "size", "path"), show="headings")
         tree.heading("item", text="Item")
         tree.heading("slot", text="Slot")
         tree.heading("candidate", text="Candidate")
+        tree.heading("size", text="Size")
         tree.heading("path", text="Validated File")
         tree.column("item", width=220, anchor=tk.W)
         tree.column("slot", width=80, anchor=tk.W)
         tree.column("candidate", width=180, anchor=tk.W)
-        tree.column("path", width=320, anchor=tk.W)
+        tree.column("size", width=84, anchor=tk.W)
+        tree.column("path", width=280, anchor=tk.W)
         tree.grid(row=1, column=0, sticky="nsew", padx=10)
         scrollbar = ttk.Scrollbar(window, orient=tk.VERTICAL, command=tree.yview)
         scrollbar.grid(row=1, column=1, sticky="ns", padx=(0, 10))
         tree.configure(yscrollcommand=scrollbar.set)
 
-        row_count = 0
-        row_titles = {row.item_id: row.title for row in self.library_controller.snapshot().rows}
-        for result in pending:
-            item_id = str(result.get("item_id") or "")
-            candidate_ids = dict(result.get("candidate_ids") or {})
-            details = dict(result.get("details") or {})
-            validated_files = dict(details.get("validated_files") or {})
-            for slot, candidate_id in candidate_ids.items():
-                file_info = dict(validated_files.get(slot) or {})
-                tree.insert(
-                    "",
-                    tk.END,
-                    values=(
-                        row_titles.get(item_id, item_id),
-                        str(slot),
-                        str(candidate_id),
-                        str(file_info.get("path") or ""),
-                    ),
-                )
-                row_count += 1
-        if row_count == 0:
-            tree.insert("", tk.END, values=("(none)", "", "", "No pending artwork review candidates for selected rows."))
+        preview = ttk.Frame(window, padding=(0, 0, 10, 0))
+        preview.grid(row=1, column=2, sticky="nsew")
+        preview.rowconfigure(0, weight=1)
+        image_label = tk.Label(
+            preview,
+            width=280,
+            height=180,
+            bg=self.palette()["panel"],
+            fg=self.palette()["text"],
+            text="Select slot",
+            anchor=tk.CENTER,
+        )
+        image_label.grid(row=0, column=0, sticky="nsew")
+        detail_label = ttk.Label(preview, text="", style="Subtle.TLabel", justify=tk.LEFT, wraplength=280)
+        detail_label.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+
+        review_row_by_id: dict[str, ArtworkReviewRow] = {}
+        preview_images: list[Any] = []
+        for index, row in enumerate(review_rows):
+            row_id = str(index)
+            review_row_by_id[row_id] = row
+            tree.insert(
+                "",
+                tk.END,
+                iid=row_id,
+                values=(
+                    row.title,
+                    row.slot,
+                    row.candidate_id,
+                    row.dimensions_label,
+                    row.path,
+                ),
+            )
+        if not review_rows:
+            tree.insert(
+                "",
+                tk.END,
+                values=("(none)", "", "", "", "No pending artwork review candidates for selected rows."),
+            )
+
+        def update_preview(_event: tk.Event[Any] | None = None) -> None:
+            selected = tree.selection()
+            row = review_row_by_id.get(selected[0]) if selected else None
+            if row is None:
+                image_label.configure(image="", text="Select slot")
+                detail_label.configure(text="")
+                return
+            path = Path(row.path) if row.path else None
+            image = self._load_preview_image(path, (280, 180)) if path and path.exists() else None
+            if image is not None:
+                preview_images[:] = [image]
+                image_label.configure(image=image, text="")
+            else:
+                preview_images.clear()
+                image_label.configure(image="", text="Preview unavailable")
+            reasons = "; ".join(row.reasons)
+            detail_label.configure(
+                text=(
+                    f"{row.title}\n"
+                    f"{row.slot} / {row.provider or 'provider'} / {row.candidate_id}\n"
+                    f"Identity {row.identity_score}    Set {row.set_coherence_score}\n"
+                    f"{row.path}\n"
+                    f"{reasons}"
+                ).strip()
+            )
+
+        tree.bind("<<TreeviewSelect>>", update_preview)
+        if review_rows:
+            tree.selection_set("0")
+            tree.focus("0")
+            update_preview()
 
         buttons = ttk.Frame(window, padding=10)
-        buttons.grid(row=2, column=0, columnspan=2, sticky="ew")
+        buttons.grid(row=2, column=0, columnspan=3, sticky="ew")
         buttons.columnconfigure(0, weight=1)
         ttk.Button(
             buttons,
@@ -2615,7 +2670,7 @@ class MainWindow(tk.Tk):
         ttk.Button(buttons, text="Close", command=window.destroy).grid(row=0, column=4)
         self._theme_child(window, self.palette())
         self.status_var.set(
-            f"Artwork decisions: {summary.locked_slots} accepted/locked, {summary.rejected_matches} rejected, {len(pending)} pending."
+            f"Artwork decisions: {summary.locked_slots} accepted/locked, {summary.rejected_matches} rejected, {len(review_rows)} pending slot(s)."
         )
 
     def clear_selected_artwork_rejections(self) -> None:

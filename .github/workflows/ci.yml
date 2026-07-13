@@ -69,6 +69,9 @@ jobs:
       - name: Run artwork search service tests
         run: python tests/artwork_search_service_test.py
 
+      - name: Run artwork review workspace tests
+        run: python tests/artwork_review_workspace_test.py
+
       - name: Run Epic manifest source tests
         run: python tests/epic_source_test.py
 
