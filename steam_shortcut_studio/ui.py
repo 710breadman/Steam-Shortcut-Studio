@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import json
+import ctypes
 import os
 import queue
 import re
@@ -16,6 +17,11 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path, PureWindowsPath
 from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
+
+try:
+    import customtkinter as ctk
+except ImportError:  # pragma: no cover - optional modern shell dependency
+    ctk = None
 
 try:
     import winreg
@@ -75,9 +81,11 @@ from .metadata_targets import (
 from .models import ArtworkAsset, DetectedGame, ExecutableCandidate, SteamProfile
 from .modern_library_view import (
     game_matches_view_filter,
+    game_matches_search,
     library_sort_key,
     library_sort_preset_key,
     display_columns_for_table,
+    modern_library_table_row_for_library_row,
     modern_library_table_row_for_game,
     modern_library_table_row_tags,
     normalized_table_column_order,
@@ -115,8 +123,10 @@ from .scan_plan import (
     steam_scan_ready_message,
     steam_scan_start_message,
 )
+from .scan_orchestration import run_combined_scan, run_folder_scan, run_steam_scan
 from .selection_actions import selection_action_result, selection_target_label
 from .selection_summary import build_mixed_selection_summary
+from .selection_bulk_controller import SelectionBulkController
 from .selection_targets import apply_selection_target_plan, build_selection_target_plan, build_write_selection_plan, no_writable_selection_message
 from .settings_store import AppSettings, SettingsStore
 from .sgdboop import detect_sgdboop
@@ -140,12 +150,14 @@ from .ui_library_adapter import (
     apply_library_selection_to_games,
     build_library_display_update,
     is_persistent_library_game,
+    library_game_index_for_item_id,
     library_item_ids_for_games,
     library_item_id_for_game,
     library_games_by_item_id,
     persistent_library_notes_text,
     persistent_library_reason_text,
     selected_visible_library_item_ids,
+    selected_visible_library_games,
 )
 from .vdf import VdfParseError
 
@@ -386,6 +398,8 @@ THEMES = [
     "Classic Light",
 ]
 
+MODERN_SHELL_THEME = "Steam Deck Blue"
+
 THEME_ALIASES = {
     "Light": "Classic Light",
     "Midnight": "Steam Deck Blue",
@@ -402,20 +416,20 @@ THEME_ALIASES = {
 
 THEME_PALETTES: dict[str, dict[str, str]] = {
     "Steam Deck Blue": {
-        "bg": "#101722",
-        "panel": "#182335",
-        "entry": "#111c2c",
-        "text": "#dce8f8",
-        "strong": "#f6fbff",
-        "muted": "#8ca2bd",
-        "border": "#2f4360",
-        "header_bg": "#1e2d44",
-        "selected": "#1a9fff",
-        "selected_text": "#06111f",
-        "button_bg": "#21324a",
-        "canvas": "#0e1622",
-        "accent": "#66c0f4",
-        "accent_text": "#06111f",
+        "bg": "#050b14",
+        "panel": "#0b1523",
+        "entry": "#08111c",
+        "text": "#e7eef9",
+        "strong": "#ffffff",
+        "muted": "#8ca0b8",
+        "border": "#19324d",
+        "header_bg": "#10243b",
+        "selected": "#123e7a",
+        "selected_text": "#ffffff",
+        "button_bg": "#0f1c2d",
+        "canvas": "#07101a",
+        "accent": "#2e80ff",
+        "accent_text": "#f7fbff",
         "success": "#38d996",
         "warning": "#ffd166",
         "error": "#ff6b6b",
@@ -717,16 +731,28 @@ class MainWindow(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title(f"{__app_name__} {__version__}")
-        self.geometry("1320x850")
+        self.geometry("1448x1086")
         self.minsize(1120, 700)
+        self.modern_shell_enabled = ctk is not None
+        if self.modern_shell_enabled:
+            try:
+                ctk.set_appearance_mode("dark")
+                ctk.set_default_color_theme("blue")
+            except Exception:
+                pass
         self.app_icon_image: tk.PhotoImage | None = None
 
         self.settings_store = SettingsStore()
         self.settings = self.settings_store.load()
+        if self.modern_shell_enabled:
+            self.settings.theme_name = MODERN_SHELL_THEME
+            self.settings.dark_mode = True
         self.log_path = self.settings_store.settings_dir / "logs" / "steam_shortcut_studio.log"
         self.library_store = LibraryStore()
         self.library_controller = LibraryController(self.library_store)
+        self.selection_bulk_controller = SelectionBulkController(self.library_controller)
         self.transaction_history_controller = TransactionHistoryController()
+        self.modern_app_icon: Any | None = None
         self.games: list[DetectedGame] = []
         self.profiles: list[SteamProfile] = []
         self.current_game_index: int | None = None
@@ -756,7 +782,6 @@ class MainWindow(tk.Tk):
         self.artwork_job_keys: set[str] = set()
         self.library_scan_poll_after_id: str | None = None
         self.source_scan_state = SourceScanUiState(self.library_controller)
-        self.library_selection_anchor_id = ""
         self.persistent_artwork_job_ids: set[str] = set()
         self.persistent_artwork_review_results: dict[str, dict[str, object]] = {}
         self.artwork_job_status: dict[int, str] = {}
@@ -776,9 +801,33 @@ class MainWindow(tk.Tk):
         self._build_vars()
         self._build_style()
         self._build_ui()
+        self.after(0, self.apply_native_dark_chrome)
         self.after(120, self._poll_logs)
         self.after(180, self._poll_library_controller_events)
         self.after(150, self._load_initial_state)
+
+    def apply_native_dark_chrome(self) -> None:
+        if not sys.platform.startswith("win"):
+            return
+        hwnd = self.winfo_id()
+        if not hwnd:
+            return
+        try:
+            dwmapi = ctypes.windll.dwmapi
+        except Exception:
+            return
+        value = ctypes.c_int(1)
+        for attribute in (20, 19):
+            try:
+                dwmapi.DwmSetWindowAttribute(
+                    ctypes.c_void_p(hwnd),
+                    ctypes.c_uint(attribute),
+                    ctypes.byref(value),
+                    ctypes.sizeof(value),
+                )
+                break
+            except Exception:
+                continue
 
     def apply_app_icon(self) -> None:
         png_path = app_asset_path(APP_ICON_PNG)
@@ -787,6 +836,9 @@ class MainWindow(tk.Tk):
             try:
                 self.app_icon_image = tk.PhotoImage(file=str(png_path))
                 self.iconphoto(True, self.app_icon_image)
+                if ctk is not None and Image is not None:
+                    with Image.open(png_path) as opened:
+                        self.modern_app_icon = ctk.CTkImage(light_image=opened.copy(), dark_image=opened.copy(), size=(54, 54))
             except tk.TclError as exc:
                 self.logger.warning("Could not load app PNG icon from %s: %s", png_path, exc)
         if ico_path:
@@ -1032,6 +1084,7 @@ class MainWindow(tk.Tk):
         self.compat_tool_var = tk.StringVar(value=self.compat_tool_display_name(self.settings.steam_play_compat_tool))
         self.artwork_kind_var = tk.StringVar(value="all")
         self.artwork_search_var = tk.StringVar()
+        self.library_search_var = tk.StringVar()
         initial_theme = self.normalized_theme_name(self.settings.theme_name)
         self.theme_var = tk.StringVar(value=initial_theme)
         self.dark_mode_var = tk.BooleanVar(value=self.theme_is_dark(initial_theme))
@@ -1048,6 +1101,7 @@ class MainWindow(tk.Tk):
             key: tk.BooleanVar(value=bool(self.settings.metadata_sources.get(key, True)))
             for key in METADATA_SOURCE_LABELS
         }
+        self.library_search_var.trace_add("write", lambda *_args: self.apply_view_filter())
 
     def _build_style(self) -> None:
         palette = self.palette()
@@ -1063,14 +1117,42 @@ class MainWindow(tk.Tk):
         style.configure("TLabel", background=palette["bg"], foreground=palette["text"], font=("Segoe UI", 9))
         style.configure("Header.TLabel", font=("Segoe UI", 17, "bold"), foreground=palette["strong"], background=palette["bg"])
         style.configure("Subtle.TLabel", foreground=palette["muted"], background=palette["bg"])
-        style.configure("TButton", background=palette["button_bg"], foreground=palette["text"], bordercolor=palette["border"])
-        style.configure("Accent.TButton", font=("Segoe UI", 9, "bold"), background=palette["accent"], foreground=palette["accent_text"])
+        style.configure(
+            "TButton",
+            background=palette["button_bg"],
+            foreground=palette["text"],
+            bordercolor=palette["border"],
+            relief="flat",
+            padding=(10, 7),
+        )
+        style.configure(
+            "Accent.TButton",
+            font=("Segoe UI", 9, "bold"),
+            background=palette["accent"],
+            foreground=palette["accent_text"],
+            padding=(12, 8),
+        )
         style.configure("TCheckbutton", background=palette["bg"], foreground=palette["text"])
         style.configure("TRadiobutton", background=palette["bg"], foreground=palette["text"])
         style.configure("TNotebook", background=palette["bg"], bordercolor=palette["border"])
         style.configure("TNotebook.Tab", background=palette["header_bg"], foreground=palette["text"])
-        style.configure("Treeview", rowheight=28, font=("Segoe UI", 9), background=palette["panel"], fieldbackground=palette["panel"], foreground=palette["text"])
-        style.configure("Treeview.Heading", font=("Segoe UI", 9, "bold"), background=palette["header_bg"], foreground=palette["text"])
+        style.configure(
+            "Treeview",
+            rowheight=52 if getattr(self, "modern_shell_enabled", False) else 38,
+            font=("Segoe UI", 9),
+            background=palette["panel"],
+            fieldbackground=palette["panel"],
+            foreground=palette["text"],
+            bordercolor=palette["border"],
+        )
+        style.configure(
+            "Treeview.Heading",
+            font=("Segoe UI", 9, "bold"),
+            background=palette["header_bg"],
+            foreground=palette["text"],
+            relief="flat",
+            padding=(10, 8),
+        )
         style.configure("TEntry", fieldbackground=palette["entry"], foreground=palette["text"])
         style.configure("TCombobox", fieldbackground=palette["entry"], foreground=palette["text"])
         style.configure("TMenubutton", background=palette["button_bg"], foreground=palette["text"])
@@ -1112,6 +1194,8 @@ class MainWindow(tk.Tk):
     def effective_theme_name(self, theme: str | None = None) -> str:
         selected = theme or (self.theme_var.get() if hasattr(self, "theme_var") else self.settings.theme_name)
         selected = self.normalized_theme_name(selected)
+        if self.modern_shell_enabled:
+            return MODERN_SHELL_THEME
         if selected == "Follow System":
             return "Steam Deck Blue" if self.system_prefers_dark() else "Classic Light"
         return selected
@@ -1121,6 +1205,8 @@ class MainWindow(tk.Tk):
 
     def palette(self) -> dict[str, str]:
         selected = self.theme_var.get() if hasattr(self, "theme_var") else self.settings.theme_name
+        if self.modern_shell_enabled:
+            selected = MODERN_SHELL_THEME
         theme = self.effective_theme_name(selected)
         base = dict(THEME_PALETTES.get(theme, THEME_PALETTES["Classic Light"]))
         base.setdefault("accent", base["selected"])
@@ -1128,16 +1214,527 @@ class MainWindow(tk.Tk):
         base.setdefault("success", "#16855d")
         base.setdefault("warning", "#a16207")
         base.setdefault("error", "#b42318")
+        base.setdefault("sidebar", base["bg"])
+        base.setdefault("panel_alt", base["button_bg"])
+        base.setdefault("panel_raised", base["header_bg"])
         return base
 
+    def _build_sidebar(self, parent: ttk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(2, weight=1)
+        palette = self.palette()
+
+        brand = ttk.Frame(parent, padding=(0, 4, 0, 12))
+        brand.grid(row=0, column=0, sticky="ew")
+        brand.columnconfigure(0, weight=1)
+        ttk.Label(brand, text="Steam Shortcut Studio", style="Header.TLabel", wraplength=210).grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(
+            brand,
+            text="Modern library shell",
+            style="Subtle.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+
+        nav = ttk.LabelFrame(parent, text="Navigation", padding=10)
+        nav.grid(row=1, column=0, sticky="ew", pady=(0, 10))
+        nav.columnconfigure(0, weight=1)
+
+        nav_buttons = [
+            ("Library", self.focus_library_table),
+            ("Details", self.show_shortcut_inspector),
+            ("Artwork", self.show_artwork_inspector),
+            ("Backups", self.show_transaction_history),
+            ("Settings", self.open_settings_dialog),
+        ]
+        for row, (label, command) in enumerate(nav_buttons):
+            button = ttk.Button(nav, text=label, command=command)
+            button.grid(row=row, column=0, sticky="ew", pady=2)
+
+        status = ttk.LabelFrame(parent, text="Library Roots", padding=10)
+        status.grid(row=2, column=0, sticky="nsew")
+        status.columnconfigure(0, weight=1)
+        ttk.Label(status, text="Steam", style="Subtle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(status, textvariable=self.steam_path_var, wraplength=210).grid(row=1, column=0, sticky="w")
+        ttk.Label(status, text="Games", style="Subtle.TLabel").grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(status, textvariable=self.collection_path_var, wraplength=210).grid(row=3, column=0, sticky="w")
+        ttk.Label(status, text="Profile", style="Subtle.TLabel").grid(row=4, column=0, sticky="w", pady=(10, 0))
+        ttk.Label(status, textvariable=self.profile_status_var, wraplength=210).grid(row=5, column=0, sticky="w")
+        ttk.Separator(status, orient=tk.HORIZONTAL).grid(row=6, column=0, sticky="ew", pady=12)
+        ttk.Label(status, text="Theme", style="Subtle.TLabel").grid(row=7, column=0, sticky="w")
+        theme_combo = ttk.Combobox(status, textvariable=self.theme_var, values=THEMES, state="readonly", width=18)
+        theme_combo.grid(row=8, column=0, sticky="ew", pady=(4, 0))
+        theme_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_theme_selection())
+        ToolTip(theme_combo, "Pick app theme. Default opens in the modern dark direction.")
+        ttk.Label(
+            status,
+            text="Prototype shell keeps production actions and table behavior while moving layout toward the approved modern look.",
+            style="Subtle.TLabel",
+            wraplength=210,
+        ).grid(row=9, column=0, sticky="w", pady=(12, 0))
+
+        palette_card = ttk.LabelFrame(parent, text="Accent", padding=10)
+        palette_card.grid(row=3, column=0, sticky="ew", pady=(10, 0))
+        palette_card.columnconfigure(0, weight=1)
+        accent_row = ttk.Frame(palette_card)
+        accent_row.grid(row=0, column=0, sticky="ew")
+        accent_row.columnconfigure(0, weight=1)
+        ttk.Label(accent_row, text=palette["accent"], style="Subtle.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            palette_card,
+            text="Sidebar, table, and inspector now share the dark production palette.",
+            style="Subtle.TLabel",
+            wraplength=210,
+        ).grid(row=1, column=0, sticky="w", pady=(8, 0))
+
+    def focus_library_table(self) -> None:
+        if hasattr(self, "games_tree"):
+            self.games_tree.focus_set()
+            selection = self.games_tree.selection()
+            if selection:
+                self.games_tree.focus(selection[0])
+
+    def show_shortcut_inspector(self) -> None:
+        if hasattr(self, "detail_notebook") and hasattr(self, "shortcut_tab"):
+            self.detail_notebook.select(self.shortcut_tab)
+
+    def show_artwork_inspector(self) -> None:
+        if hasattr(self, "detail_notebook") and hasattr(self, "artwork_tab"):
+            self.detail_notebook.select(self.artwork_tab)
+
+    def show_metadata_inspector(self) -> None:
+        if hasattr(self, "detail_notebook") and hasattr(self, "metadata_tab"):
+            self.detail_notebook.select(self.metadata_tab)
+
+    def show_extensions_dialog(self) -> None:
+        messagebox.showinfo(
+            __app_name__,
+            "Extensions UI is not implemented yet.\n\nThe navigation entry stays visible so the shell matches the reconstruction spec.",
+        )
+
+    def show_about_dialog(self) -> None:
+        messagebox.showinfo(
+            __app_name__,
+            f"{__app_name__} {__version__}\n\nIncremental UI reconstruction.\nSafe transactions stay routed through the existing production services.",
+        )
+
+    def _draw_sidebar_icon(self, canvas: tk.Canvas, kind: str, palette: dict[str, str]) -> None:
+        canvas.delete("all")
+        fg = palette["text"]
+        accent = palette["accent"]
+        canvas.configure(bg=palette["panel"])
+        if kind == "Library":
+            for x in (7, 15):
+                for y in (7, 15):
+                    canvas.create_rectangle(x, y, x + 5, y + 5, fill=accent if x == 7 and y == 7 else fg, outline="")
+        elif kind == "Shortcuts":
+            canvas.create_line(7, 18, 18, 7, fill=fg, width=2)
+            canvas.create_line(12, 7, 18, 7, fill=fg, width=2)
+            canvas.create_line(18, 7, 18, 13, fill=fg, width=2)
+            canvas.create_line(10, 18, 18, 18, fill=accent, width=2)
+        elif kind == "Artwork":
+            canvas.create_rectangle(6, 7, 22, 19, outline=fg, width=2)
+            canvas.create_rectangle(9, 10, 13, 14, fill=accent, outline="")
+            canvas.create_line(8, 18, 14, 12, fill=fg, width=2)
+            canvas.create_line(14, 12, 18, 16, fill=fg, width=2)
+        elif kind == "Metadata":
+            canvas.create_rectangle(8, 6, 20, 20, outline=fg, width=2)
+            canvas.create_line(11, 10, 17, 10, fill=accent, width=2)
+            canvas.create_line(11, 14, 17, 14, fill=fg, width=2)
+            canvas.create_line(11, 18, 15, 18, fill=fg, width=2)
+        elif kind == "Tools":
+            canvas.create_oval(8, 8, 20, 20, outline=fg, width=2)
+            canvas.create_line(14, 6, 14, 10, fill=accent, width=2)
+            canvas.create_line(14, 18, 14, 22, fill=accent, width=2)
+            canvas.create_line(6, 14, 10, 14, fill=accent, width=2)
+            canvas.create_line(18, 14, 22, 14, fill=accent, width=2)
+        elif kind == "Import / Scan":
+            canvas.create_line(14, 6, 14, 17, fill=fg, width=2)
+            canvas.create_line(10, 12, 14, 17, fill=accent, width=2)
+            canvas.create_line(18, 12, 14, 17, fill=accent, width=2)
+            canvas.create_rectangle(7, 18, 21, 21, fill=fg, outline="")
+        elif kind == "Backups":
+            canvas.create_rectangle(7, 7, 21, 21, outline=fg, width=2)
+            canvas.create_line(10, 12, 18, 12, fill=accent, width=2)
+            canvas.create_line(14, 9, 14, 16, fill=accent, width=2)
+        elif kind == "Settings":
+            canvas.create_oval(8, 8, 20, 20, outline=fg, width=2)
+            canvas.create_line(14, 6, 14, 10, fill=accent, width=2)
+            canvas.create_line(14, 18, 14, 22, fill=accent, width=2)
+            canvas.create_line(6, 14, 10, 14, fill=accent, width=2)
+            canvas.create_line(18, 14, 22, 14, fill=accent, width=2)
+        elif kind == "Extensions":
+            canvas.create_rectangle(7, 9, 13, 15, outline=fg, width=2)
+            canvas.create_rectangle(13, 9, 19, 15, outline=accent, width=2)
+            canvas.create_rectangle(10, 15, 16, 21, outline=fg, width=2)
+        elif kind == "About":
+            canvas.create_oval(7, 7, 21, 21, outline=fg, width=2)
+            canvas.create_text(14, 14, text="i", fill=accent, font=("Segoe UI", 12, "bold"))
+        else:
+            canvas.create_oval(8, 8, 20, 20, outline=fg, width=2)
+
+    def _sidebar_nav_row(
+        self,
+        parent: tk.Widget,
+        *,
+        label: str,
+        icon_kind: str,
+        command: Callable[[], None],
+        selected: bool = False,
+    ) -> tk.Widget:
+        palette = self.palette()
+        row = ctk.CTkFrame(
+            parent,
+            fg_color=palette["selected"] if selected else "transparent",
+            corner_radius=10,
+            border_width=1 if selected else 0,
+            border_color=palette["border"],
+        )
+        row.grid_columnconfigure(1, weight=1)
+        row.configure(height=50)
+        row.grid_propagate(False)
+        icon_wrap = ctk.CTkFrame(row, width=34, height=34, fg_color=palette["panel"], corner_radius=17)
+        icon_wrap.grid(row=0, column=0, padx=(12, 10), pady=8, sticky="w")
+        icon_wrap.grid_propagate(False)
+        icon = tk.Canvas(icon_wrap, width=24, height=24, highlightthickness=0, bd=0, relief="flat")
+        icon.place(relx=0.5, rely=0.5, anchor="center")
+        self._draw_sidebar_icon(icon, icon_kind, palette)
+        text = ctk.CTkLabel(
+            row,
+            text=label,
+            anchor="w",
+            text_color=palette["strong"] if selected else palette["text"],
+            font=("Segoe UI", 13, "bold" if selected else "normal"),
+        )
+        text.grid(row=0, column=1, sticky="w", padx=(0, 12))
+
+        def activate(_event: tk.Event[Any] | None = None) -> str:
+            command()
+            return "break"
+
+        def hover(_event: tk.Event[Any] | None = None, widget: tk.Widget = row) -> None:
+            if not selected:
+                widget.configure(fg_color=palette["panel"])
+
+        def unhover(_event: tk.Event[Any] | None = None, widget: tk.Widget = row) -> None:
+            widget.configure(fg_color=palette["selected"] if selected else "transparent")
+
+        for widget in (row, icon_wrap, icon, text):
+            widget.bind("<Button-1>", activate)
+            widget.bind("<Enter>", hover)
+            widget.bind("<Leave>", unhover)
+        return row
+
+    def update_detail_header(self, game: DetectedGame | None = None) -> None:
+        if not hasattr(self, "detail_title_var"):
+            return
+        if game is None:
+            self.detail_title_var.set("No game selected")
+            self.detail_meta_var.set("Pick a library row to inspect artwork, metadata, and safety state.")
+            self.detail_status_var.set("Selection empty")
+            return
+        source = "Steam" if game.is_native_steam_game else (game.source_type.replace("_", " ").title() or "Library")
+        item_id = library_item_id_for_game(game)
+        if is_persistent_library_game(game):
+            state = f"Stored library • {library_status_for_game(game)}"
+        elif game.is_native_steam_game:
+            state = "Installed Steam • protected"
+        elif game.selected_exe:
+            state = "Shortcut / folder • launch target set"
+        else:
+            state = "Shortcut / folder • needs launch target"
+        self.detail_title_var.set(game.display_title)
+        self.detail_meta_var.set(f"{source} • {state}")
+        self.detail_status_var.set("Selection ready" if item_id or not game.is_native_steam_game else "Protected Steam row")
+
+    def _set_text_widget(self, widget: tk.Text, text: str) -> None:
+        widget.configure(state=tk.NORMAL)
+        widget.delete("1.0", tk.END)
+        widget.insert("1.0", text)
+        widget.configure(state=tk.DISABLED)
+
+    def update_detail_tabs(self, game: DetectedGame | None = None) -> None:
+        if game is None:
+            if hasattr(self, "metadata_summary_text"):
+                self._set_text_widget(
+                    self.metadata_summary_text,
+                    "Metadata panel.\n\nPick a library row to see source fields, notes, and identity details.",
+                )
+            if hasattr(self, "links_summary_text"):
+                self._set_text_widget(
+                    self.links_summary_text,
+                    "Links panel.\n\nPick a library row to see source notes and related action targets.",
+                )
+            if hasattr(self, "local_files_text"):
+                self._set_text_widget(
+                    self.local_files_text,
+                    "Local files panel.\n\nPick a library row to see install folder, launch target, and working directory.",
+                )
+            return
+
+        metadata_lines = [
+            f"Title: {game.display_title}",
+            f"Source: {game.source_type.replace('_', ' ').title() or 'Library'}",
+            f"Platform: {game.platform or 'PC'}",
+            f"Release year: {game.metadata.release_year or 'Unknown'}",
+            f"Developer: {game.metadata.developer or 'Unknown'}",
+            f"Publisher: {game.metadata.publisher or 'Unknown'}",
+            f"Notes: {len(game.metadata.notes.strip())} chars",
+        ]
+        if game.is_native_steam_game:
+            metadata_lines.append(f"Steam AppID: {game.steam_appid}")
+        elif is_persistent_library_game(game):
+            metadata_lines.append(f"Persistent row ID: {library_item_id_for_game(game)}")
+            metadata_lines.append(f"Stored status: {library_status_for_game(game)}")
+        self._set_text_widget(getattr(self, "metadata_summary_text"), "\n".join(metadata_lines))
+
+        links_lines = [
+            "Actions and source references:",
+            f"- Inspector tab: Artwork for {game.display_title}",
+            f"- Inspector tab: Shortcut details for {game.display_title}",
+        ]
+        if game.is_native_steam_game:
+            links_lines.append("- Protected Steam row: artwork may change; notes and shortcut data stay read-only.")
+        elif is_persistent_library_game(game):
+            links_lines.append("- Stored rows refresh from source scans, not direct Steam writes.")
+        self._set_text_widget(getattr(self, "links_summary_text"), "\n".join(links_lines))
+
+        local_lines = [
+            f"Install folder: {game.root_path or 'Unknown'}",
+            f"Launch target: {game.selected_exe or 'Not selected'}",
+            f"Working directory: {game.working_directory or 'Not set'}",
+            f"Launch options: {game.launch_options or 'None'}",
+        ]
+        self._set_text_widget(getattr(self, "local_files_text"), "\n".join(local_lines))
+
+    def _build_modern_sidebar(self, parent: tk.Widget) -> None:
+        palette = self.palette()
+        parent.grid_columnconfigure(0, weight=1)
+
+        brand = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=0)
+        brand.grid(row=0, column=0, padx=16, pady=(18, 14), sticky="ew")
+        brand.grid_columnconfigure(1, weight=1)
+        logo = ctk.CTkFrame(brand, width=54, height=54, fg_color=palette["panel"], corner_radius=14)
+        logo.grid(row=0, column=0, rowspan=2, padx=(0, 12), sticky="n")
+        logo.grid_propagate(False)
+        if self.modern_app_icon is not None:
+            ctk.CTkLabel(logo, text="", image=self.modern_app_icon).place(relx=0.5, rely=0.5, anchor="center")
+        else:
+            ctk.CTkLabel(logo, text="SSS", text_color=palette["accent"], font=("Segoe UI", 14, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+        ctk.CTkLabel(brand, text="STEAM", text_color=palette["strong"], anchor="w", font=("Segoe UI", 17, "bold")).grid(row=0, column=1, sticky="w")
+        subtitle = ctk.CTkFrame(brand, fg_color="transparent")
+        subtitle.grid(row=1, column=1, sticky="w")
+        ctk.CTkLabel(subtitle, text="SHORTCUT STUDIO", text_color=palette["strong"], anchor="w", font=("Segoe UI", 12, "bold")).pack(side="left")
+        ctk.CTkLabel(subtitle, text=f" v{__version__}", text_color=palette["muted"], anchor="w", font=("Segoe UI", 10)).pack(side="left", padx=(6, 0))
+        ctk.CTkLabel(brand, text="PRO", text_color=palette["accent"], anchor="w", font=("Segoe UI", 10, "bold")).grid(row=2, column=1, sticky="w", pady=(2, 0))
+
+        nav = ctk.CTkFrame(parent, fg_color="transparent", corner_radius=0)
+        nav.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="ew")
+        nav.columnconfigure(0, weight=1)
+        nav_items = [
+            ("Library", "Library", self.focus_library_table),
+            ("Shortcuts", "Shortcuts", self.show_shortcut_inspector),
+            ("Artwork", "Artwork", self.show_artwork_inspector),
+            ("Metadata", "Metadata", self.show_metadata_inspector),
+            ("Tools", "Tools", self.open_settings_dialog),
+            ("Import / Scan", "Import / Scan", self.scan_all_libraries),
+            ("Backups", "Backups", self.show_transaction_history),
+            ("Settings", "Settings", self.open_settings_dialog),
+            ("Extensions", "Extensions", self.show_extensions_dialog),
+            ("About", "About", self.show_about_dialog),
+        ]
+        for row, (label, icon_kind, command) in enumerate(nav_items):
+            selected = label == "Library"
+            self._sidebar_nav_row(nav, label=label, icon_kind=icon_kind, command=command, selected=selected).grid(
+                row=row, column=0, sticky="ew", padx=4, pady=2
+            )
+
+        appearance = ctk.CTkFrame(parent, fg_color=palette["panel"], corner_radius=14)
+        appearance.grid(row=2, column=0, padx=14, pady=(8, 12), sticky="ew")
+        appearance.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(appearance, text="APPEARANCE", text_color=palette["muted"], anchor="w", font=("Segoe UI", 10, "bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 8))
+        chip_row = ctk.CTkFrame(appearance, fg_color="transparent")
+        chip_row.grid(row=1, column=0, sticky="ew", padx=10, pady=(0, 10))
+        for name, accent in [
+            ("Steam Deck Blue", "#2e80ff"),
+            ("Glacier Blue", "#1f9dff"),
+            ("Purple Glow", "#a855f7"),
+            ("Forest Green", "#22c55e"),
+            ("Amber Arcade", "#f59e0b"),
+        ]:
+            ctk.CTkButton(
+                chip_row,
+                text="",
+                width=24,
+                height=24,
+                corner_radius=12,
+                fg_color=accent,
+                hover_color=accent,
+                border_width=2 if self.normalized_theme_name(self.theme_var.get()) == name else 0,
+                border_color=palette["text"],
+                command=lambda value=name: (self.theme_var.set(value), self.apply_theme_selection()),
+            ).pack(side="left", padx=4)
+
+        storage = ctk.CTkFrame(parent, fg_color=palette["panel"], corner_radius=14)
+        storage.grid(row=3, column=0, padx=14, pady=(0, 12), sticky="ew")
+        storage.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(storage, text="Steam Library", text_color=palette["strong"], anchor="w", font=("Segoe UI", 13, "bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 2))
+        ctk.CTkLabel(storage, textvariable=self.collection_path_var, text_color=palette["muted"], anchor="w", font=("Segoe UI", 10)).grid(row=1, column=0, sticky="w", padx=12)
+        ctk.CTkLabel(storage, text="142.1 GB of 1.86 TB used", text_color=palette["muted"], anchor="w", font=("Segoe UI", 10)).grid(row=2, column=0, sticky="w", padx=12, pady=(10, 4))
+        progress = ctk.CTkProgressBar(storage, height=7, progress_color=palette["accent"])
+        progress.grid(row=3, column=0, sticky="ew", padx=12, pady=(0, 12))
+        try:
+            progress.set(0.076)
+        except Exception:
+            pass
+
+        status = ctk.CTkFrame(parent, fg_color=palette["panel"], corner_radius=14)
+        status.grid(row=4, column=0, padx=14, pady=(0, 16), sticky="sew")
+        status.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(status, text="Ready", text_color=palette["success"], anchor="w", font=("Segoe UI", 12, "bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(12, 2))
+        ctk.CTkLabel(status, textvariable=self.profile_status_var, text_color=palette["muted"], anchor="w", font=("Segoe UI", 10)).grid(row=1, column=0, sticky="w", padx=12)
+        ctk.CTkLabel(status, text="Steam connected", text_color=palette["muted"], anchor="w", font=("Segoe UI", 10)).grid(row=2, column=0, sticky="w", padx=12, pady=(0, 12))
+
+    def _build_modern_ui(self) -> None:
+        palette = self.palette()
+        self.columnconfigure(0, weight=0, minsize=216)
+        self.columnconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
+        self.configure(bg=palette["bg"])
+
+        sidebar = ctk.CTkFrame(self, fg_color=palette["sidebar"], corner_radius=0)
+        self.modern_sidebar = sidebar
+        sidebar.configure(width=216)
+        sidebar.grid(row=0, column=0, sticky="nsew")
+        sidebar.grid_rowconfigure(4, weight=1)
+        self._build_modern_sidebar(sidebar)
+
+        content = ttk.Frame(self, padding=(12, 12, 14, 12))
+        content.grid(row=0, column=1, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+        content.rowconfigure(1, weight=1)
+
+        toolbar = ctk.CTkFrame(content, fg_color=palette["panel"], corner_radius=16)
+        self.modern_toolbar = toolbar
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 12))
+        toolbar.grid_columnconfigure(1, weight=1)
+
+        identity = ctk.CTkFrame(toolbar, fg_color="transparent")
+        identity.grid(row=0, column=0, padx=(14, 12), pady=12, sticky="w")
+        ctk.CTkLabel(identity, text="STEAM", text_color=palette["strong"], anchor="w", font=("Segoe UI", 13, "bold")).pack(anchor="w")
+        ctk.CTkLabel(identity, text=f"SHORTCUT STUDIO  v{__version__}  PRO", text_color=palette["muted"], anchor="w", font=("Segoe UI", 10)).pack(anchor="w")
+
+        actions = ctk.CTkFrame(toolbar, fg_color="transparent")
+        actions.grid(row=0, column=1, padx=8, pady=10, sticky="ew")
+        for column in range(4):
+            actions.grid_columnconfigure(column, weight=1, minsize=176)
+        action_specs = [
+            ("Scan", "Scan Folders & Libraries", self.scan_all_libraries),
+            ("Refresh Metadata", "Update Info & Artwork", self.scan_selected_persistent_sources),
+            ("Auto-Art", "Find & Match Artwork", lambda: self.match_metadata_and_art_for_selected(force_refresh=True)),
+            ("Preview", "Preview Changes", self.preview_write),
+        ]
+        for column, (title, subtitle, command) in enumerate(action_specs):
+            self._command_tile(actions, column, title, subtitle, command)
+
+        apply_group = ctk.CTkFrame(toolbar, fg_color="transparent")
+        apply_group.grid(row=0, column=2, padx=(0, 14), pady=10, sticky="e")
+        self.apply_button = ctk.CTkFrame(apply_group, fg_color=palette["accent"], corner_radius=14)
+        self.apply_button.grid(row=0, column=0, sticky="e")
+        self.apply_button.grid_columnconfigure(0, weight=1)
+        self.apply_button.grid_columnconfigure(1, weight=0)
+        self._command_tile(self.apply_button, 0, "Apply Changes", "Safely", self.write_to_steam, width=178, accent=True)
+        ctk.CTkButton(
+            apply_group,
+            text="▾",
+            width=44,
+            height=54,
+            corner_radius=14,
+            fg_color="#123f7f",
+            hover_color="#1b5eb4",
+            text_color=palette["accent_text"],
+            font=("Segoe UI", 12, "bold"),
+            command=self.preview_write,
+        ).grid(row=0, column=1, padx=(6, 0), sticky="e")
+
+        shell = ttk.Frame(content)
+        shell.grid(row=1, column=0, sticky="nsew")
+        shell.columnconfigure(0, weight=3, uniform="shell")
+        shell.columnconfigure(1, weight=2, uniform="shell")
+        shell.rowconfigure(0, weight=1)
+        center = ttk.Frame(shell)
+        self.detail_frame = ttk.Frame(shell)
+        center.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.detail_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        center.columnconfigure(0, weight=1)
+        center.rowconfigure(2, weight=1)
+
+        self.table_frame = ttk.Frame(center)
+        self.table_frame.grid(row=0, column=0, sticky="nsew")
+        self._build_table(self.table_frame)
+        self._build_detail(self.detail_frame)
+
+        self.bulk_actions_frame = ctk.CTkFrame(content, fg_color=palette["panel"], corner_radius=14)
+        self.modern_bulk_actions_frame = self.bulk_actions_frame
+        self.bulk_actions_frame.grid(row=2, column=0, sticky="ew", pady=(12, 0))
+        self.bulk_actions_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(self.bulk_actions_frame, textvariable=self.bulk_status_var, text_color=palette["text"], anchor="w", font=("Segoe UI", 11, "bold")).grid(row=0, column=0, padx=14, pady=10, sticky="w")
+        ctk.CTkButton(self.bulk_actions_frame, text="Clear Selection", width=128, corner_radius=12, fg_color=palette["panel"], hover_color=palette["selected"], command=lambda: self.set_games_selected(False, visible_only=False)).grid(
+            row=0, column=2, padx=(0, 10), pady=8, sticky="e"
+        )
+        ctk.CTkButton(self.bulk_actions_frame, text="Find Art", width=112, corner_radius=12, fg_color=palette["accent"], hover_color="#4a94ff", command=lambda: self.match_metadata_and_art_for_selected(force_refresh=True)).grid(
+            row=0, column=3, padx=(0, 10), pady=8, sticky="e"
+        )
+        ctk.CTkButton(self.bulk_actions_frame, text="Preview Changes", width=138, corner_radius=12, fg_color=palette["panel"], hover_color=palette["selected"], command=self.preview_write).grid(
+            row=0, column=4, padx=(0, 10), pady=8, sticky="e"
+        )
+        ctk.CTkButton(self.bulk_actions_frame, text="Apply Changes", width=132, corner_radius=12, fg_color=palette["accent"], hover_color="#4a94ff", command=self.write_to_steam).grid(
+            row=0, column=5, padx=(0, 12), pady=8, sticky="e"
+        )
+
+        footer = ctk.CTkFrame(content, fg_color=palette["sidebar"], corner_radius=0, height=28)
+        self.modern_footer = footer
+        footer.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        footer.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(footer, textvariable=self.status_var, text_color=palette["muted"], anchor="w", font=("Segoe UI", 10)).grid(row=0, column=0, padx=12, pady=4, sticky="w")
+        ctk.CTkLabel(footer, textvariable=self.profile_status_var, text_color=palette["muted"], anchor="e", font=("Segoe UI", 10)).grid(row=0, column=1, padx=12, pady=4, sticky="e")
+
+        progress_frame = ttk.Frame(content)
+        progress_frame.grid(row=4, column=0, sticky="ew")
+        progress_frame.grid_remove()
+        self.progress = ttk.Progressbar(progress_frame, mode="indeterminate")
+        self.progress.grid(row=0, column=0, sticky="ew")
+
+        log_frame = ttk.Frame(content)
+        log_frame.grid(row=5, column=0, sticky="ew")
+        log_frame.grid_remove()
+        log_frame.columnconfigure(0, weight=1)
+        self.log_text = tk.Text(log_frame, height=6, wrap="word", font=("Consolas", 9), relief="flat", bg=palette["panel"])
+        self.log_text.grid(row=0, column=0, sticky="ew")
+        log_scroll = ttk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
+        log_scroll.grid(row=0, column=1, sticky="ns")
+        self.log_text.configure(yscrollcommand=log_scroll.set)
+
     def _build_ui(self) -> None:
-        self.columnconfigure(0, weight=1)
-        for row in range(5):
-            self.rowconfigure(row, weight=0)
-        self.rowconfigure(1, weight=1)
+        if self.modern_shell_enabled:
+            self.build_menu_bar()
+            self._build_modern_ui()
+            return
+        self.columnconfigure(0, weight=0)
+        self.columnconfigure(1, weight=1)
+        self.rowconfigure(0, weight=1)
         self.build_menu_bar()
 
-        header = ttk.Frame(self, padding=(18, 10, 18, 4))
+        sidebar = ttk.Frame(self, padding=(16, 18, 14, 18))
+        sidebar.grid(row=0, column=0, sticky="nsew")
+        self._build_sidebar(sidebar)
+
+        content = ttk.Frame(self, padding=(0, 0, 18, 0))
+        content.grid(row=0, column=1, sticky="nsew")
+        content.columnconfigure(0, weight=1)
+        content.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(content, padding=(0, 10, 0, 4))
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
         ttk.Label(header, text="Steam Shortcut Studio", style="Header.TLabel").grid(row=0, column=0, sticky="w")
@@ -1147,95 +1744,109 @@ class MainWindow(tk.Tk):
             style="Subtle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
         ttk.Label(header, textvariable=self.profile_status_var, style="Subtle.TLabel").grid(row=1, column=1, sticky="e", padx=(0, 12))
-        ttk.Label(header, text="Theme", style="Subtle.TLabel").grid(row=0, column=2, sticky="e", padx=(0, 6))
-        self.theme_combo = ttk.Combobox(header, textvariable=self.theme_var, values=THEMES, state="readonly", width=18)
-        self.theme_combo.grid(row=0, column=3, sticky="e")
-        self.theme_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_theme_selection())
-        ToolTip(self.theme_combo, "Pick a full app skin. Themes use stronger Steam-keyboard-inspired color identities and are saved in Settings.")
+        ttk.Label(
+            header,
+            text="Modern dark shell",
+            style="Subtle.TLabel",
+        ).grid(row=0, column=1, sticky="e", padx=(0, 12))
 
-        main = ttk.Frame(self)
-        main.grid(row=1, column=0, sticky="nsew", padx=18, pady=(2, 8))
-        main.columnconfigure(0, weight=1, uniform="main")
-        main.columnconfigure(1, weight=1, uniform="main")
-        main.rowconfigure(0, weight=1)
-        left_panel = ttk.Frame(main)
-        self.detail_frame = ttk.Frame(main)
-        left_panel.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        self.detail_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
-        left_panel.columnconfigure(0, weight=1)
-        left_panel.rowconfigure(1, weight=1)
+        shell = ttk.Frame(content)
+        shell.grid(row=1, column=0, sticky="nsew", padx=18, pady=(2, 8))
+        shell.columnconfigure(0, weight=3, uniform="shell")
+        shell.columnconfigure(1, weight=2, uniform="shell")
+        shell.rowconfigure(0, weight=1)
+        center = ttk.Frame(shell)
+        self.detail_frame = ttk.Frame(shell)
+        center.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        self.detail_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+        center.columnconfigure(0, weight=1)
+        center.rowconfigure(2, weight=1)
 
-        setup = ttk.LabelFrame(left_panel, text="Library Location", padding=(10, 6))
-        setup.grid(row=0, column=0, sticky="ew", pady=(0, 6))
-        setup.columnconfigure(1, weight=1)
-        for col in (2, 3, 4):
-            setup.columnconfigure(col, weight=0, minsize=78)
-        button_width = 9
+        command_bar = ttk.Frame(center)
+        command_bar.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        command_bar.columnconfigure(1, weight=1)
+        button_width = 12
+        ttk.Button(command_bar, text="Scan", width=button_width, style="Accent.TButton", command=self.scan_all_libraries).grid(row=0, column=0, padx=(0, 8))
+        ttk.Button(command_bar, text="Refresh Metadata", width=button_width + 4, command=self.scan_selected_persistent_sources).grid(row=0, column=1, padx=(0, 8))
+        ttk.Button(command_bar, text="Auto-Art", width=button_width, command=lambda: self.match_metadata_and_art_for_selected(force_refresh=True)).grid(row=0, column=2, padx=(0, 8))
+        ttk.Button(command_bar, text="Preview", width=button_width, command=self.preview_write).grid(row=0, column=3, padx=(0, 8))
+        ttk.Button(command_bar, text="Apply Changes", width=button_width + 2, command=self.write_to_steam).grid(row=0, column=4, padx=(0, 8))
 
-        ttk.Label(setup, text="1. Steam").grid(row=0, column=0, sticky="w", padx=(0, 8), pady=1)
-        steam_entry = ttk.Entry(setup, textvariable=self.steam_path_var)
-        steam_entry.grid(row=0, column=1, sticky="ew", pady=1)
-        ToolTip(steam_entry, "Steam install folder. The app looks for Steam's launcher and userdata here.")
-        browse_steam_button = ttk.Button(setup, text="Browse", width=button_width, command=self.browse_steam)
-        browse_steam_button.grid(row=0, column=2, padx=(8, 6), pady=1)
-        ToolTip(browse_steam_button, "Manually choose the Steam folder if detection misses it.")
-        detect_button = ttk.Button(setup, text="Detect", width=button_width, command=self.detect_steam)
-        detect_button.grid(row=0, column=3, padx=(0, 6), pady=1)
-        ToolTip(detect_button, "Auto-detect Steam from common install folders.")
-        ttk.Label(setup, text="2. Games").grid(row=1, column=0, sticky="w", padx=(0, 8), pady=1)
-        collection_entry = ttk.Entry(setup, textvariable=self.collection_path_var)
-        collection_entry.grid(row=1, column=1, sticky="ew", pady=1)
-        ToolTip(collection_entry, "Root folder containing your non-Steam games. Each top-level child folder becomes the game title.")
-        choose_button = ttk.Button(setup, text="Browse", width=button_width, command=self.browse_collection)
-        choose_button.grid(row=1, column=2, padx=(8, 6), pady=1)
-        ToolTip(choose_button, "Pick the folder to scan recursively for launch files.")
-        scan_button = ttk.Button(setup, text="Scan", width=button_width, style="Accent.TButton", command=self.scan_all_libraries)
-        scan_button.grid(row=0, column=4, rowspan=2, sticky="nsew", padx=(6, 0), pady=1)
-        ToolTip(scan_button, "Scan installed Steam games, existing non-Steam shortcuts, and the chosen game folder in one pass.")
+        setup = ttk.LabelFrame(center, text="Search / Filters / Selection", padding=(10, 8))
+        setup.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        for col in range(6):
+            setup.columnconfigure(col, weight=1 if col in (1, 4) else 0)
+        ttk.Label(setup, text="Search").grid(row=0, column=0, sticky="w", padx=(0, 8))
+        search_entry = ttk.Entry(setup, textvariable=self.library_search_var)
+        search_entry.grid(row=0, column=1, sticky="ew", pady=1)
+        search_entry.insert(0, "")
+        search_entry.bind("<KeyRelease>", lambda _event: self.apply_view_filter())
+        ToolTip(search_entry, "Search by title, source, launch target, year, or source type.")
+        ttk.Label(setup, text="View").grid(row=0, column=2, sticky="w", padx=(12, 8))
+        self.view_filter_combo = ttk.Combobox(
+            setup,
+            textvariable=self.view_filter_var,
+            values=VIEW_FILTERS,
+            state="readonly",
+            width=18,
+        )
+        self.view_filter_combo.grid(row=0, column=3, sticky="ew", padx=(0, 8))
+        self.view_filter_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_view_filter())
+        ToolTip(self.view_filter_combo, "Filter the list without changing the underlying scan results.")
+        ttk.Label(setup, text="Sort").grid(row=0, column=4, sticky="w", padx=(12, 8))
+        self.sort_preset_combo = ttk.Combobox(
+            setup,
+            textvariable=self.sort_preset_var,
+            values=SORT_PRESETS,
+            state="readonly",
+            width=20,
+        )
+        self.sort_preset_combo.grid(row=0, column=5, sticky="ew")
+        self.sort_preset_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_sort_preset())
+        ToolTip(self.sort_preset_combo, "Use common sort recipes, or click column headers for one-off sorting.")
+        ttk.Label(setup, textvariable=self.bulk_status_var, style="Subtle.TLabel").grid(row=1, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        ttk.Label(setup, text="Right-click headers for columns.", style="Subtle.TLabel").grid(row=1, column=3, columnspan=3, sticky="e", pady=(8, 0))
 
-        self.table_frame = ttk.Frame(left_panel)
-        self.table_frame.grid(row=1, column=0, sticky="nsew")
+        self.table_frame = ttk.Frame(center)
+        self.table_frame.grid(row=2, column=0, sticky="nsew")
         self._build_table(self.table_frame)
         self._build_detail(self.detail_frame)
 
-        actions = ttk.Frame(self, padding=(18, 0, 18, 8))
-        actions.grid(row=2, column=0, sticky="ew")
+        self.bulk_actions_frame = ttk.Frame(content, padding=(18, 0, 18, 8))
+        self.bulk_actions_frame.grid(row=2, column=0, sticky="ew")
         for col in (0, 1, 3, 4):
-            actions.columnconfigure(col, weight=0)
-        actions.columnconfigure(2, weight=1)
+            self.bulk_actions_frame.columnconfigure(col, weight=0)
+        self.bulk_actions_frame.columnconfigure(2, weight=1)
         action_width = 16
-        match_button = ttk.Button(actions, text="Search Art", width=action_width, command=lambda: self.match_metadata_and_art_for_selected(force_refresh=True))
-        match_button.grid(row=0, column=0, padx=(0, 8))
-        ToolTip(match_button, "Rerun artwork search for checked games in the current view only.")
-        preview_button = ttk.Button(actions, text="Preview", width=action_width, command=self.preview_write)
-        preview_button.grid(row=0, column=1, padx=(0, 8))
+        refresh_button = ttk.Button(self.bulk_actions_frame, text="Refresh Selected Sources", width=action_width + 6, command=self.scan_selected_persistent_sources)
+        refresh_button.grid(row=0, column=0, padx=(0, 8))
+        ToolTip(refresh_button, "Rescan only the launcher/source types represented by selected persistent library rows.")
+        art_button = ttk.Button(self.bulk_actions_frame, text="Find Art", width=action_width, command=lambda: self.match_metadata_and_art_for_selected(force_refresh=True))
+        art_button.grid(row=0, column=1, padx=(0, 8))
+        ToolTip(art_button, "Run artwork search for selected games in the current view.")
+        preview_button = ttk.Button(self.bulk_actions_frame, text="Preview Changes", width=action_width + 2, command=self.preview_write)
+        preview_button.grid(row=0, column=3, padx=(0, 8))
         ToolTip(preview_button, "Show exactly what will be added or updated before touching Steam files.")
-        source_actions = ttk.Frame(actions)
-        source_actions.grid(row=0, column=2, sticky="w")
-        library_button = ttk.Button(source_actions, text="Library", width=action_width, command=self.load_persistent_library)
-        library_button.grid(row=0, column=0, padx=(0, 8))
-        ToolTip(library_button, "Load the app-owned persistent library through the production controller.")
-        sync_sources_button = ttk.Button(source_actions, text="Sync Sources", width=action_width, command=self.scan_persistent_sources)
-        sync_sources_button.grid(row=0, column=1, padx=(0, 8))
-        ToolTip(sync_sources_button, "Scan Epic, Steam, and the chosen folder into the app-owned persistent library through the production controller.")
-        backups_button = ttk.Button(source_actions, text="Backups", width=action_width, command=self.show_transaction_history)
-        backups_button.grid(row=0, column=2)
-        ToolTip(backups_button, "Show verified transaction history and available restore backups.")
-        write_button = ttk.Button(actions, text="Write to Steam", width=action_width, style="Accent.TButton", command=self.write_to_steam)
-        write_button.grid(row=0, column=3, sticky="e", padx=(8, 8))
+        write_button = ttk.Button(self.bulk_actions_frame, text="Apply Changes", width=action_width, style="Accent.TButton", command=self.write_to_steam)
+        write_button.grid(row=0, column=4, sticky="e", padx=(0, 8))
         ToolTip(write_button, "Closes running Steam when needed, writes shortcuts, artwork, and simple notes with backups, then reopens Steam only if this app closed it.")
-        self.cancel_button = ttk.Button(actions, text="Cancel Operations", width=18, command=self.cancel_current_job, state=tk.DISABLED)
-        self.cancel_button.grid(row=0, column=4, sticky="e")
+        source_actions = ttk.Frame(self.bulk_actions_frame)
+        source_actions.grid(row=0, column=2, sticky="w")
+        clear_selection_button = ttk.Button(source_actions, text="Clear Selection", width=action_width, command=lambda: self.set_games_selected(False, visible_only=False))
+        clear_selection_button.grid(row=0, column=0, padx=(0, 8))
+        ToolTip(clear_selection_button, "Clear selected rows and return bulk actions to neutral state.")
+        self.cancel_button = ttk.Button(source_actions, text="Cancel Operations", width=18, command=self.cancel_current_job, state=tk.DISABLED)
+        self.cancel_button.grid(row=0, column=1)
         ToolTip(self.cancel_button, "Ask the current scan, notes, or artwork job to stop as soon as it reaches a safe checkpoint.")
 
-        progress_frame = ttk.Frame(self, padding=(18, 0, 18, 8))
+        progress_frame = ttk.Frame(content, padding=(18, 0, 18, 8))
         progress_frame.grid(row=3, column=0, sticky="ew")
         progress_frame.columnconfigure(0, weight=1)
         ttk.Label(progress_frame, textvariable=self.status_var, style="Subtle.TLabel").grid(row=0, column=0, sticky="ew", pady=(0, 4))
         self.progress = ttk.Progressbar(progress_frame, mode="indeterminate")
         self.progress.grid(row=1, column=0, sticky="ew")
 
-        log_frame = ttk.LabelFrame(self, text="Log", padding=8)
+        log_frame = ttk.LabelFrame(content, text="Log", padding=8)
         log_frame.grid(row=4, column=0, sticky="ew", padx=18, pady=(0, 14))
         log_frame.columnconfigure(0, weight=1)
         self.log_text = tk.Text(log_frame, height=6, wrap="word", font=("Consolas", 9), relief="flat", bg="#ffffff")
@@ -1250,7 +1861,7 @@ class MainWindow(tk.Tk):
         self.apply_theme_selection()
 
     def apply_theme_selection(self) -> None:
-        selected_theme = self.normalized_theme_name(self.theme_var.get())
+        selected_theme = MODERN_SHELL_THEME if self.modern_shell_enabled else self.normalized_theme_name(self.theme_var.get())
         self.theme_var.set(selected_theme)
         self.dark_mode_var.set(self.theme_is_dark(selected_theme))
         self.settings.theme_name = selected_theme
@@ -1265,6 +1876,25 @@ class MainWindow(tk.Tk):
         text_bg = palette["panel"]
         for widget in self.winfo_children():
             self._theme_child(widget, palette)
+        if self.modern_shell_enabled:
+            for attr, color in (
+                ("modern_sidebar", palette["sidebar"]),
+                ("modern_toolbar", palette["panel"]),
+                ("modern_bulk_actions_frame", palette["panel"]),
+                ("modern_footer", palette["sidebar"]),
+            ):
+                widget = getattr(self, attr, None)
+                if widget is not None:
+                    try:
+                        widget.configure(fg_color=color)
+                    except Exception:
+                        pass
+            apply_button = getattr(self, "apply_button", None)
+            if apply_button is not None:
+                try:
+                    apply_button.configure(fg_color=palette["accent"], text_color=palette["accent_text"])
+                except Exception:
+                    pass
         if hasattr(self, "artwork_canvas"):
             self.artwork_canvas.configure(bg=palette["canvas"])
         if hasattr(self, "preview_boxes"):
@@ -1284,6 +1914,8 @@ class MainWindow(tk.Tk):
                     pass
 
     def _theme_child(self, widget: tk.Widget, palette: dict[str, str]) -> None:
+        if ctk is not None and widget.__class__.__module__.startswith("customtkinter"):
+            return
         if isinstance(widget, tk.Text):
             widget.configure(bg=palette["panel"], fg=palette["text"], insertbackground=palette["text"])
         elif isinstance(widget, tk.Canvas):
@@ -1298,6 +1930,9 @@ class MainWindow(tk.Tk):
             self._theme_child(child, palette)
 
     def build_menu_bar(self) -> None:
+        if self.modern_shell_enabled:
+            self.configure(menu=None)
+            return
         palette = self.palette()
         menu_config = {"bg": palette["panel"], "fg": palette["text"], "activebackground": palette["selected"], "activeforeground": palette["selected_text"]}
         menubar = tk.Menu(self, **menu_config)
@@ -1395,7 +2030,7 @@ class MainWindow(tk.Tk):
         self.update_existing_var.set(self.settings.update_existing_shortcuts)
         self.default_tags_var.set(", ".join(self.settings.default_tags))
         self.compat_tool_var.set(self.compat_tool_display_name(self.settings.steam_play_compat_tool))
-        theme = self.normalized_theme_name(self.settings.theme_name)
+        theme = MODERN_SHELL_THEME if self.modern_shell_enabled else self.normalized_theme_name(self.settings.theme_name)
         self.theme_var.set(theme)
         self.dark_mode_var.set(self.theme_is_dark(theme))
         self.view_filter_var.set(self.settings.view_filter if self.settings.view_filter in VIEW_FILTERS else "All")
@@ -1616,6 +2251,9 @@ class MainWindow(tk.Tk):
         self.apply_widget_theme()
 
     def _build_table(self, parent: ttk.Frame) -> None:
+        if self.modern_shell_enabled:
+            self._build_modern_table(parent)
+            return
         parent.columnconfigure(0, weight=1)
         parent.rowconfigure(1, weight=1)
         table_actions = ttk.Frame(parent)
@@ -1641,28 +2279,6 @@ class MainWindow(tk.Tk):
         )
         selection_menu.pack(side=tk.LEFT, padx=(0, 8))
         ToolTip(selection_menu, "Selection tools inspired by parser preview workflows: work on visible rows or target likely follow-up work.")
-        ttk.Label(table_actions, text="View").pack(side=tk.LEFT, padx=(4, 4))
-        self.view_filter_combo = ttk.Combobox(
-            table_actions,
-            textvariable=self.view_filter_var,
-            values=VIEW_FILTERS,
-            state="readonly",
-            width=18,
-        )
-        self.view_filter_combo.pack(side=tk.LEFT, padx=(0, 10))
-        self.view_filter_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_view_filter())
-        ToolTip(self.view_filter_combo, "Filter the list without changing the underlying scan results.")
-        ttk.Label(table_actions, text="Sort").pack(side=tk.LEFT, padx=(0, 4))
-        self.sort_preset_combo = ttk.Combobox(
-            table_actions,
-            textvariable=self.sort_preset_var,
-            values=SORT_PRESETS,
-            state="readonly",
-            width=20,
-        )
-        self.sort_preset_combo.pack(side=tk.LEFT, padx=(0, 10))
-        self.sort_preset_combo.bind("<<ComboboxSelected>>", lambda _event: self.apply_sort_preset())
-        ToolTip(self.sort_preset_combo, "Use common sort recipes, or click column headers for one-off sorting.")
         refresh_selected_button = ttk.Button(table_actions, text="Refresh Selected Sources", command=self.scan_selected_persistent_sources)
         refresh_selected_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(refresh_selected_button, "Rescan only the launcher/source types represented by selected persistent library rows.")
@@ -1693,9 +2309,7 @@ class MainWindow(tk.Tk):
         clear_reviews_button = ttk.Button(table_actions, text="Clear Source Reviews", command=self.clear_reviewed_source_scans)
         clear_reviews_button.pack(side=tk.LEFT, padx=(0, 10))
         ToolTip(clear_reviews_button, "Dismiss remembered source refresh review/failure jobs after you have handled them.")
-        ttk.Label(table_actions, textvariable=self.bulk_status_var, style="Subtle.TLabel").pack(side=tk.RIGHT)
-        ttk.Label(table_actions, text="Right-click headers for columns.", style="Subtle.TLabel").pack(side=tk.LEFT, padx=(8, 0))
-        self.games_tree = ttk.Treeview(parent, columns=GAME_COLUMNS, show="headings", selectmode="browse")
+        self.games_tree = ttk.Treeview(parent, columns=GAME_COLUMNS, show="headings", selectmode="extended")
         for column in GAME_COLUMNS:
             self.games_tree.heading(column, text=GAME_COLUMN_LABELS[column], command=lambda selected=column: self.sort_games_by_column(selected))
             self.games_tree.column(column, width=GAME_COLUMN_WIDTHS[column], minwidth=40, anchor=tk.W)
@@ -1709,6 +2323,137 @@ class MainWindow(tk.Tk):
         self.games_tree.bind("<ButtonRelease-1>", self.on_game_table_click)
         self.games_tree.bind("<space>", self.on_game_table_space)
         self.games_tree.bind("<Button-3>", self.show_column_context_menu)
+
+    def _build_modern_table(self, parent: ttk.Frame) -> None:
+        palette = self.palette()
+        parent.columnconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+        toolbar = ctk.CTkFrame(parent, fg_color=palette["panel"], corner_radius=14)
+        toolbar.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        toolbar.grid_columnconfigure(0, weight=1)
+        toolbar.grid_columnconfigure(1, weight=0)
+        toolbar.grid_columnconfigure(2, weight=0)
+        search = ctk.CTkEntry(toolbar, placeholder_text="Search games...", height=40, corner_radius=10, textvariable=self.library_search_var)
+        search.grid(row=0, column=0, sticky="ew", padx=(12, 8), pady=10)
+        search.bind("<Return>", lambda _event: self.apply_view_filter())
+        self.library_search_entry = search
+        filter_combo = ctk.CTkOptionMenu(
+            toolbar,
+            values=["All Games", "Needs Review", "Missing Artwork", "Installed Steam", "Stored Library"],
+            height=40,
+            width=165,
+            fg_color=palette["panel_raised"],
+            button_color=palette["panel_raised"],
+            button_hover_color=palette["selected"],
+            command=lambda value: self._modern_set_view_filter(value),
+        )
+        filter_combo.set(f"All Games ({len(self.games)})")
+        filter_combo.grid(row=0, column=1, padx=(0, 8), pady=10)
+        self.library_filter_combo = filter_combo
+        overflow = ctk.CTkButton(
+            toolbar,
+            text="⋮",
+            width=42,
+            height=40,
+            corner_radius=10,
+            fg_color=palette["panel_raised"],
+            hover_color=palette["selected"],
+            command=self.open_settings_dialog,
+        )
+        overflow.grid(row=0, column=2, padx=(0, 12), pady=10)
+
+        header = ttk.Frame(parent)
+        header.grid(row=1, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+        header.columnconfigure(1, weight=0)
+
+        modern_columns = ("add", "title", "source", "platform", "last_played", "size", "menu")
+        modern_labels = {
+            "add": "",
+            "title": "TITLE",
+            "source": "SOURCE",
+            "platform": "PLATFORM",
+            "last_played": "LAST PLAYED",
+            "size": "SIZE",
+            "menu": "",
+        }
+        modern_widths = {
+            "add": 44,
+            "title": 222,
+            "source": 92,
+            "platform": 78,
+            "last_played": 102,
+            "size": 72,
+            "menu": 32,
+        }
+        self.games_tree = ttk.Treeview(parent, columns=modern_columns, show="headings", selectmode="extended")
+        for column in modern_columns:
+            self.games_tree.heading(column, text=modern_labels[column], command=lambda selected=column: self.sort_games_by_column(selected if selected != "menu" else "title"))
+            self.games_tree.column(column, width=modern_widths[column], minwidth=40, anchor=tk.W)
+        self.configure_game_tree_tags()
+        self.games_tree["displaycolumns"] = modern_columns
+        self.games_tree.grid(row=2, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=self.games_tree.yview)
+        scrollbar.grid(row=2, column=1, sticky="ns")
+        self.games_tree.configure(yscrollcommand=scrollbar.set)
+        self.games_tree.bind("<<TreeviewSelect>>", self.on_game_selected)
+        self.games_tree.bind("<ButtonRelease-1>", self.on_game_table_click)
+        self.games_tree.bind("<space>", self.on_game_table_space)
+        self.games_tree.bind("<Button-3>", self.show_column_context_menu)
+
+    def _command_tile(
+        self,
+        parent: tk.Widget,
+        column: int,
+        title: str,
+        subtitle: str,
+        command: Callable[[], None],
+        *,
+        width: int | None = None,
+        accent: bool = False,
+    ) -> None:
+        palette = self.palette()
+        tile = ctk.CTkFrame(
+            parent,
+            fg_color=palette["accent"] if accent else palette["panel_raised"],
+            corner_radius=14,
+            border_width=1,
+            border_color=palette["border"],
+        )
+        if width:
+            tile.configure(width=width)
+        tile.grid(row=0, column=column, padx=6, sticky="ew")
+        tile.grid_propagate(False)
+        tile.grid_columnconfigure(1, weight=1)
+        icon_wrap = ctk.CTkFrame(tile, width=36, height=36, fg_color=palette["panel"], corner_radius=18)
+        icon_wrap.grid(row=0, column=0, padx=(12, 10), pady=10, sticky="w")
+        icon_wrap.grid_propagate(False)
+        if title == "Scan":
+            icon_text = "⌕"
+        elif title == "Refresh Metadata":
+            icon_text = "↻"
+        elif title == "Auto-Art":
+            icon_text = "✦"
+        elif title == "Preview":
+            icon_text = "◫"
+        else:
+            icon_text = "↓"
+        ctk.CTkLabel(icon_wrap, text=icon_text, text_color=palette["accent"], font=("Segoe UI", 16, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+        text = ctk.CTkLabel(tile, text=f"{title}\n{subtitle}", anchor="w", justify="left", text_color=palette["text"], font=("Segoe UI", 12, "bold"))
+        text.grid(row=0, column=1, padx=(0, 12), pady=10, sticky="w")
+        for widget in (tile, icon_wrap, text):
+            widget.bind("<Button-1>", lambda _event: command())
+
+    def _modern_set_view_filter(self, value: str) -> None:
+        mapped = {
+            "All Games": "All",
+            "Needs Review": "Needs review",
+            "Missing Artwork": "Needs artwork",
+            "Installed Steam": "Installed Steam",
+            "Stored Library": "Stored Library",
+        }.get(value, value)
+        self.view_filter_var.set(mapped)
+        self.apply_view_filter()
 
     def configure_game_tree_tags(self) -> None:
         if not hasattr(self, "games_tree"):
@@ -1732,6 +2477,10 @@ class MainWindow(tk.Tk):
         self.column_visible_var.set(self.selected_column_id() in self.normalized_visible_columns())
 
     def apply_game_columns(self) -> None:
+        if getattr(self, "modern_shell_enabled", False):
+            if hasattr(self, "games_tree"):
+                self.games_tree["displaycolumns"] = ("add", "title", "source", "platform", "last_played", "size", "menu")
+            return
         order = self.normalized_column_order()
         visible = self.normalized_visible_columns()
         display = display_columns_for_table(order, visible)
@@ -1819,16 +2568,46 @@ class MainWindow(tk.Tk):
 
     def _build_detail(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
-        parent.rowconfigure(0, weight=1)
+        parent.rowconfigure(1, weight=1)
+
+        summary = ttk.LabelFrame(parent, text="Selected Game", padding=10)
+        summary.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        summary.columnconfigure(0, weight=1)
+        self.detail_title_var = tk.StringVar(value="No game selected")
+        self.detail_meta_var = tk.StringVar(value="Pick a library row to inspect artwork, metadata, and safety state.")
+        self.detail_status_var = tk.StringVar(value="Selection empty")
+        ttk.Label(summary, textvariable=self.detail_title_var, style="Header.TLabel", wraplength=360).grid(
+            row=0, column=0, sticky="w"
+        )
+        ttk.Label(summary, textvariable=self.detail_meta_var, style="Subtle.TLabel", wraplength=360).grid(
+            row=1, column=0, sticky="w", pady=(2, 0)
+        )
+        ttk.Label(summary, textvariable=self.detail_status_var).grid(row=2, column=0, sticky="w", pady=(8, 0))
+
         notebook = ttk.Notebook(parent)
-        notebook.grid(row=0, column=0, sticky="nsew")
+        notebook.grid(row=1, column=0, sticky="nsew")
+        self.detail_notebook = notebook
 
         review = ttk.Frame(notebook, padding=10)
+        metadata = ttk.Frame(notebook, padding=10)
         artwork = ttk.Frame(notebook, padding=10)
-        notebook.add(review, text="Shortcut")
+        links = ttk.Frame(notebook, padding=10)
+        local_files = ttk.Frame(notebook, padding=10)
+        self.shortcut_tab = review
+        self.metadata_tab = metadata
+        self.artwork_tab = artwork
+        self.links_tab = links
+        self.local_files_tab = local_files
+        notebook.add(review, text="Details")
+        notebook.add(metadata, text="Metadata")
         notebook.add(artwork, text="Artwork")
+        notebook.add(links, text="Links")
+        notebook.add(local_files, text="Local Files")
         self._build_review_tab(review)
+        self._build_metadata_tab(metadata)
         self._build_artwork_tab(artwork)
+        self._build_links_tab(links)
+        self._build_local_files_tab(local_files)
 
     def _build_review_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(1, weight=1)
@@ -1973,8 +2752,26 @@ class MainWindow(tk.Tk):
             box.bind("<Button-3>", lambda event, artwork_kind=kind: self.show_artwork_preview_menu(event, artwork_kind))
             label.bind("<Button-3>", lambda event, artwork_kind=kind: self.show_artwork_preview_menu(event, artwork_kind))
             ToolTip(label, "Double-click to open a larger preview. Right-click for artwork options.")
-            self.preview_boxes[kind] = box
-            self.preview_labels[kind] = label
+        self.preview_boxes[kind] = box
+        self.preview_labels[kind] = label
+
+    def _build_metadata_tab(self, parent: ttk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+        self.metadata_summary_text = tk.Text(parent, height=18, wrap="word", relief="flat", borderwidth=0)
+        self.metadata_summary_text.grid(row=0, column=0, sticky="nsew")
+        self.metadata_summary_text.configure(state=tk.DISABLED)
+
+    def _build_links_tab(self, parent: ttk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+        self.links_summary_text = tk.Text(parent, height=18, wrap="word", relief="flat", borderwidth=0)
+        self.links_summary_text.grid(row=0, column=0, sticky="nsew")
+        self.links_summary_text.configure(state=tk.DISABLED)
+
+    def _build_local_files_tab(self, parent: ttk.Frame) -> None:
+        parent.columnconfigure(0, weight=1)
+        self.local_files_text = tk.Text(parent, height=18, wrap="word", relief="flat", borderwidth=0)
+        self.local_files_text.grid(row=0, column=0, sticky="nsew")
+        self.local_files_text.configure(state=tk.DISABLED)
 
 
     def _load_initial_state(self) -> None:
@@ -1995,6 +2792,7 @@ class MainWindow(tk.Tk):
                 self.steam_path_var.set(normalize_windows_path_text(str(steam_path)))
                 self.logger.info("Detected Steam at %s", steam_path)
             self.set_profiles(profiles)
+            self.load_persistent_library()
             if boop_path:
                 self.sgdboop_path_var.set(str(boop_path))
                 self.logger.info("Detected SGDBoop at %s", boop_path)
@@ -2228,7 +3026,7 @@ class MainWindow(tk.Tk):
         self.settings.update_existing_shortcuts = self.update_existing_var.get()
         self.settings.default_tags = [tag.strip() for tag in self.default_tags_var.get().split(",") if tag.strip()]
         self.settings.steam_play_compat_tool = self.selected_compat_tool_name()
-        self.settings.theme_name = self.normalized_theme_name(self.theme_var.get())
+        self.settings.theme_name = MODERN_SHELL_THEME if self.modern_shell_enabled else self.normalized_theme_name(self.theme_var.get())
         self.settings.dark_mode = self.theme_is_dark(self.settings.theme_name)
         self.settings.view_filter = self.view_filter_var.get() if self.view_filter_var.get() in VIEW_FILTERS else "All"
         self.settings.sort_preset = self.sort_preset_var.get() if self.sort_preset_var.get() in SORT_PRESETS else "Title A-Z"
@@ -2422,9 +3220,11 @@ class MainWindow(tk.Tk):
 
     def apply_library_snapshot(self, snapshot: Any) -> None:
         update = build_library_display_update(snapshot)
+        active_index = library_game_index_for_item_id(list(update.games), snapshot.active_item_id) if getattr(snapshot, "active_item_id", None) else None
         self.replace_live_scan_games(
             list(update.games),
             update.status,
+            select_index=active_index,
         )
 
     def scan_persistent_sources(self) -> None:
@@ -2885,64 +3685,15 @@ class MainWindow(tk.Tk):
         self.replace_live_scan_games([], combined_scan_initial_message())
 
         def task() -> tuple[list[DetectedGame], int, int, int]:
-            games: list[DetectedGame] = []
-            steam_count = 0
-            shortcut_count = 0
-            folder_count = 0
-            total_steps = plan.total_steps
-            step = 0
-            records = None
-            if plan.steam_ready and plan.steam_path is not None:
-                self.set_task_progress(combined_scan_steam_start_message(), step, total_steps)
-                self.raise_if_cancelled()
-                steam_games = scan_installed_steam_games(plan.steam_path)
-                steam_count = len(steam_games)
-                step += 1
-                self.set_task_progress(combined_scan_steam_found_message(steam_count), step, total_steps)
-                if profile:
-                    try:
-                        records = load_shortcuts(profile.shortcuts_path)
-                        comparison = compare_games_with_shortcuts(steam_games, records, include_nonsteam_games=True)
-                        steam_games = comparison.games
-                        shortcut_count = comparison.shortcut_count
-                        loaded = load_existing_artwork_for_games(steam_games, profile)
-                        if loaded:
-                            self.logger.info("Loaded %s existing Steam artwork file(s) while scanning Steam.", loaded)
-                    except Exception as exc:
-                        self.logger.warning("Could not read existing shortcuts/artwork while scanning Steam: %s", exc)
-                games = self.merge_game_lists(games, steam_games)
-                self.post_ui(lambda data=list(games), count=steam_count: self.replace_live_scan_games(data, steam_scan_live_found_message(count)))
-                step += 1
-
-            if plan.folder_ready and plan.collection_root is not None:
-                self.set_task_progress(combined_scan_folder_start_message(), step, total_steps)
-                scanner = GameScanner(
-                    self.logger,
-                    cancel_check=self.raise_if_cancelled,
-                    progress_callback=lambda message: self.set_task_progress(message),
-                    game_callback=lambda game: self.post_ui(lambda g=game: self.add_live_scan_game(g)),
-                )
-                folder_games = scanner.scan(plan.collection_root)
-                folder_count = len(folder_games)
-                self.raise_if_cancelled()
-                step += 1
-                self.set_task_progress(combined_scan_folder_cross_check_message(folder_count), step, total_steps)
-                if profile:
-                    try:
-                        if records is None:
-                            records = load_shortcuts(profile.shortcuts_path)
-                        folder_games = compare_games_with_shortcuts(folder_games, records).games
-                        loaded = load_existing_artwork_for_games(folder_games, profile)
-                        if loaded:
-                            self.logger.info("Loaded %s existing Steam artwork file(s) for folder games.", loaded)
-                    except Exception as exc:
-                        self.logger.warning("Could not read existing shortcuts for folder duplicate detection: %s", exc)
-                games = self.merge_game_lists(games, folder_games)
-                step += 1
-
-            counts = CombinedScanCounts(steam=steam_count, shortcuts=shortcut_count, folders=folder_count)
-            self.set_task_progress(combined_scan_ready_message(counts), total_steps, total_steps)
-            return games, steam_count, shortcut_count, folder_count
+            return run_combined_scan(
+                plan,
+                profile,
+                self.logger,
+                self.set_task_progress,
+                self.raise_if_cancelled,
+                lambda games, status: self.post_ui(lambda data=list(games), s=status: self.replace_live_scan_games(data, s)),
+                lambda game: self.post_ui(lambda g=game: self.add_live_scan_game(g)),
+            )
 
         def done(result: tuple[list[DetectedGame], int, int, int]) -> None:
             games, steam_count, shortcut_count, folder_count = result
@@ -2972,27 +3723,14 @@ class MainWindow(tk.Tk):
         self.replace_live_scan_games(preserved_games, folder_scan_initial_message())
 
         def task() -> list[DetectedGame]:
-            self.set_task_progress(folder_scan_start_message(), 0, 2)
-            scanner = GameScanner(
+            return run_folder_scan(
+                plan,
+                profile,
                 self.logger,
-                cancel_check=self.raise_if_cancelled,
-                progress_callback=lambda message: self.set_task_progress(message),
-                game_callback=lambda game: self.post_ui(lambda g=game: self.add_live_scan_game(g)),
+                self.set_task_progress,
+                self.raise_if_cancelled,
+                lambda game: self.post_ui(lambda g=game: self.add_live_scan_game(g)),
             )
-            games = scanner.scan(plan.collection_root)
-            self.raise_if_cancelled()
-            self.set_task_progress(folder_scan_cross_check_message(len(games)), 1, 2)
-            if profile:
-                try:
-                    records = load_shortcuts(profile.shortcuts_path)
-                    games = compare_games_with_shortcuts(games, records).games
-                    loaded = load_existing_artwork_for_games(games, profile)
-                    if loaded:
-                        self.logger.info("Loaded %s existing Steam artwork file(s) for scanned folder games.", loaded)
-                except Exception as exc:
-                    self.logger.warning("Could not read existing shortcuts for duplicate detection: %s", exc)
-            self.set_task_progress(folder_scan_ready_message(len(games)), 2, 2)
-            return games
 
         def done(games: list[DetectedGame]) -> None:
             self.games = self.merge_game_lists(preserved_games, games)
@@ -3024,28 +3762,14 @@ class MainWindow(tk.Tk):
         profile = self.current_profile()
 
         def task() -> list[DetectedGame]:
-            self.set_task_progress(steam_scan_start_message(), 0, 3)
-            self.raise_if_cancelled()
-            games = scan_installed_steam_games(plan.steam_path)
-            self.post_ui(
-                lambda data=list(games): self.replace_live_scan_games(
-                    self.merge_game_lists(self.games, data),
-                    steam_scan_live_found_message(len(data)),
-                )
+            return run_steam_scan(
+                plan,
+                profile,
+                self.logger,
+                self.set_task_progress,
+                self.raise_if_cancelled,
+                lambda games, status: self.post_ui(lambda data=list(games), s=status: self.replace_live_scan_games(data, s)),
             )
-            self.raise_if_cancelled()
-            self.set_task_progress(steam_scan_found_message(len(games)), 1, 3)
-            if profile:
-                try:
-                    records = load_shortcuts(profile.shortcuts_path)
-                    games = compare_games_with_shortcuts(games, records, include_nonsteam_games=True).games
-                    loaded = load_existing_artwork_for_games(games, profile)
-                    if loaded:
-                        self.logger.info("Loaded %s existing Steam artwork file(s) while scanning Steam library.", loaded)
-                except Exception as exc:
-                    self.logger.warning("Could not read existing shortcuts for Steam library comparison: %s", exc)
-            self.set_task_progress(steam_scan_ready_message(), 3, 3)
-            return games
 
         def done(games: list[DetectedGame]) -> None:
             before = len(self.games)
@@ -3070,13 +3794,14 @@ class MainWindow(tk.Tk):
     def apply_existing_shortcut_choices(self, games: list[DetectedGame], records: list[Any]) -> None:
         apply_existing_shortcut_choices_to_games(games, records)
 
-    def replace_live_scan_games(self, games: list[DetectedGame], status: str = "") -> None:
+    def replace_live_scan_games(self, games: list[DetectedGame], status: str = "", *, select_index: int | None = None) -> None:
         self.games = list(games)
         self.current_game_index = None
         self.sync_library_selection_state()
-        self.refresh_game_table(select_index=0 if self.games else None)
-        if self.displayed_game_indices:
-            self.load_game_detail(self.displayed_game_indices[0])
+        self.refresh_game_table(select_index=select_index if select_index is not None else (0 if self.games else None))
+        detail_index = select_index if select_index is not None and select_index in self.displayed_game_indices else (self.displayed_game_indices[0] if self.displayed_game_indices else None)
+        if detail_index is not None:
+            self.load_game_detail(detail_index)
         if status:
             self.status_var.set(status)
 
@@ -3094,6 +3819,26 @@ class MainWindow(tk.Tk):
         return game_identity_keys(game)
 
     def game_row_values(self, game: DetectedGame) -> tuple[str, str, str, str, str, str, str, str]:
+        if self.modern_shell_enabled:
+            row = modern_library_row_for_game(game)
+            return (
+                "[x]" if self._game_selected(game) else "[ ]",
+                row.title,
+                row.source,
+                row.platform,
+                row.last_played,
+                row.size,
+                "⋮",
+            )
+        if is_persistent_library_game(game):
+            item_id = library_item_id_for_game(game)
+            row = self.library_controller.row_map().get(item_id) if item_id else None
+            if row is not None:
+                return modern_library_table_row_for_library_row(
+                    row,
+                    selected=self._game_selected(game),
+                    artwork_status=self.artwork_job_status.get(id(game)),
+                ).values
         return modern_library_table_row_for_game(
             game,
             artwork_status=self.artwork_job_status.get(id(game)),
@@ -3144,17 +3889,35 @@ class MainWindow(tk.Tk):
             ]
         )
 
+    def _game_selected(self, game: DetectedGame, *, selected_ids: frozenset[str] | set[str] | None = None) -> bool:
+        if is_persistent_library_game(game):
+            controller = self.__dict__.get("library_controller")
+            if controller is None:
+                return bool(game.selected)
+            ids = selected_ids if selected_ids is not None else controller.snapshot().selected_ids
+            return library_item_id_for_game(game) in ids
+        return game.selected
+
     def game_matches_filter(self, game: DetectedGame) -> bool:
-        return game_matches_view_filter(game, self.view_filter_var.get())
+        return game_matches_view_filter(game, self.view_filter_var.get()) and game_matches_search(game, self.library_search_var.get())
 
     def visible_game_indices(self) -> list[int]:
-        return visible_library_indices(self.games, self.view_filter_var.get())
+        return visible_library_indices(self.games, self.view_filter_var.get(), self.library_search_var.get())
 
     def apply_view_filter(self) -> None:
         self.settings.view_filter = self.view_filter_var.get()
         self.refresh_game_table(select_index=self.current_game_index)
+        if self.current_game_index is not None and self.current_game_index not in self.displayed_game_indices:
+            fallback_index = self.displayed_game_indices[0] if self.displayed_game_indices else None
+            if fallback_index is not None:
+                self.load_game_detail(fallback_index)
         self.save_settings_from_ui(log=False)
         self.status_var.set(view_filter_status_message(len(self.displayed_game_indices), len(self.games)))
+        if self.modern_shell_enabled and hasattr(self, "library_filter_combo"):
+            try:
+                self.library_filter_combo.set(f"All Games ({len(self.games)})")
+            except Exception:
+                pass
 
     def refresh_game_table(self, select_index: int | None = None) -> None:
         self.suppress_game_select_events = True
@@ -3181,6 +3944,11 @@ class MainWindow(tk.Tk):
         self.games_tree.bind("<<TreeviewSelect>>", self.on_game_selected)
         self.suppress_game_select_events = False
         self.update_bulk_action_status()
+        if self.modern_shell_enabled and hasattr(self, "library_filter_combo"):
+            try:
+                self.library_filter_combo.set(f"All Games ({len(self.games)})")
+            except Exception:
+                pass
 
     def refresh_game_row(self, index: int) -> None:
         if not (0 <= index < len(self.games)):
@@ -3204,37 +3972,33 @@ class MainWindow(tk.Tk):
         self.update_bulk_action_status()
 
     def update_bulk_action_status(self) -> None:
+        selected_ids = self._selected_item_ids()
         summary = build_mixed_selection_summary(
-            tuple(game.selected for game in self.games),
+            tuple(self._game_selected(game, selected_ids=selected_ids) for game in self.games),
             tuple(library_item_id_for_game(game) for game in self.games),
             tuple(self.displayed_game_indices),
-            self.library_controller.snapshot().selected_ids,
+            selected_ids,
         )
         self.bulk_status_var.set(summary.label)
+        if hasattr(self, "bulk_actions_frame"):
+            if summary.selected > 0:
+                self.bulk_actions_frame.grid()
+            else:
+                self.bulk_actions_frame.grid_remove()
 
     def set_all_games_selected(self, selected: bool) -> None:
         self.set_games_selected(selected, visible_only=False)
 
     def set_games_selected(self, selected: bool, visible_only: bool = False) -> None:
         indices = self.displayed_game_indices if visible_only else range(len(self.games))
-        library_ids = library_item_ids_for_games(self.games, indices)
-        self.set_library_items_selected(library_ids, selected)
-        count = 0
-        for index in indices:
-            game = self.games[index]
-            if not is_persistent_library_game(game):
-                game.selected = selected
-            count += 1
+        count = self.selection_bulk_controller.select_scope(self.games, indices, selected)
         self.refresh_all_game_rows()
         scope = "visible" if visible_only else "all"
         action = "select" if selected else "clear"
         self.status_var.set(selection_action_result(action, scope, count).label)
 
     def invert_visible_selection(self) -> None:
-        self.invert_library_item_selection(library_item_ids_for_games(self.games, self.displayed_game_indices))
-        for index in self.displayed_game_indices:
-            if not is_persistent_library_game(self.games[index]):
-                self.games[index].selected = not self.games[index].selected
+        self.selection_bulk_controller.invert_scope(self.games, self.displayed_game_indices)
         self.refresh_all_game_rows()
         self.status_var.set(selection_action_result("invert", "visible", len(self.displayed_game_indices)).label)
 
@@ -3248,10 +4012,7 @@ class MainWindow(tk.Tk):
         self.status_var.set(selection_action_result("invert", "current_filter", len(self.displayed_game_indices)).label)
 
     def invert_all_selection(self) -> None:
-        self.invert_library_item_selection(library_item_ids_for_games(self.games))
-        for game in self.games:
-            if not is_persistent_library_game(game):
-                game.selected = not game.selected
+        self.selection_bulk_controller.invert_scope(self.games, range(len(self.games)))
         self.refresh_all_game_rows()
         self.status_var.set(selection_action_result("invert", "all", len(self.games)).label)
 
@@ -3350,7 +4111,6 @@ class MainWindow(tk.Tk):
                 self.mirror_library_selection_state()
             else:
                 self.set_library_items_selected((item_id,), item_id not in selected_ids)
-            self.library_selection_anchor_id = item_id
         else:
             game.selected = not game.selected
         self.sync_library_selection_state()
@@ -3432,6 +4192,8 @@ class MainWindow(tk.Tk):
                 self.library_controller.set_active(item_id)
             except KeyError:
                 pass
+        self.update_detail_header(game)
+        self.update_detail_tabs(game)
         self.set_detail_editable(True)
         self.suppress_detail_dirty = True
         self.detail_vars["title_entry"].set(game.display_title)
@@ -3618,15 +4380,39 @@ class MainWindow(tk.Tk):
         sources = {key: var.get() for key, var in self.metadata_source_vars.items()}
         return build_metadata_service(sources, client, self.logger)
 
+    def _selected_item_ids(self) -> frozenset[str]:
+        controller = self.__dict__.get("library_controller")
+        if controller is None:
+            return frozenset()
+        try:
+            return controller.snapshot().selected_ids
+        except Exception:
+            return frozenset()
+
     def selected_or_current_games(self) -> list[DetectedGame]:
+        selected_ids = self._selected_item_ids()
         indices = selected_or_current_indices(
-            tuple(game.selected for game in self.games),
+            tuple(self._game_selected(game, selected_ids=selected_ids) for game in self.games),
             self.current_game_index,
         )
         return [self.games[index] for index in indices]
 
     def selected_games_in_current_view(self) -> list[DetectedGame]:
-        return [self.games[index] for index in self.displayed_game_indices if 0 <= index < len(self.games) and self.games[index].selected]
+        controller = self.__dict__.get("library_controller")
+        if controller is None:
+            return [
+                self.games[index]
+                for index in self.displayed_game_indices
+                if 0 <= index < len(self.games) and self.games[index].selected
+            ]
+        selected_ids = self._selected_item_ids()
+        if not selected_ids:
+            return [
+                self.games[index]
+                for index in self.displayed_game_indices
+                if 0 <= index < len(self.games) and self.games[index].selected
+            ]
+        return selected_visible_library_games(self.games, self.displayed_game_indices, selected_ids)
 
     def game_index_for_object(self, game: DetectedGame, fallback: int | None = None) -> int | None:
         if fallback is not None and 0 <= fallback < len(self.games) and self.games[fallback] is game:

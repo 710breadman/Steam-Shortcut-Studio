@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from steam_shortcut_studio.settings_store import SettingsStore  # noqa: E402
+from steam_shortcut_studio.settings_store import AppSettings, SettingsStore  # noqa: E402
 
 
 def test_legacy_column_settings_gain_library_columns() -> None:
@@ -38,6 +38,14 @@ def test_legacy_column_settings_gain_library_columns() -> None:
         assert settings.game_column_order == settings.visible_game_columns
 
 
+def test_default_settings_start_in_modern_dark_theme() -> None:
+    settings = AppSettings()
+
+    assert settings.dark_mode is True
+    assert settings.theme_name == "Steam Deck Blue"
+
+
 if __name__ == "__main__":
     test_legacy_column_settings_gain_library_columns()
+    test_default_settings_start_in_modern_dark_theme()
     print("Settings store tests passed.")

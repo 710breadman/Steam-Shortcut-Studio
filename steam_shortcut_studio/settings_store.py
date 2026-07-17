@@ -47,8 +47,8 @@ class AppSettings:
     update_existing_shortcuts: bool = True
     default_tags: list[str] = field(default_factory=lambda: ["Non Steam", "Imported"])
     last_export_dir: str = ""
-    dark_mode: bool = False
-    theme_name: str = "Follow System"
+    dark_mode: bool = True
+    theme_name: str = "Steam Deck Blue"
     visible_game_columns: list[str] = field(default_factory=lambda: ["add", "title", "source", "platform", "status", "exe", "artwork", "existing"])
     game_column_order: list[str] = field(default_factory=lambda: ["add", "title", "source", "platform", "status", "exe", "artwork", "existing"])
     view_filter: str = "All"
@@ -83,7 +83,7 @@ class AppSettings:
         if settings.artwork_preview_limit > 80:
             settings.artwork_preview_limit = 80
         if not settings.theme_name:
-            settings.theme_name = "Midnight" if settings.dark_mode else "Follow System"
+            settings.theme_name = "Steam Deck Blue" if settings.dark_mode else "Follow System"
         settings.steam_play_compat_tool = str(settings.steam_play_compat_tool or "").strip()
         if not isinstance(settings.artwork_sources, dict):
             settings.artwork_sources = dict(DEFAULT_ARTWORK_SOURCES)

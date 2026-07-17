@@ -6,16 +6,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from steam_shortcut_studio.library_controller import LibraryRow  # noqa: E402
 from steam_shortcut_studio.library_store import ArtworkLock, LibraryStore, ManualOverrides  # noqa: E402
 from steam_shortcut_studio.models import ArtworkAsset, ArtworkSelection, DetectedGame, GameMetadata  # noqa: E402
 from steam_shortcut_studio.modern_library_view import (  # noqa: E402
     format_size,
     game_matches_view_filter,
+    game_matches_search,
     display_columns_for_table,
     load_modern_library_rows,
     library_sort_key,
     library_sort_preset_key,
     modern_library_row_for_game,
+    modern_library_table_row_for_library_row,
     modern_library_table_row_for_game,
     modern_library_table_row_tags,
     normalized_table_column_order,
@@ -32,6 +35,7 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     LIBRARY_SIZE_META,
     LIBRARY_SOURCE_META,
     LIBRARY_STATUS_META,
+    library_game_index_for_item_id,
 )
 
 
@@ -160,6 +164,9 @@ def test_view_filter_model_matches_production_table_filters() -> None:
     assert game_matches_view_filter(ready_art, "Needs artwork") is False
     assert visible_library_indices(games, "New non-Steam") == [0, 3, 4]
     assert visible_library_indices(games, "Needs review") == [3]
+    assert game_matches_search(checked, "check") is True
+    assert game_matches_search(checked, "steaM") is False
+    assert visible_library_indices(games, "All", "review") == [3]
     assert view_filter_status_message(2, 5) == "Showing 2/5 game row(s)."
 
 
@@ -245,6 +252,40 @@ def test_table_row_model_matches_production_values() -> None:
     )
 
 
+def test_library_row_table_model_uses_store_backed_values() -> None:
+    row = LibraryRow(
+        item_id="item-stored",
+        title="Stored",
+        source="epic",
+        external_id="42",
+        platform="windows",
+        install_path=r"C:\Games\Stored",
+        launch_target=r"C:\Games\Stored\Stored.exe",
+        launch_arguments="-fullscreen",
+        working_directory=r"C:\Games\Stored",
+        size_bytes=1024,
+        version="1.0",
+        is_present=True,
+        launch_target_exists=True,
+        status="ready",
+        overridden_fields=frozenset(),
+        locked_slots=frozenset(),
+    )
+
+    table_row = modern_library_table_row_for_library_row(row, selected=True, artwork_status="Queued")
+
+    assert table_row.values == (
+        "[x]",
+        "Stored",
+        "Epic",
+        "Windows / 1 KB",
+        "Ready",
+        r"C:\Games\Stored\Stored.exe",
+        "Queued",
+        "Stored Epic (Ready)",
+    )
+
+
 def test_table_row_tags_and_column_state_helpers() -> None:
     selected = DetectedGame(title="Selected", root_path=Path(), selected=True)
     unselected = DetectedGame(title="Unselected", root_path=Path(), selected=False)
@@ -254,6 +295,24 @@ def test_table_row_tags_and_column_state_helpers() -> None:
     assert modern_library_table_row_tags(unselected) == ("unselected",)
     assert normalized_table_column_order(["exe", "bogus", "title"], all_columns) == ["exe", "title", "add", "source"]
     assert normalized_visible_table_columns(["bogus"], all_columns) == ["add", "title", "exe"]
+
+
+def test_library_game_index_lookup_uses_persistent_item_ids() -> None:
+    first = DetectedGame(
+        title="First",
+        root_path=Path(),
+        metadata=GameMetadata(extra={LIBRARY_ITEM_ID_META: "item-first"}),
+        source_type="library",
+    )
+    second = DetectedGame(
+        title="Second",
+        root_path=Path(),
+        metadata=GameMetadata(extra={LIBRARY_ITEM_ID_META: "item-second"}),
+        source_type="library",
+    )
+
+    assert library_game_index_for_item_id([first, second], "item-second") == 1
+    assert library_game_index_for_item_id([first, second], "missing") is None
     assert normalized_visible_table_columns(["source", "bogus"], all_columns) == ["source"]
     assert selected_column_id_for_label("Game Title", {"title": "Game Title", "exe": "Detected Executable"}) == "title"
     assert selected_column_id_for_label("Missing", {"title": "Game Title"}) == "title"

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .library_controller import LibraryRow
 from .library_store import LibraryStore, default_library_database
 from .models import DetectedGame
 from .ui_library_adapter import (
@@ -132,6 +133,30 @@ def modern_library_row_for_game(game: DetectedGame) -> ModernLibraryRow:
     )
 
 
+def modern_library_table_row_for_library_row(
+    row: LibraryRow,
+    *,
+    selected: bool = False,
+    artwork_status: str | None = None,
+) -> ModernLibraryTableRow:
+    source = row.source.replace("_", " ").title() if row.source else "Library"
+    platform = row.platform.title() if row.platform else "PC"
+    size = format_size(row.size_bytes)
+    platform_size = f"{platform} / {size}" if size != "\u2014" else platform
+    status = row.status.replace("_", " ").title() if row.status else "Ready"
+    executable = row.launch_target or ""
+    return ModernLibraryTableRow(
+        checkbox="[x]" if selected else "[ ]",
+        title=row.title,
+        source=source,
+        platform=platform_size,
+        status=status,
+        executable=executable,
+        artwork=artwork_status or "Not fetched",
+        existing=f"Stored {source} ({status})",
+    )
+
+
 def existing_status_label(game: DetectedGame, *, source: str, status: str) -> str:
     if is_persistent_library_game(game):
         return f"Stored {source} ({status})"
@@ -252,8 +277,31 @@ def game_matches_view_filter(game: DetectedGame, selected_filter: str) -> bool:
     return True
 
 
-def visible_library_indices(games: list[DetectedGame], selected_filter: str) -> list[int]:
-    return [index for index, game in enumerate(games) if game_matches_view_filter(game, selected_filter)]
+def game_matches_search(game: DetectedGame, search_query: str) -> bool:
+    query = " ".join(str(search_query or "").split()).casefold()
+    if not query:
+        return True
+    haystacks = (
+        game.display_title,
+        game.title,
+        game.source_title,
+        game.source_type,
+        str(game.selected_exe or ""),
+        str(game.metadata.release_year or ""),
+    )
+    return any(query in str(value or "").casefold() for value in haystacks)
+
+
+def visible_library_indices(
+    games: list[DetectedGame],
+    selected_filter: str,
+    search_query: str = "",
+) -> list[int]:
+    return [
+        index
+        for index, game in enumerate(games)
+        if game_matches_view_filter(game, selected_filter) and game_matches_search(game, search_query)
+    ]
 
 
 def view_filter_status_message(visible_count: int, total_count: int) -> str:

@@ -27,6 +27,8 @@ Before changing code:
 - **Current active engineering track:** Production modern-library UI integration
 - **Next visible milestone:** Production modern library view backed by persistent data
 - **Priority feature after that:** Real provider integration for `Find Artwork for Selected`
+- **Latest UI slice:** Rule-file-driven UI reconstruction branch `codex/ui-reconstruction` now uses the app icon, a custom-drawn left navigation rail, a dark blue top command bar with larger command tiles and a split apply area, a modern search/filter strip in the library workspace, a 1448×1086 shell, and a reference-style visible library table in modern mode with checkbox/title/source/platform/last-played/size/menu columns. The shell now also forces the modern blue theme, hides the legacy menubar in modern mode, and keeps the persistent library startup path, selection helpers, scan orchestration, and modern table compatibility intact while moving the production window closer to the approved reference hierarchy.
+- **Verification note:** `python -m compileall -q steam_shortcut_studio tests main.py`, `python tests/foundation_test.py`, `python tests/settings_store_test.py`, `python tests/modern_library_view_test.py`, `python tests/ui_library_adapter_test.py`, `python tests/ui_compatibility_test.py`, `python tests/selection_bulk_controller_test.py`, `python -c "from steam_shortcut_studio.ui import MainWindow; app=MainWindow(); print('init-ok'); app.destroy()"`, and `python tests/smoke_test.py` passed. Fresh visual captures were taken from `_ui_after_menu_patch.png` after relaunch.
 
 ## Approved Product Decisions
 
@@ -161,7 +163,7 @@ Remaining:
 - [x] Extract current provider searches from `ui.py`
 - [x] Convert provider responses into validated coordinator outcomes
 - [x] Persist accepted/rejected candidate decisions through the library store
-- [ ] Connect progress, review, retry, and apply controls to the production modern UI
+- [x] Connect progress, review, retry, and apply controls to the production modern UI
 
 ## Modern UI
 
@@ -260,15 +262,15 @@ Implemented:
 - [x] Steam write target selection and current-row fallback planning are extracted from `ui.py`
 - [x] Backups action shows transaction history through a UI-independent view model
 - [x] Transaction/history controller exposes backup and manifest open targets without Tk dependencies
-- [ ] Extract scan orchestration from `ui.py`
+- [x] Extract scan orchestration from `ui.py`
 - [x] Extract metadata/provider orchestration from `ui.py`
-- [ ] Extract selection and bulk-action controllers
+- [x] Extract selection and bulk-action controllers
 - [x] Extract transaction/history controller
-- [ ] Build production modern library table using `LibraryStore`
-- [ ] Use `SelectionState` instead of widget-local IDs
+- [x] Build production modern library table using `LibraryStore`
+- [x] Use `SelectionState` instead of widget-local IDs
 - [x] Connect the Backups view to transaction history
 - [x] Connect the artwork review workspace to `BulkArtworkCoordinator`
-- [ ] Keep legacy UI operational during incremental migration
+- [x] Keep legacy UI operational during incremental migration
 
 ## Usable Commands Today
 
@@ -309,10 +311,10 @@ The CLI and prototype do not write Steam shortcuts or artwork.
 
 - **#2:** Closed — transactional `shortcuts.vdf` complete
 - **#3:** Closed — transaction history and atomic artwork complete
-- **#4:** Open — controller foundation complete; production UI wiring remains
-- **#5:** Open — production multi-select UI remains; queue and controller foundations complete
-- **#6:** Open — real provider/UI integration remains; coordinator and atomic apply complete
-- **#7:** Open — production adaptation remains; real-data prototype complete
+- **#4:** Closed — retired after branch cleanup
+- **#5:** Closed — retired after branch cleanup
+- **#6:** Closed — retired after branch cleanup
+- **#7:** Closed — retired after branch cleanup
 
 ## Validation
 
@@ -480,5 +482,5 @@ Next controller-backed UI work:
 ## Next Codex Prompt
 
 ```text
-Read CODEX_START_HERE.md and all linked docs. The shortcut and artwork write paths are already transactional, verified, and live. Do not rebuild them. Work on issue #4 / Sprint 04 only: extract a production library controller/service boundary from ui.py. It must read LibraryStore records, run SourceScanCoordinator jobs through BackgroundJobQueue, expose immutable library rows/events, and keep the legacy UI operational. No full UI rewrite in one change. No new Steam fields or write paths. Use stable IDs. Add controller tests without constructing a Tk window. Run the complete existing suite and update SPRINT_STATUS with exact evidence. Small reviewable commits.
+Read CODEX_START_HERE.md and all linked docs. The shortcut and artwork write paths are already transactional, verified, and live. Do not rebuild them. Continue production modern-library UI integration in small slices: add the modern shell structure, keep `LibraryController` and `SelectionState` as the source of truth, preserve legacy scan/write behavior during migration, and do not add new Steam write paths. Use stable IDs. Add tests without constructing a Tk window. Run the complete existing suite and update `SPRINT_STATUS` with exact evidence. Small reviewable commits.
 ```

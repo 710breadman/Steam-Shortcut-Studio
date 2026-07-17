@@ -113,6 +113,15 @@ def library_games_by_item_id(games: list[DetectedGame]) -> dict[str, DetectedGam
     }
 
 
+def library_game_index_for_item_id(games: list[DetectedGame], item_id: str) -> int | None:
+    if not item_id:
+        return None
+    for index, game in enumerate(games):
+        if library_item_id_for_game(game) == item_id:
+            return index
+    return None
+
+
 def selected_visible_library_item_ids(
     games: list[DetectedGame],
     displayed_indices: list[int],
@@ -121,6 +130,16 @@ def selected_visible_library_item_ids(
     visible = library_item_ids_for_games(games, displayed_indices)
     selected = set(selected_ids)
     return tuple(item_id for item_id in visible if item_id in selected)
+
+
+def selected_visible_library_games(
+    games: list[DetectedGame],
+    displayed_indices: list[int],
+    selected_ids: frozenset[str] | set[str],
+) -> list[DetectedGame]:
+    visible_ids = selected_visible_library_item_ids(games, displayed_indices, selected_ids)
+    games_by_id = library_games_by_item_id(games)
+    return [games_by_id[item_id] for item_id in visible_ids if item_id in games_by_id]
 
 
 def library_item_ids_between(

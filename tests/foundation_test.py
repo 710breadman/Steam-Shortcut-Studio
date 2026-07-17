@@ -34,6 +34,16 @@ class SelectionStateTests(unittest.TestCase):
         self.assertEqual(selected, ["b", "c", "d"])
         self.assertEqual(state.selected_in_order(order), ["b", "c", "d"])
 
+    def test_range_selection_falls_back_to_target_when_anchor_is_missing(self) -> None:
+        order = ["a", "b", "c", "d"]
+        state = SelectionState(anchor_id="z")
+
+        selected = state.select_range(order, "c")
+
+        self.assertEqual(selected, ["c"])
+        self.assertEqual(state.selected_ids, {"c"})
+        self.assertEqual(state.anchor_id, "c")
+
     def test_filtering_does_not_silently_remove_selected_items(self) -> None:
         state = SelectionState()
         state.replace(["visible", "hidden-by-filter"])

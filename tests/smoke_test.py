@@ -867,7 +867,7 @@ def test_reset_settings_to_defaults_rewrites_settings_file() -> None:
             assert loaded.collection_root == ""
             assert loaded.steamgriddb_api_key == ""
             assert loaded.rawg_api_key == ""
-            assert loaded.theme_name == "Follow System"
+            assert loaded.theme_name == "Steam Deck Blue"
             assert loaded.view_filter == "All"
             assert Path(loaded.cache_dir) == expected_cache
         finally:
