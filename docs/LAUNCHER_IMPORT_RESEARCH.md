@@ -1,100 +1,199 @@
 # Launcher Import Research
 
+**Updated:** 2026-07-19
+
 ## Goal
 
 Prefer launcher-owned installation metadata over recursive executable guessing. Folder scanning remains the fallback for portable games and unsupported launchers.
 
-## Priority Order
+All adapters are read-only. They normalize source data into shared records and never modify launcher files or databases.
 
-1. Epic Games Launcher
-2. GOG Galaxy
-3. Playnite
-4. EA app
-5. Ubisoft Connect
+## Current and Planned Order
+
+1. Epic Games Launcher — implemented
+2. Native Steam — implemented
+3. Loose/local folders — implemented
+4. Playnite — next
+5. GOG Galaxy
 6. Battle.net
-7. Heroic, Lutris, Legendary, and Bottles on SteamOS/Bazzite
+7. EA App
+8. Ubisoft Connect
+9. Amazon Games
+10. itch.io
+11. Rockstar Games Launcher
+12. Microsoft Store / Xbox where safe and feasible
+13. Heroic, Lutris, Legendary, Bottles, Faugus, `.desktop`, and Flatpak-aware sources after the Windows workflow is stable
 
-Each launcher should implement the shared read-only `SourceAdapter` contract and return stable `SourceLibraryItem` records plus explicit issues. Import adapters must not modify launcher files.
+## Shared Adapter Contract
+
+Every source provides:
+
+- Stable source-specific ID.
+- Display title.
+- Source name.
+- External/store identity.
+- Installation path.
+- Launch target and arguments.
+- Working directory.
+- Platform.
+- Version and size when available.
+- Source-record path or equivalent evidence.
+- Structured warnings and errors.
+
+Adapters return normalized records, not raw launcher-specific objects.
+
+## Capability Declaration
+
+Each adapter should expose explicit capabilities so the controller and UI can disable unsupported actions without launcher-specific conditionals.
+
+```text
+supports_installed_games
+supports_owned_uninstalled_games
+supports_direct_launch
+supports_launcher_launch
+supports_launch_arguments
+supports_artwork_identity
+supports_version
+supports_install_monitoring
+supports_uninstall_detection
+supports_multiple_installations
+supports_platform_variants
+```
+
+Capability absence is not an error. It means the related action is unavailable or requires review.
+
+## Identity and Reconciliation Requirement
+
+Adding a source must not create direct shortcut proposals before cross-source reconciliation runs.
+
+Identity evidence priority:
+
+1. Exact stable store or launcher ID.
+2. Exact native Steam AppID relationship.
+3. Exact existing managed-shortcut relationship.
+4. Exact source launch identity.
+5. Strong install-path/executable evidence.
+6. Title, release year, developer, and edition evidence requiring conservative scoring.
+
+Title alone never permits automatic merging.
 
 ## Epic Games Launcher
 
-### Primary implementation reference
-
-The open-source Legendary client currently reads Epic Games Launcher manifests from:
-
-```text
-%PROGRAMDATA%\Epic\EpicGamesLauncher\Data\Manifests
-```
-
-It loads files ending in `.item` as JSON and indexes them by `AppName`.
-
-Reference:
-
-- `legendary-gl/legendary/legendary/lfs/egl.py`
-- `legendary-gl/legendary/legendary/models/egl.py`
-
-### Useful manifest fields
-
-| Epic field | Steam Shortcut Studio use |
-| --- | --- |
-| `DisplayName` | Preferred display title |
-| `AppName` | Fallback title and external identity |
-| `CatalogNamespace` + `CatalogItemId` | Strong external identity |
-| `InstallLocation` | Installation root |
-| `LaunchExecutable` | Authoritative launch target relative to the install root |
-| `LaunchCommand` | Launch arguments |
-| `AppVersionString` | Installed version |
-| `InstallSize` | Installed size |
-| `InstallationGuid` | Additional installation evidence |
-| `MainGameAppName` | Base-game relationship evidence |
-| `bIsExecutable` | Skip non-executable components |
-| `bIsIncompleteInstall` | Skip incomplete installations |
-| `bCanRunOffline` | Informational metadata |
-| `bNeedsValidation` | Surface a review/status warning later |
-
-### Safety rules
-
-- Read `.item` files only.
-- Never rewrite, delete, or normalize Epic manifests.
-- Skip incomplete installations and explicitly non-executable components.
-- Keep malformed files isolated so one bad manifest cannot block the whole scan.
-- Retain entries with a missing launch executable for manual review rather than inventing one.
-- Flag launch targets outside `InstallLocation` for review.
-- Do not require Windows paths to exist when parsing fixtures or a library copied from another machine.
-- Prefer catalog identity over title matching.
-
 ### Current implementation
 
-`steam_shortcut_studio/sources/epic.py` implements the initial read-only adapter. It is not yet connected to the production scan UI.
+The read-only adapter scans:
 
-## Shared Adapter Requirements
+```text
+%PROGRAMDATA%\Epic\EpicGamesLauncher\Data\Manifests\*.item
+```
 
-Every future adapter should provide:
+It uses catalog namespace and item ID as strong identity, maps install and launch data, skips incomplete or non-executable components, isolates malformed manifests, and flags suspicious launch targets for review.
 
-- Stable source-specific ID
-- Display title
-- Source name
-- External/store identity
-- Installation path
-- Launch target and arguments
-- Working directory
-- Platform
-- Source record path
-- Identity evidence
-- Structured warnings/errors
+Epic is the reference implementation for conservative source scans.
 
-Adapters should not return raw launcher-specific objects to the UI. Launcher data should be converted into the shared source model and later reconciled with the persistent library model.
+## Playnite — Next Adapter
 
-## Next Research
+Treat Playnite as a first-class optional curated source, not a dependency or replacement launcher.
 
-### GOG Galaxy
+### Preserve
 
-Determine the safest read-only source of installed-game identity and launch data. Galaxy database access must use read-only SQLite mode and tolerate schema changes. Avoid taking locks on the live database.
+- Playnite game ID.
+- Source plugin and source game ID.
+- Custom display name.
+- Installation state.
+- Installation directory.
+- All launch actions.
+- Emulator associations.
+- Platform associations.
+- User-selected executable and arguments.
+- Existing metadata, tags, and artwork references where useful.
 
-### Playnite
+### Launch behavior
 
-Treat Playnite as a user-curated source. Preserve its game IDs, custom names, launch actions, and emulator associations. Do not assume every Playnite entry represents an installed native PC game.
+Store multiple launch recipes where available:
 
-### EA, Ubisoft, and Battle.net
+- Launch through Playnite.
+- Launch through the original source launcher.
+- Direct executable or script.
+- Emulator action.
 
-Document each launcher's manifest/database ownership, locking behavior, installation state fields, launch protocol, and reliable external identity before implementation.
+Never silently replace one recipe with another. Require an explicit preferred recipe.
+
+### Research tasks
+
+- Confirm installed and portable database locations.
+- Determine the safest supported read path for current Playnite versions.
+- Avoid locking or writing the live database.
+- Create generated and anonymized fixtures.
+- Define handling for uninstalled, hidden, emulated, and duplicate entries.
+- Preserve user-curated names without treating them as exact cross-source identity.
+
+## GOG Galaxy
+
+Research the safest read-only source of installed-game identity and launch data.
+
+Requirements:
+
+- Open databases in read-only mode.
+- Avoid taking persistent locks on the live database.
+- Tolerate schema changes and unavailable Galaxy services.
+- Preserve GOG product IDs.
+- Distinguish Galaxy-managed and standalone installations.
+- Store direct and Galaxy launch recipes when both are valid.
+
+## Battle.net
+
+Research before implementation:
+
+- Stable product identity.
+- Installed-version records.
+- Launcher URI or product code.
+- Direct executable reliability.
+- Update, repair, and relocation behavior.
+- PTR, beta, classic, and region variants.
+- Multiple installations.
+- Launch arguments.
+- Behavior when Battle.net is moved or reinstalled.
+
+Default to launcher-based launch unless direct execution is proven reliable for that title. Preserve both recipes when appropriate.
+
+## EA App and Ubisoft Connect
+
+For each launcher, document:
+
+- Manifest/database ownership.
+- Locking behavior.
+- Stable external identity.
+- Installation state.
+- Launch protocol.
+- Direct executable reliability.
+- Update and repair behavior.
+- Multiple editions and subscriptions.
+
+No adapter should depend on credentials, scrape private account data, or modify launcher storage.
+
+## Monitoring
+
+Source monitoring is a later layer above adapters.
+
+- Watch only documented directories or records.
+- Debounce repeated launcher writes.
+- Convert changes into a review summary.
+- Never write Steam automatically merely because a launcher manifest changed.
+- A partial or unavailable scan never marks prior games missing.
+
+## Testing Requirements
+
+Every adapter needs fixtures for:
+
+- Normal installed game.
+- Missing install path.
+- Missing or suspicious launch target.
+- Multiple launch actions.
+- Duplicate external IDs.
+- Malformed record isolation.
+- Partial/unavailable source behavior.
+- Missing/reappearing persistence.
+- Platform or edition variants.
+- Stable IDs across rescans.
+- No source-file modifications.
