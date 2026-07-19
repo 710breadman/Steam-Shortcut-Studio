@@ -72,6 +72,21 @@ def shortcut_records_equivalent(
     )
 
 
+def _shortcut_record_difference(
+    planned: list[ShortcutRecord],
+    observed: list[ShortcutRecord],
+) -> str:
+    if len(planned) != len(observed):
+        return f"record count planned={len(planned)} observed={len(observed)}"
+    for index, (expected, actual) in enumerate(zip(planned, observed, strict=True)):
+        expected_map = _normalized_shortcut_record(expected)
+        actual_map = _normalized_shortcut_record(actual)
+        for field in expected_map:
+            if expected_map[field] != actual_map[field]:
+                return f"record {index} field {field!r} planned={expected_map[field]!r} observed={actual_map[field]!r}"
+    return "unknown record difference"
+
+
 def load_shortcuts_strict(path: Path) -> list[ShortcutRecord]:
     if not path.exists():
         return []
@@ -183,7 +198,8 @@ def upsert_games_transactional(
     def validate_staged(path: Path) -> None:
         staged_records = load_shortcuts(path)
         if not shortcut_records_equivalent(records, staged_records):
-            raise RuntimeError("Staged shortcuts.vdf does not match the planned records.")
+            detail = _shortcut_record_difference(records, staged_records)
+            raise RuntimeError(f"Staged shortcuts.vdf does not match the planned records ({detail}).")
 
     def verify_written(path: Path) -> None:
         _verify_shortcut_records(path, records, expected_games)

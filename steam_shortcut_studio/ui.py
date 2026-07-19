@@ -85,6 +85,7 @@ from .modern_library_view import (
     library_sort_key,
     library_sort_preset_key,
     display_columns_for_table,
+    modern_library_row_for_game,
     modern_library_table_row_for_library_row,
     modern_library_table_row_for_game,
     modern_library_table_row_tags,
@@ -733,6 +734,7 @@ class MainWindow(tk.Tk):
         self.title(f"{__app_name__} {__version__}")
         self.geometry("1448x1086")
         self.minsize(1120, 700)
+        # CustomTkinter shell is production UI; env flag remains harmless compatibility.
         self.modern_shell_enabled = ctk is not None
         if self.modern_shell_enabled:
             try:
@@ -1268,7 +1270,7 @@ class MainWindow(tk.Tk):
         ToolTip(theme_combo, "Pick app theme. Default opens in the modern dark direction.")
         ttk.Label(
             status,
-            text="Prototype shell keeps production actions and table behavior while moving layout toward the approved modern look.",
+            text="Modern shell uses production scan, artwork, metadata, shortcut, and transaction actions.",
             style="Subtle.TLabel",
             wraplength=210,
         ).grid(row=9, column=0, sticky="w", pady=(12, 0))
@@ -1307,15 +1309,17 @@ class MainWindow(tk.Tk):
             self.detail_notebook.select(self.metadata_tab)
 
     def show_extensions_dialog(self) -> None:
-        messagebox.showinfo(
-            __app_name__,
-            "Extensions UI is not implemented yet.\n\nThe navigation entry stays visible so the shell matches the reconstruction spec.",
-        )
+        enabled = ["Official Steam artwork", "Wikimedia artwork"]
+        if self.api_key_var.get().strip():
+            enabled.append("SteamGridDB artwork")
+        if self.rawg_api_key_var.get().strip():
+            enabled.append("RAWG metadata/artwork")
+        messagebox.showinfo(__app_name__, "Available integrations:\n\n" + "\n".join(f"• {item}" for item in enabled) + "\n\nConfigure optional API keys in Settings.")
 
     def show_about_dialog(self) -> None:
         messagebox.showinfo(
             __app_name__,
-            f"{__app_name__} {__version__}\n\nIncremental UI reconstruction.\nSafe transactions stay routed through the existing production services.",
+            f"{__app_name__} {__version__}\n\nProduction desktop UI for scanning libraries, managing artwork, and writing safe Steam shortcuts.\nTransactions use backup, verification, and rollback safeguards.",
         )
 
     def _draw_sidebar_icon(self, canvas: tk.Canvas, kind: str, palette: dict[str, str]) -> None:
@@ -1470,12 +1474,18 @@ class MainWindow(tk.Tk):
                     self.local_files_text,
                     "Local files panel.\n\nPick a library row to see install folder, launch target, and working directory.",
                 )
+            if hasattr(self, "open_store_button"):
+                self.open_store_button.configure(state=tk.DISABLED)
+            if hasattr(self, "open_folder_button"):
+                self.open_folder_button.configure(state=tk.DISABLED)
+            if hasattr(self, "open_launch_button"):
+                self.open_launch_button.configure(state=tk.DISABLED)
             return
 
         metadata_lines = [
             f"Title: {game.display_title}",
             f"Source: {game.source_type.replace('_', ' ').title() or 'Library'}",
-            f"Platform: {game.platform or 'PC'}",
+            f"Platform: {game.metadata.extra.get('platform') or 'PC'}",
             f"Release year: {game.metadata.release_year or 'Unknown'}",
             f"Developer: {game.metadata.developer or 'Unknown'}",
             f"Publisher: {game.metadata.publisher or 'Unknown'}",
@@ -1498,14 +1508,29 @@ class MainWindow(tk.Tk):
         elif is_persistent_library_game(game):
             links_lines.append("- Stored rows refresh from source scans, not direct Steam writes.")
         self._set_text_widget(getattr(self, "links_summary_text"), "\n".join(links_lines))
+        if hasattr(self, "open_store_button"):
+            self.open_store_button.configure(state=tk.NORMAL if game.steam_appid is not None else tk.DISABLED)
 
         local_lines = [
             f"Install folder: {game.root_path or 'Unknown'}",
             f"Launch target: {game.selected_exe or 'Not selected'}",
-            f"Working directory: {game.working_directory or 'Not set'}",
+            f"Working directory: {game.metadata.extra.get('working_directory') or 'Not set'}",
             f"Launch options: {game.launch_options or 'None'}",
         ]
         self._set_text_widget(getattr(self, "local_files_text"), "\n".join(local_lines))
+        if hasattr(self, "open_folder_button"):
+            folder = Path(game.root_path) if game.root_path and str(game.root_path) not in {"", "."} else None
+            self.open_folder_button.configure(state=tk.NORMAL if folder and folder.exists() else tk.DISABLED)
+        if hasattr(self, "open_launch_button"):
+            launch = Path(game.selected_exe) if game.selected_exe and str(game.selected_exe) not in {"", "."} else None
+            self.open_launch_button.configure(state=tk.NORMAL if launch and launch.exists() else tk.DISABLED)
+
+    def open_selected_steam_store(self) -> None:
+        if self.current_game_index is None:
+            return
+        game = self.games[self.current_game_index]
+        if game.steam_appid is not None:
+            self.open_external_url(f"https://store.steampowered.com/app/{game.steam_appid}/")
 
     def _build_modern_sidebar(self, parent: tk.Widget) -> None:
         palette = self.palette()
@@ -1609,8 +1634,8 @@ class MainWindow(tk.Tk):
         sidebar.grid_rowconfigure(4, weight=1)
         self._build_modern_sidebar(sidebar)
 
-        content = ttk.Frame(self, padding=(12, 12, 14, 12))
-        content.grid(row=0, column=1, sticky="nsew")
+        content = ctk.CTkFrame(self, fg_color=palette["bg"], corner_radius=0)
+        content.grid(row=0, column=1, padx=(12, 14), pady=12, sticky="nsew")
         content.columnconfigure(0, weight=1)
         content.rowconfigure(1, weight=1)
 
@@ -1629,9 +1654,9 @@ class MainWindow(tk.Tk):
         for column in range(4):
             actions.grid_columnconfigure(column, weight=1, minsize=176)
         action_specs = [
-            ("Scan", "Scan Folders & Libraries", self.scan_all_libraries),
-            ("Refresh Metadata", "Update Info & Artwork", self.scan_selected_persistent_sources),
-            ("Auto-Art", "Find & Match Artwork", lambda: self.match_metadata_and_art_for_selected(force_refresh=True)),
+            ("Scan", "Scan Folders", self.scan_all_libraries),
+            ("Refresh Metadata", "Update Info", self.scan_selected_persistent_sources),
+            ("Auto-Art", "Find & Match Art", lambda: self.match_metadata_and_art_for_selected(force_refresh=True)),
             ("Preview", "Preview Changes", self.preview_write),
         ]
         for column, (title, subtitle, command) in enumerate(action_specs):
@@ -1657,19 +1682,19 @@ class MainWindow(tk.Tk):
             command=self.preview_write,
         ).grid(row=0, column=1, padx=(6, 0), sticky="e")
 
-        shell = ttk.Frame(content)
+        shell = ctk.CTkFrame(content, fg_color="transparent", corner_radius=0)
         shell.grid(row=1, column=0, sticky="nsew")
         shell.columnconfigure(0, weight=3, uniform="shell")
         shell.columnconfigure(1, weight=2, uniform="shell")
         shell.rowconfigure(0, weight=1)
-        center = ttk.Frame(shell)
-        self.detail_frame = ttk.Frame(shell)
+        center = ctk.CTkFrame(shell, fg_color="transparent", corner_radius=0)
+        self.detail_frame = ctk.CTkFrame(shell, fg_color=palette["panel"], corner_radius=16)
         center.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         self.detail_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
         center.columnconfigure(0, weight=1)
         center.rowconfigure(2, weight=1)
 
-        self.table_frame = ttk.Frame(center)
+        self.table_frame = ctk.CTkFrame(center, fg_color=palette["panel"], corner_radius=16)
         self.table_frame.grid(row=0, column=0, sticky="nsew")
         self._build_table(self.table_frame)
         self._build_detail(self.detail_frame)
@@ -1699,13 +1724,13 @@ class MainWindow(tk.Tk):
         ctk.CTkLabel(footer, textvariable=self.status_var, text_color=palette["muted"], anchor="w", font=("Segoe UI", 10)).grid(row=0, column=0, padx=12, pady=4, sticky="w")
         ctk.CTkLabel(footer, textvariable=self.profile_status_var, text_color=palette["muted"], anchor="e", font=("Segoe UI", 10)).grid(row=0, column=1, padx=12, pady=4, sticky="e")
 
-        progress_frame = ttk.Frame(content)
+        progress_frame = ctk.CTkFrame(content, fg_color="transparent", corner_radius=0)
         progress_frame.grid(row=4, column=0, sticky="ew")
         progress_frame.grid_remove()
         self.progress = ttk.Progressbar(progress_frame, mode="indeterminate")
         self.progress.grid(row=0, column=0, sticky="ew")
 
-        log_frame = ttk.Frame(content)
+        log_frame = ctk.CTkFrame(content, fg_color=palette["panel"], corner_radius=12)
         log_frame.grid(row=5, column=0, sticky="ew")
         log_frame.grid_remove()
         log_frame.columnconfigure(0, weight=1)
@@ -2752,8 +2777,8 @@ class MainWindow(tk.Tk):
             box.bind("<Button-3>", lambda event, artwork_kind=kind: self.show_artwork_preview_menu(event, artwork_kind))
             label.bind("<Button-3>", lambda event, artwork_kind=kind: self.show_artwork_preview_menu(event, artwork_kind))
             ToolTip(label, "Double-click to open a larger preview. Right-click for artwork options.")
-        self.preview_boxes[kind] = box
-        self.preview_labels[kind] = label
+            self.preview_boxes[kind] = box
+            self.preview_labels[kind] = label
 
     def _build_metadata_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
@@ -2766,12 +2791,36 @@ class MainWindow(tk.Tk):
         self.links_summary_text = tk.Text(parent, height=18, wrap="word", relief="flat", borderwidth=0)
         self.links_summary_text.grid(row=0, column=0, sticky="nsew")
         self.links_summary_text.configure(state=tk.DISABLED)
+        self.links_actions = ttk.Frame(parent)
+        self.links_actions.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        self.open_store_button = ttk.Button(self.links_actions, text="Open Steam Store", command=self.open_selected_steam_store, state=tk.DISABLED)
+        self.open_store_button.grid(row=0, column=0, sticky="w")
 
     def _build_local_files_tab(self, parent: ttk.Frame) -> None:
         parent.columnconfigure(0, weight=1)
         self.local_files_text = tk.Text(parent, height=18, wrap="word", relief="flat", borderwidth=0)
         self.local_files_text.grid(row=0, column=0, sticky="nsew")
         self.local_files_text.configure(state=tk.DISABLED)
+        actions = ttk.Frame(parent)
+        actions.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        self.open_folder_button = ttk.Button(actions, text="Open Install Folder", command=self.open_selected_install_folder, state=tk.DISABLED)
+        self.open_folder_button.pack(side=tk.LEFT, padx=(0, 8))
+        self.open_launch_button = ttk.Button(actions, text="Open Launch Target", command=self.open_selected_launch_target, state=tk.DISABLED)
+        self.open_launch_button.pack(side=tk.LEFT)
+
+    def open_selected_install_folder(self) -> None:
+        if self.current_game_index is None:
+            return
+        path = self.games[self.current_game_index].root_path
+        if path and str(path) not in {"", "."}:
+            self.open_filesystem_path(path)
+
+    def open_selected_launch_target(self) -> None:
+        if self.current_game_index is None:
+            return
+        path = self.games[self.current_game_index].selected_exe
+        if path and str(path) not in {"", "."}:
+            self.open_filesystem_path(path)
 
 
     def _load_initial_state(self) -> None:
