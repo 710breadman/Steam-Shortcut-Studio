@@ -1,137 +1,100 @@
 # UI Framework Decision
 
-**Status:** Accepted for the next implementation phase  
-**Date:** 2026-07-11
+**Status:** PySide6 proof approved; migration not yet approved  
+**Updated:** 2026-07-19
 
 ## Decision
 
-Do not perform an immediate full migration from Tkinter to PySide6 or another GUI toolkit.
+Keep the current production CustomTkinter/ttk interface operational while building one isolated PySide6 proof of the central library workflow.
 
-Use an incremental modernization strategy:
+Do not rewrite the domain core. The following remain Python and UI-independent regardless of the result:
 
-1. Extract domain logic and state from `ui.py`.
-2. Build a reusable design-token layer.
-3. Prototype the approved dark/blue shell using CustomTkinter for window chrome, cards, buttons, tabs, and theme controls.
-4. Continue using ttk widgets where they are stronger, especially the current table/tree behavior, until a tested replacement exists.
-5. Re-evaluate PySide6 only after the transaction, selection, queue, and persistence layers are UI-independent.
+- Library persistence.
+- Source adapters and scan coordination.
+- Stable selection.
+- Background jobs.
+- Metadata and artwork services.
+- Identity and reconciliation logic.
+- Steam transaction, verification, history, and rollback services.
 
-## Why This Fits the Project
+A full UI migration occurs only when measured evidence shows that PySide6 provides a worthwhile improvement.
 
-The current application already works on Windows, SteamOS, and Bazzite and is intentionally standard-library-first. A complete GUI migration would combine visual work with event-loop, packaging, threading, and platform changes. That would create unnecessary risk before the Steam-write foundation is complete.
+## Why the Decision Changed
 
-CustomTkinter is based on Tkinter, can be mixed with normal Tkinter widgets, provides modern customizable widgets, supports light/dark appearance modes, themes, and high-DPI scaling, and uses the MIT license. This makes it suitable for an incremental shell prototype without rewriting the domain core.
+The earlier decision deferred PySide6 until transaction, selection, queue, persistence, and controller boundaries were stable. Those foundations now exist. The project can test a second UI without coupling the experiment to Steam writes or rebuilding application logic.
 
-PySide6 remains the strongest long-term option if the project eventually needs a richer model/view table, more advanced layout behavior, or extensive custom rendering. It also brings a larger dependency, larger packaged builds, Qt-specific deployment work, and a much broader migration.
+The current interface remains the production baseline and fallback.
 
-## Options Considered
+## Proof Scope
 
-### Option A — Continue with ttk only
+Build one library workspace using real `LibraryController` data and immutable events.
 
-**Advantages**
+Required features:
 
-- No new runtime dependency
-- Lowest packaging risk
-- Existing code remains compatible
+- 100, 1,000, and 5,000 generated library rows.
+- Thumbnail, title, source, platform, explicit state columns, artwork state, confidence, and row actions.
+- Search, filtering, sorting, grouping, saved views, and stable multi-selection.
+- Active inspector focus separated from batch selection.
+- Right-side inspector with artwork slot cards.
+- Context menus and keyboard actions.
+- Drag-and-drop entry points.
+- Background queue progress and terminal states.
+- Read-only operation; no new Steam-write path.
 
-**Disadvantages**
+## Evaluation Matrix
 
-- Harder to reach the approved mockup quality
-- More custom styling work
-- Rounded cards, polished controls, and consistent visual states remain difficult
+Compare the proof against the current production UI:
 
-**Decision:** Keep ttk where useful, but do not rely on it alone for the new shell.
+| Area | Measurement |
+| --- | --- |
+| Initial load | Time to first usable library at 100/1,000/5,000 rows |
+| Search/filter | Median and worst observed response time |
+| Sort | Response time and selection preservation |
+| Selection | Range, additive, visible, and filter-scope correctness |
+| Background work | Event throughput without UI stalls |
+| Memory | Baseline and thumbnail-heavy use |
+| Scaling | Windows 100%, 125%, and 150% |
+| Linux | Basic Bazzite/SteamOS-compatible launch and rendering |
+| Packaging | Build size, startup time, dependency complexity |
+| Maintainability | Code size, state boundaries, custom widget burden |
+| UX | Table clarity, inspector flow, keyboard use, review speed |
 
-### Option B — CustomTkinter shell plus ttk table
+## Migration Gate
 
-**Advantages**
+Approve migration only when all are true:
 
-- Incremental adoption
-- Compatible with existing Tkinter event loop
-- Modern widgets and appearance modes
-- Supports custom themes and high-DPI scaling
-- MIT licensed
-- Can coexist with existing widgets
+- The proof is materially more responsive or scalable.
+- The model/view table clearly simplifies selection, sorting, filtering, and custom cell states.
+- Windows scaling is reliable.
+- Linux support remains viable.
+- Packaging cost is acceptable.
+- Controller and transaction boundaries remain unchanged.
+- A staged screen-by-screen migration can keep the current UI usable.
 
-**Disadvantages**
+If the proof does not clearly win, retain CustomTkinter/ttk and apply the useful interaction findings there.
 
-- No first-class high-performance data table comparable to Qt model/view
-- Mixed widget styling needs care
-- Adds a runtime and packaging dependency
+## Options Rejected for This Stage
 
-**Decision:** Selected for the first UI prototype.
+### C# / Avalonia
 
-### Option C — ttkbootstrap
+Potentially strong cross-platform UI, but it would introduce a second language boundary or require a broader rewrite without first proving that Python/Qt is insufficient.
 
-**Advantages**
+### WinUI 3 or WPF
 
-- Small conceptual change from ttk
-- Built-in themed styles
-- Existing widgets remain familiar
+Windows-focused and inconsistent with the planned SteamOS/Bazzite phase.
 
-**Disadvantages**
+### JavaFX
 
-- Improves theming more than structure
-- Less direct support for the card-heavy, premium mockup style
-- Does not solve the oversized UI module or state boundaries
+Requires a rewrite with little direct advantage for the existing Python services.
 
-**Decision:** Not selected as the primary direction. It remains a fallback if CustomTkinter packaging or mixed-widget behavior proves unsuitable.
+### Electron, Tauri, or Flutter
 
-### Option D — PySide6 / Qt Widgets
+Adds a frontend/backend bridge and packaging architecture before the desktop workflow has proven that need.
 
-**Advantages**
+## Proof Safety Rules
 
-- Strong model/view architecture
-- Excellent tables, delegates, threading primitives, styling, and layout tools
-- Mature cross-platform desktop framework
-- Better fit for a very large library and complex inspector over the long term
-
-**Disadvantages**
-
-- Full UI rewrite
-- New event model and packaging strategy
-- Larger distribution size
-- More licensing and deployment diligence
-- Higher short-term risk while Steam writes are still being hardened
-
-**Decision:** Defer. Reconsider after the service boundaries are complete.
-
-## Prototype Boundary
-
-The first visual prototype should include only:
-
-- Application window and top bar
-- Left navigation
-- Theme/accent selector
-- Library table container
-- Empty right inspector shell
-- Bulk-selection summary bar
-- Safety/backup status cards using mock data
-
-It must not write Steam files.
-
-## Prototype Success Criteria
-
-- Closely resembles approved mockup #2.
-- Runs on Windows and Linux.
-- Theme changes remain available.
-- Existing table behavior can be embedded or adapted.
-- The shell can receive library data through a controller interface.
-- No scanning or Steam-write logic is duplicated inside widgets.
-- Packaged build impact is measured before adoption.
-
-## Reconsideration Trigger
-
-Re-evaluate PySide6 when all of the following are true:
-
-- Transaction service is complete.
-- Selection and job state are UI-independent.
-- Library persistence has stable IDs.
-- The current table is proven to be a performance or usability blocker.
-- A small PySide6 proof of concept demonstrates a clear advantage worth the migration cost.
-
-## Research Sources
-
-- CustomTkinter official documentation: https://customtkinter.tomschimansky.com/documentation/
-- CustomTkinter repository and license: https://github.com/TomSchimansky/CustomTkinter
-- Qt for Python official documentation: https://doc.qt.io/qtforpython-6/
-- ttkbootstrap documentation: https://ttkbootstrap.readthedocs.io/en/latest/
+- Read real app-owned library data only.
+- Do not write Steam files.
+- Do not duplicate controllers or services inside widgets.
+- Do not replace the current production entry point.
+- Do not begin broad migration before the benchmark report and explicit decision.

@@ -1,458 +1,410 @@
-# Steam Shortcut Studio Product Roadmap
+# Steam Shortcut Studio — Product Roadmap
 
-## Product Direction
-
-Steam Shortcut Studio is a personal-library manager for Steam and non-Steam games. It should make large libraries easier to import, identify, repair, customize, and maintain without becoming a replacement game launcher.
-
-The product should treat these as first-class library items:
-
-- Native Steam games
-- Existing non-Steam shortcuts
-- Loose or portable game folders
-- Windows launcher libraries
-- SteamOS/Bazzite launcher libraries in a later phase
-
-The app should prioritize safety, reversible changes, clear previews, and useful bulk actions.
+**Updated:** 2026-07-19  
+**Scope:** future work only. See `CURRENT_STATE.md` for completed capabilities.
 
 ## North Star
 
-A user should be able to scan a personal game library, select many games, find matching metadata and artwork, review only uncertain results, and safely apply the approved changes to Steam.
+A user can scan a personal PC-game library, reconcile the same game across sources, choose the preferred launch method, review only uncertain results, and safely apply approved shortcuts, artwork, notes, and organization changes to the intended Steam profile.
 
-The core experience should be:
+Steam Shortcut Studio remains a library workshop, not a replacement launcher.
 
-1. Detect Steam and configured library sources.
-2. Scan or import games.
-3. Identify games and launch targets with visible confidence.
-4. Select one or many games.
-5. Find metadata and complete artwork sets in bulk.
-6. Automatically accept only high-confidence, low-risk results.
-7. Route uncertain results into a review queue.
-8. Preview all Steam changes.
-9. Create a backup.
-10. Apply, verify, and retain a rollback point.
-
-## Non-Negotiable Safety Rules
+## Permanent Safety Rules
 
 1. Never modify installed game files.
-2. Never silently overwrite manual artwork choices.
-3. Never write launch, compatibility, or native Steam settings without a preview.
-4. Back up every Steam-owned file before changing it.
-5. Write through a transaction service rather than directly from UI code.
-6. Read back and validate every changed file after writing.
-7. Roll back automatically when validation fails.
-8. Preserve unknown fields and unsupported data.
-9. Keep advanced or experimental native-Steam edits behind explicit warnings.
-10. Record why every automatic decision was considered safe.
+2. Never infer duplicate identity from title alone.
+3. Never silently change the preferred launch recipe.
+4. Never write to every Steam profile by default.
+5. Never overwrite manual artwork, notes, collections, tags, or launch choices.
+6. Automatic monitoring may detect changes; Steam writes require preview and approval by default.
+7. Every Steam-owned write uses backup, staged validation, read-back verification, and rollback.
+8. Unsupported or poorly understood Steam fields remain read-only.
+9. Launcher adapters remain read-only.
+10. Preserve unknown source and Steam data whenever possible.
 
-## Target User Experience
+# P0 — Release Baseline and Architecture Decisions
 
-The approved UI direction is a polished dark desktop application with:
-
-- A left navigation sidebar
-- A compact top command bar
-- A central searchable and sortable game table
-- Multi-selection and contextual bulk actions
-- A right-side inspector for artwork, metadata, launch settings, safety, and history
-- A visible theme selector with multiple accent colors
-- Clear states for safe automation, review required, protected native Steam data, failure, and rollback
-
-See [UI_UX_TARGET.md](UI_UX_TARGET.md) for the full design specification.
-
-## Highest-Priority Feature: Bulk Artwork Search
-
-Bulk artwork search must be a first-class workflow.
+## P0.1 Planning and Handoff Reset
 
-A user must be able to:
+- Keep `CURRENT_STATE.md` factual and concise.
+- Keep this roadmap future-only.
+- Use small GitHub issues for implementation.
+- Treat `SPRINT_STATUS.md` and older sprint documents as historical evidence, not the active backlog.
+- Keep `CODEX_START_HERE.md` short and action-oriented.
 
-- Select multiple games in the library table
-- Choose `Find Artwork for Selected`
-- Choose whether to fill missing slots only or reconsider all unlocked slots
-- Process the selection through a background job queue
-- See progress per game and for the whole batch
-- Automatically accept only high-confidence matches
-- Review incomplete, conflicting, or weak matches
-- Cancel the remaining queue
-- Retry failed jobs
-- Preserve manually locked artwork
+### Exit criteria
 
-Every selected game should finish in one of these states:
+- A new development session can identify the current state, active issue, safety boundaries, and required tests without reading a long historical diary.
 
-- Artwork ready
-- Applied automatically
-- Needs review
-- No acceptable match
-- Skipped
-- Failed
-- Cancelled
+## P0.2 Installable Windows Alpha
 
-## Product Scope
+Create a dependable Windows build for personal testing.
 
-### In Scope
+Deliverables:
 
-- Scanning native Steam games, existing shortcuts, folders, and supported launcher manifests
-- Launch-target detection and manual override
-- Native and non-Steam artwork management
-- Metadata, notes, tags, and safe user-controlled settings
-- Bulk selection and batch actions
-- Backup, preview, verification, history, and rollback
-- Windows-first launcher integration
-- SteamOS/Bazzite support after the Windows workflow is stable
-- Theme and accent-color customization
+- Installer and portable ZIP evaluation.
+- App icon, version metadata, and uninstaller behavior.
+- Per-user settings and cache preservation across upgrades.
+- Clear first-run setup.
+- Diagnostics export.
+- Signed-build plan, even if initial alpha builds remain unsigned.
+- Release checklist and rollback instructions.
 
-### Out of Scope for the Near Term
+### Exit criteria
 
-- Replacing Steam as the primary launcher
-- Social features
-- Store purchasing
-- Cloud game streaming
-- Editing installed game binaries or application content
-- ROM and emulator management until PC-game workflows are mature
-- Automatic modification of poorly understood Steam fields
+- A clean Windows machine can install or run the alpha, scan a test library, preview changes, apply a safe shortcut transaction, and uninstall without reading source code.
 
-## Roadmap Phases
+## P0.3 PySide6 Proof of Concept
 
-## Phase 0 — Safety Foundation
+Keep the current production UI operational while building one isolated PySide6 library workspace using real controller data.
 
-### Goal
+Required proof:
 
-Make every Steam write transactional, verifiable, and reversible before expanding editing capabilities.
+- 100, 1,000, and 5,000 generated rows.
+- Thumbnail, title, source, platform, source state, Steam state, Studio state, artwork state, confidence, and row actions.
+- Search, sorting, grouping, saved filters, and stable multi-selection.
+- Right-side inspector with artwork slot cards.
+- Context menus, keyboard navigation, drag-and-drop, and queue progress.
+- Windows scaling at 100%, 125%, and 150%.
+- Basic Linux/Bazzite launch test.
+- Packaged startup time and distribution-size comparison.
+- Clear code-complexity comparison against the current production table.
 
-### Deliverables
+### Decision gate
 
-- Transaction service
-- Backup manifest
-- Atomic or staged writes
-- Read-back validation
-- Automatic rollback on failure
-- Restore-point history
-- Write simulation/dry run
-- Structured change plan
-- Safety test fixtures
+Migrate only if the proof is materially better in responsiveness, interaction quality, scaling, maintainability, and packaging. Keep the Python core in either outcome.
 
-### Exit Criteria
+## P0.4 Library Performance Baseline
 
-- A failed write cannot leave the tested Steam fixtures corrupted.
-- A successful write can be validated and restored.
-- UI code cannot directly write Steam files.
+Measure the current and proof interfaces under representative loads.
 
-## Phase 1 — Architecture and Modern UI Foundation
+Record:
 
-### Goal
+- Initial load time.
+- Search/filter latency.
+- Sort latency.
+- Selection latency.
+- Thumbnail memory use.
+- Background event throughput.
+- Startup time.
+- Packaged size.
 
-Split the current large UI module into maintainable views, components, controllers, and services while creating the approved modern shell.
+### Exit criteria
 
-### Deliverables
+- Results are reproducible and stored in a short benchmark report.
+- The UI decision uses measured evidence instead of appearance alone.
 
-- UI package structure
-- Theme token system
-- Reusable buttons, cards, tabs, badges, and panels
-- Left sidebar
-- Top command bar
-- Library workspace shell
-- Right inspector shell
-- Responsive resizing rules
+## P0.5 Identity and Reconciliation Foundation
 
-### Exit Criteria
+Create a first-class cross-source identity system before adding many more launchers.
 
-- Existing workflows remain usable.
-- The main window follows the approved information architecture.
-- Theme colors are data-driven rather than hardcoded per widget.
+Deliverables:
 
-## Phase 2 — Library Table and Selection Model
+- `GameIdentityCluster` or equivalent domain model.
+- Exact external/store identifier links.
+- Native Steam AppID relationships.
+- Existing shortcut target relationships.
+- Install-path and executable evidence.
+- Conservative title/year/developer fallback scoring.
+- Edition and platform conflict detection.
+- Preferred installed copy.
+- Preferred launch recipe.
+- Decisions: merge, keep separate, ignore, and remember.
+- Detection of duplicate shortcuts and missing targets.
+- Previewable reconciliation changes.
 
-### Goal
+### Exit criteria
 
-Create a scalable central library view that supports efficient single-game and multi-game work.
+- Scanning the same title from Steam, Epic, Playnite, folders, or existing shortcuts cannot silently create duplicate shortcut proposals.
+- Title-only matches always require review.
 
-### Deliverables
+# P1 — Core Daily Workflow
 
-- Searchable and sortable game table
-- Row checkboxes
-- Shift-range selection
-- Additive selection
-- Select-all-in-filter
-- Selection summary
-- Saved selection state during safe refreshes
-- Contextual bulk-action bar
-- Filters for source, status, artwork, native Steam, and review state
+## P1.1 Explicit Library States
 
-### Exit Criteria
+Represent three independent state groups:
 
-- Hundreds of entries remain usable and responsive.
-- Multiple games can be selected reliably.
-- Bulk actions operate only on the intended selection.
+```text
+Source state: installed / missing / unavailable / unknown
+Steam state: native / existing shortcut / not added / duplicate
+Studio state: managed / unmanaged / review / pending / failed
+```
 
-## Phase 3 — Background Jobs and Bulk Workflows
+Build smart views:
 
-### Goal
+- All Games
+- Native Steam
+- Existing Non-Steam
+- Managed by Studio
+- Detected — Not Added
+- Ready to Add
+- Missing or Uninstalled
+- Duplicate or Conflicting
+- Needs Launch Review
+- Missing Artwork
+- Needs Artwork Review
+- Manually Customized
+- Failed Jobs
 
-Add a reusable queue for scan, metadata, artwork, and validation tasks.
+Support user-created saved filters.
 
-### Deliverables
+## P1.2 Contextual Quick Actions
 
-- Job model and queue service
-- Worker limits
-- Cancellation
-- Retry
-- Per-job and aggregate progress
-- Structured failures
-- Persistent or recoverable batch summary
-- Bulk scan selected
-- Bulk refresh metadata selected
-- Bulk preview selected
+Add consistent row and selection actions:
 
-### Exit Criteria
+- Test launch.
+- Open install folder.
+- Open source record when safe.
+- Copy launch command.
+- Add selected to Steam.
+- Remove a Studio-managed shortcut.
+- Restore previous state.
+- Rescan parent source.
+- Ignore executable permanently.
+- Explain launch-candidate selection.
+- Choose preferred launch recipe.
 
-- The UI remains responsive during a large batch.
-- Cancelling a batch does not corrupt partial results.
-- Failures are isolated to individual items.
+## P1.3 Windows Explorer Quick Add
 
-## Phase 4 — Bulk Artwork Search and Review
+### Stage 1
 
-### Goal
+Register a per-user `.exe` context-menu command:
 
-Deliver the primary batch-artwork workflow.
+```text
+Add to Steam with Shortcut Studio
+```
 
-### Deliverables
+It invokes a compact review wizard rather than writing immediately.
 
-- `Find Artwork for Selected`
-- Artwork-slot policy controls
-- Provider prioritization
-- Match scoring and evidence
-- Complete-set coherence checks
-- Image validation and dimension checks
-- Manual-art locks
-- Review queue
-- Batch result summary
-- Missing-only and replace-unlocked modes
+Wizard fields:
 
-### Exit Criteria
+- Detected title.
+- Alternative executables.
+- Duplicate/identity warning.
+- Direct and launcher launch recipes.
+- Working directory and arguments.
+- Artwork match summary.
+- Target Steam profile.
+- Preview and Apply.
 
-- At least 20 selected games can be processed in one batch.
-- High-confidence matches can be accepted automatically under configured rules.
-- Weak or conflicting matches never apply silently.
-- Manual artwork remains untouched unless explicitly unlocked.
+### Stage 2
 
-## Phase 5 — Artwork Workspace
+Evaluate a Windows 11 native context-menu integration. Keep scanning and network work outside Explorer's process.
 
-### Goal
+## P1.4 Structured Notes
 
-Create a polished, slot-based editor for individual and batch results.
+Replace the single conceptual notes surface with structured app-owned sections:
 
-### Deliverables
+- Personal notes.
+- Launch instructions.
+- Compatibility notes.
+- Controller notes.
+- Mods and patches.
+- Troubleshooting.
+- Source/import evidence.
+- Links.
+- Automatic metadata summary.
 
-- Portrait/grid slot
-- Wide capsule slot
-- Hero slot
-- Logo slot
-- Icon slot
-- Candidate browser
-- Source filters
-- Before/after comparison
-- Local file and clipboard import
-- Slot lock/unlock
-- Crop/fit controls where safe
-- Per-slot confidence and source evidence
+Allow an optional short, previewed Steam summary. Detailed notes remain app-owned.
 
-### Exit Criteria
+## P1.5 Multiple Launch Recipes
 
-- Every Steam artwork slot can be inspected and intentionally changed.
-- The user can understand where each selected asset came from.
-- A complete set looks coherent rather than assembled from unrelated games or editions.
+A library identity may retain multiple launch methods:
 
-## Phase 6 — Native Steam Controls
+- Direct executable.
+- Source launcher protocol or command.
+- Playnite action.
+- Mod manager.
+- Compatibility wrapper.
+- Custom script.
+- Remote-play target.
 
-### Goal
+Each recipe stores target, arguments, working directory, environment, source, platform, evidence, and last test result. One recipe is explicitly preferred per installation/profile context.
 
-Allow practical customization of native Steam games without endangering the library.
+## P1.6 Steam Profile Targeting
 
-### Initial Safe Scope
+- Detect available Steam profiles.
+- Require an explicit default or per-operation target.
+- Support selected multiple profiles only when intentionally chosen.
+- Show the target profile in Preview and Apply.
+- Never default to all profiles.
 
-- Custom artwork
-- Personal notes stored by Steam Shortcut Studio
-- App-managed tags and labels where supported
-- Explicitly supported launch options
-- Compatibility-tool choices where the storage format is understood and tested
-- Restore to original values
+## P1.7 Collections Backup and Restore
 
-### Required Research Gate
+Before collection editing:
 
-Before implementing a native Steam field, document:
+- Identify ownership and storage format.
+- Back up collection state.
+- Preview changes.
+- Verify writes.
+- Restore previous state.
 
-- Which Steam file owns the value
-- Whether Steam may overwrite it
-- Whether Steam must be closed
-- How unknown fields are preserved
-- How the value is validated
-- How rollback works
-- Windows and Linux behavior
+Later optional management may create or update collections from sources, tags, and saved rules. Existing manual collections remain protected by default.
 
-### Exit Criteria
+# P2 — Windows Launcher Sources
 
-- Native-game changes are opt-in, previewed, and reversible.
-- Unsupported fields remain read-only.
-- No game files are modified.
+Every source implements the shared read-only adapter model, stable identity, capability declaration, and structured diagnostics.
 
-## Phase 7 — Windows Launcher Imports
+## Adapter capabilities
 
-### Goal
+```text
+supports_installed_games
+supports_owned_uninstalled_games
+supports_direct_launch
+supports_launcher_launch
+supports_launch_arguments
+supports_artwork_identity
+supports_version
+supports_install_monitoring
+supports_uninstall_detection
+supports_multiple_installations
+supports_platform_variants
+```
 
-Prefer authoritative launcher manifests over folder-name guessing.
+Unsupported actions are disabled through capabilities rather than launcher-specific UI conditionals.
 
-### Priority Order
+## Priority order
 
-1. Epic Games Store
-2. GOG/GOG Galaxy
-3. Playnite
+1. Playnite
+2. GOG Galaxy
+3. Battle.net
 4. EA App
 5. Ubisoft Connect
-6. Battle.net
-7. Microsoft Store/Xbox where feasible and safe
+6. Amazon Games
+7. itch.io
+8. Rockstar Games Launcher
+9. Microsoft Store / Xbox where safe and feasible
 
-### Deliverables
+## Playnite requirements
 
-- `SourceAdapter` interface
-- External identity storage
-- Install-path and launch-command extraction
-- Duplicate reconciliation
-- Adapter diagnostics
-- Folder-scanning fallback
+Treat Playnite as an optional, user-curated source.
 
-### Exit Criteria
+Preserve:
 
-- Supported manifests produce more reliable identities than folder scanning.
-- Duplicate copies and existing Steam shortcuts can be reconciled rather than blindly added.
+- Playnite game ID.
+- Custom title.
+- Installation state.
+- Launch actions.
+- Emulator associations.
+- Source plugin identity.
+- Existing metadata and artwork references where useful.
 
-## Phase 8 — SteamOS and Bazzite Sources
+Offer both `Launch through Playnite` and imported direct/source-launch recipes when available.
 
-### Goal
+## Battle.net requirements
 
-Extend the stable source-adapter model to Linux gaming tools.
+Research and fixture-test:
 
-### Priority Order
+- Stable product identity.
+- Installed-state records.
+- Product/launcher URI.
+- Direct executable reliability.
+- Update and repair behavior.
+- PTR, beta, and region variants.
+- Multiple installations.
+- Launcher movement and repair effects.
+
+Prefer launcher-based launch until direct execution is proven reliable for the title.
+
+# P3 — Artwork and Portability
+
+## Artwork Workspace Completion
+
+- Per-game and bulk artwork search.
+- Missing-any-slot and per-slot filters.
+- Steam AppID and external-ID lookup.
+- Official Steam assets as fallback.
+- Local file, clipboard, drag-and-drop, and URL import.
+- Provider, creator, dimension, aspect-ratio, and animation preferences.
+- Complete-set coherence scoring.
+- Before/after comparison for all five slots.
+- Export/import artwork packs.
+- Restore original/native art.
+- Copy art between Steam profiles.
+- Permanent candidate rejection.
+
+## Portable Managed-Library Bundle
+
+Export and preview-import:
+
+- Library records.
+- Identity decisions.
+- Manual overrides.
+- Structured notes and tags.
+- Launch recipes.
+- Artwork and locks.
+- Rejected candidates.
+- Collections backups.
+- Transaction references.
+
+Support path remapping between computers and PC/Steam Deck environments. Import reconciles rather than blindly duplicating.
+
+# P4 — Monitoring and Automation
+
+After reconciliation is dependable:
+
+- Watch configured folders and launcher records.
+- Detect new, removed, moved, and changed games.
+- Show a review summary instead of writing automatically.
+- Add CLI scan, preview, apply, export, import, and restore commands.
+- Support scheduled quiet scans.
+- Retry transient provider failures.
+- Notify only when action is useful.
+
+Default policy:
+
+- Detection may run automatically.
+- Steam-owned changes require explicit preview and approval.
+
+# P5 — Later Expansion
+
+## Owned but Uninstalled
+
+Add a separate read-only view after installed-library workflows stabilize. Do not mix uninstalled ownership with installed launch readiness.
+
+## SteamOS and Bazzite
+
+After the Windows alpha and core workflow are stable:
 
 1. Heroic
 2. Lutris
 3. Legendary
 4. Bottles
-5. Flatpak-aware paths
+5. Faugus Launcher
+6. `.desktop` and Flatpak-aware sources
 
-### Exit Criteria
+Include compatibility recipes, removable-storage state, native Linux versus Proton distinctions, and automatic icon conversion where required.
 
-- Windows behavior is not regressed.
-- Platform-specific commands and compatibility settings are represented explicitly.
-- Linux tests cover common SteamOS/Bazzite paths.
+## Optional Deck Companion
 
-## Phase 9 — Quality, Packaging, and Release
+Evaluate a small Decky companion for:
 
-### Goal
+- Opening pending review work.
+- Applying already reviewed changes.
+- Refreshing sources.
+- Managing artwork in Game Mode.
 
-Make the app dependable for regular personal use.
+## Plugin API
 
-### Deliverables
+Do not publish a public plugin API until source capabilities, data migrations, and reconciliation contracts are stable. Later extension points may include:
 
-- Split test suite
-- Fixture-driven VDF and config tests
-- Failure-injection tests
-- Performance checks
-- Diagnostics export
-- Installer or portable build
-- Upgrade-safe settings migration
-- User documentation
-- Release checklist
+- Source adapters.
+- Metadata providers.
+- Artwork providers.
+- Exporters.
+- Launch-recipe enrichers.
 
-### Exit Criteria
+# Success Metrics
 
-- The main workflows pass on supported Windows environments.
-- Linux smoke tests pass where supported.
-- A user can install, configure, back up, restore, and troubleshoot without reading source code.
-
-## Core Data Model Direction
-
-A unified library item should retain both normalized data and source evidence.
-
-```text
-LibraryItem
-- internal_id
-- title
-- normalized_title
-- source_type
-- source_external_id
-- source_record
-- install_path
-- launch_target
-- launch_arguments
-- working_directory
-- platform
-- native_steam_app_id
-- existing_shortcut_id
-- release_year
-- developer
-- publisher
-- artwork_slots
-- manual_locks
-- confidence
-- evidence
-- proposed_changes
-- original_values
-```
-
-Suggested source types:
-
-```text
-native_steam
-existing_shortcut
-folder_scan
-epic
-gog
-playnite
-ea
-ubisoft
-battlenet
-microsoft_store
-heroic
-lutris
-legendary
-bottles
-```
-
-## Automation Policy
-
-### May Auto-Apply
-
-Only when all configured safety rules pass, such as:
-
-- Identity is based on an exact external/store identifier or equivalent authoritative evidence.
-- Artwork belongs to the same game and edition.
-- Image files decode successfully and meet slot requirements.
-- No manual artwork lock is present.
-- The operation does not modify launch behavior or advanced native Steam settings.
-- A backup and rollback path exist.
-
-### Must Require Review
-
-- Ambiguous title matches
-- Conflicting editions or release years
-- Multiple plausible launch targets
-- Incomplete artwork sets when replacement policy expects a full set
-- Existing manual artwork
-- Native Steam launch or compatibility changes
-- Unknown or unsupported Steam fields
-- Provider failures that reduce confidence
-
-## Success Metrics
-
-- Percentage of scanned games correctly identified without correction
-- Percentage of artwork batches completed without manual intervention
-- False-positive automatic artwork rate
-- Number of manual artwork choices later overwritten: target zero
-- Write-verification success rate
-- Rollback success rate
-- Median time to process 20 selected games
-- Number of direct Steam-write paths outside the transaction service: target zero
-
-## Planning Documents
-
-- [UI/UX Target](UI_UX_TARGET.md)
-- [Sprint Map](SPRINT_MAP.md)
-- [Sprint Status](SPRINT_STATUS.md)
+- Correct cross-source identity rate.
+- Silent duplicate proposal rate: target zero.
+- Manual launch choices later overwritten: target zero.
+- Manual artwork choices later overwritten: target zero.
+- Wrong-profile writes: target zero.
+- Percentage of selected games processed without manual intervention.
+- False-positive automatic artwork rate.
+- Median time to review a batch of 20 games.
+- Write-verification success rate.
+- Rollback success rate.
+- Search/filter latency at 5,000 rows.
+- Number of Steam-write paths outside transaction services: target zero.
