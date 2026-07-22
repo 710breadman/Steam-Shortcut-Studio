@@ -1,139 +1,112 @@
 # Steam Shortcut Studio — Current State
 
-**Updated:** 2026-07-19  
-**Purpose:** factual source of truth for what exists today. Future work belongs in `PRODUCT_ROADMAP.md`.
+**Verified audit date:** 2026-07-22  
+**Purpose:** factual description of what exists now. Future work belongs in `docs/planning/MASTER_ROADMAP.md`.
 
-## Product Position
+## Product position
 
-Steam Shortcut Studio is a safe personal-library workshop for importing, identifying, repairing, organizing, and customizing Steam and non-Steam games. It is not intended to replace Steam or become a general-purpose launcher.
+Steam Shortcut Studio is a safe personal-library workshop for importing, identifying, repairing, organizing, and customizing Steam and non-Steam PC games. It is not intended to replace Steam.
 
-The core workflow is:
+The intended production workflow is:
 
-1. Scan Steam, supported launchers, and configured folders.
-2. Normalize entries into a persistent library.
-3. Select one or many games.
-4. Find metadata and complete artwork sets.
-5. Review uncertain identity, launch, or artwork decisions.
-6. Preview every Steam-owned change.
-7. Back up, apply, verify, and retain a rollback point.
+1. Detect Steam and configured sources.
+2. Scan native Steam games, existing shortcuts, supported launchers, and loose folders.
+3. Normalize records into an app-owned persistent library.
+4. Select one or many games.
+5. Find metadata and complete artwork sets.
+6. Review uncertain identity, launch, or artwork decisions.
+7. Preview all Steam-owned changes for one explicit profile.
+8. Back up, apply, verify, and retain rollback evidence.
 
-## Production-Safe Foundations
+## Production-safe foundations
 
-Implemented and in production code:
+Code and tests support these foundations:
 
-- Transactional `shortcuts.vdf` writes.
+- Strict transactional `shortcuts.vdf` writes.
 - Malformed active VDF blocking.
 - Staged parsing and structural validation.
-- Read-back verification.
-- Automatic rollback on verification failure.
+- Read-back verification and automatic rollback.
 - Preservation of unrelated shortcuts and user-managed fields.
 - Atomic per-game artwork-set transactions.
-- Source-image decoding and validation before writes.
-- Artwork hash verification and complete-set rollback.
-- Transaction manifests and restore-point history.
-- Graceful Steam close/reopen ownership tracking.
+- Image decode and hash validation before and after writes.
+- Complete artwork-set rollback and stale-extension cleanup.
+- Transaction manifests and history.
+- Steam close/reopen ownership tracking.
 
-No new feature may bypass these transaction boundaries.
+No feature may bypass these boundaries.
 
-## Persistent Library
+## Persistent library
 
-The app-owned SQLite library supports:
+The SQLite library currently supports:
 
 - Stable source-specific IDs.
 - Native Steam games.
 - Existing non-Steam shortcuts.
 - Epic Games Launcher installs.
-- Loose/local game folders.
+- Loose/local folders.
 - Present, missing, and reappearing state.
-- Manual display-title overrides.
-- Manual launch target, arguments, and working-directory overrides.
+- Manual title and launch overrides.
 - Personal notes.
 - Artwork slot locks.
 - Rejected artwork candidates.
 - Scan history.
 
-Partial or unavailable source scans do not mark stored games missing.
+Partial or unavailable source scans are designed to be non-authoritative. The current schema is version 1 and does not yet have a real migration path.
 
-## Bulk and Background Work
+## Selection, jobs, and artwork foundations
 
-Implemented:
+Implemented foundations include:
 
 - Stable selection by persistent library ID.
-- Active inspector focus separated from bulk selection.
+- Active inspector focus separate from bulk selection.
 - Range, additive, visible-scope, and filter-scope selection.
-- Bounded background workers.
-- UI-safe immutable events.
-- Per-item and aggregate progress.
-- Cancellation and selective retry.
-- Isolated per-game failures.
-- Review-required job states.
-- Bulk artwork modes for missing slots, all unlocked slots, and complete sets.
-- Match policy routing to automatic accept, review, skip, or rejection.
+- Bounded background workers and immutable UI events.
+- Per-item and aggregate progress, cancellation, retry, and review states.
+- Artwork modes for missing slots, all unlocked slots, and complete sets.
 - Real provider search behind UI-independent services.
+- Policy routing to automatic accept, review, skip, or rejection.
+- Production grouped artwork transactions.
 
-## Current Sources
+The production artwork review experience is only partially integrated and has not passed the final SSS Vision or end-to-end acceptance gates.
 
-| Source | Status | Notes |
-| --- | --- | --- |
-| Native Steam | Implemented | Read-only scan; Steam writes remain separate and transactional. |
-| Existing non-Steam shortcuts | Implemented | Preserves unrelated and user-managed fields. |
-| Loose/local folders | Implemented | Ranked launch candidates with manual override support. |
-| Epic Games Launcher | Implemented | Read-only `.item` manifest adapter with strong catalog identity. |
-| Playnite | Planned first | Optional curated source; preserve game IDs and launch actions. |
-| GOG Galaxy | Planned | Read-only database/manifest research required. |
-| Battle.net | Planned | Preserve launcher and direct launch recipes when valid. |
-| EA App | Later | Research storage ownership and stable identity first. |
-| Ubisoft Connect | Later | Research storage ownership and stable identity first. |
-| Amazon Games / itch.io / Rockstar / Xbox | Later | Windows-first expansion after core sources stabilize. |
-| Heroic / Lutris / Legendary / Bottles / Faugus | Later | SteamOS/Bazzite phase. |
+## Current sources
+
+| Source | Current status |
+| --- | --- |
+| Native Steam | Implemented read-only scan |
+| Existing non-Steam shortcuts | Implemented read and preserved transactional update |
+| Epic Games Launcher | Implemented read-only `.item` adapter |
+| Loose/local folders | Implemented ranked scan with manual override support |
+| Playnite | Planned next; research and fixture gate first |
+| GOG Galaxy | Planned after Playnite |
+| Battle.net | Planned after GOG; launcher-first launch policy |
+| EA App / Ubisoft Connect | Deferred to a later evidence gate |
+| SteamOS/Bazzite sources | Intentionally later than the Windows alpha |
 
 ## Current UI
 
-The production interface uses a CustomTkinter shell with existing ttk/Tk components where practical. It includes:
+The production entry point uses a CustomTkinter shell with ttk/Tk components and a controller-backed persistent library. It includes a modern dark shell, navigation, command area, table, selection, inspector, artwork controls, source progress, and transaction-history access.
 
-- Modern dark-blue production shell.
-- Left navigation.
-- Top command area.
-- Persistent library table.
-- Search, filtering, sorting, and stable multi-selection.
-- Right-side details and artwork areas.
-- Artwork review controls.
-- Source scan progress and retry controls.
-- Transaction-history access.
+This is not proof of SSS Vision parity. Before this audit there was no canonical repository copy of the exact reference, deterministic screenshot fixture, crop manifest, mixed visual metric, or accepted component-by-component parity report.
 
-### Approved UI Direction
+A PySide6 proof is approved only as an isolated read-only experiment. Migration is not approved until measured evidence shows a clear win in responsiveness, interaction quality, scaling, maintainability, and packaging.
 
-- Keep the current production UI operational.
-- Build an isolated PySide6 proof using real controller data.
-- Do not migrate unless the proof demonstrates a clear improvement in table performance, interaction quality, scaling, maintainability, and packaging.
-- Keep the Python domain, service, persistence, transaction, and source-adapter layers regardless of UI outcome.
+## Known release blockers
 
-## Approved Product Decisions
+- Windows CI failures on the open vNext planning PR:
+  - `tests/transaction_history_controller_test.py`
+  - `tests/source_cli_test.py`
+- No verified green cross-platform baseline tied to the final planning commit.
+- No canonical SSS Vision regression harness or accepted parity evidence.
+- No first-class cross-source identity/reconciliation subsystem.
+- No versioned database migration mechanism.
+- Explicit Source/Steam/Studio states are incomplete.
+- Multiple launch recipes and structured notes are not production-complete.
+- Explicit profile-targeted preview/apply needs a final integrated acceptance gate.
+- Restore is not yet a complete end-user workflow.
+- Installer/upgrade/uninstall behavior is not proven on a clean Windows machine.
+- The repository has no root license at audit time.
 
-- Build a PySide6 proof, then decide whether to migrate.
-- Windows Explorer `Add to Steam` opens a compact review wizard.
-- Store direct and launcher-based launch recipes; choose per game.
-- Treat Playnite as a first-class optional source.
-- Keep detailed app notes with an optional short Steam summary.
-- Require an explicit target Steam profile.
-- Detect source changes automatically, but require approval before Steam writes.
-- Back up and restore collections before optional collection management.
-- Show owned-but-uninstalled games later in a separate read-only view.
-- Finish the Windows experience before SteamOS/Bazzite expansion.
+## Evidence limits
 
-## Known Gaps
-
-- Cross-source duplicate and identity reconciliation is not yet a first-class subsystem.
-- Library status needs explicit source, Steam, and Studio state separation.
-- Structured notes and multiple launch recipes are not yet modeled.
-- Windows Explorer quick-add is not implemented.
-- Explicit multi-profile targeting is not complete.
-- Collections backup/restore and management are not complete.
-- Installable Windows alpha packaging needs a defined release pipeline.
-- PySide6 has not yet been benchmarked against the current UI.
-
-## Validation
-
-GitHub Actions and local suites cover Windows and Ubuntu with supported Python versions. Relevant changes must run focused tests plus the appropriate CI-equivalent commands.
-
-Do not treat documentation as stronger evidence than code and tests. When they disagree, update this document after verifying runtime behavior.
+The audit inspected repository files, pull requests, issues, commits, workflows, and workflow results through GitHub. The complete suite could not be run in the audit container because external Git cloning was unavailable. CI results are therefore treated as runtime evidence, while local-machine pass claims remain provisional unless linked to reproducible output.

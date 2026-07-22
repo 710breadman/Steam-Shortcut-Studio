@@ -1,105 +1,54 @@
 # Codex Start Here
 
-Read this file before changing Steam Shortcut Studio.
+Read this before changing Steam Shortcut Studio.
 
-## Source of Truth
+## Product
 
-1. `docs/CURRENT_STATE.md` — what exists now.
-2. `docs/PRODUCT_ROADMAP.md` — future priorities and approved decisions.
-3. The active GitHub issue — exact implementation scope.
-4. Code and tests — final authority when documentation differs.
+Steam Shortcut Studio is a safe personal-library workshop for Steam and non-Steam PC games. It scans sources, reconciles identity and launch choices, manages complete artwork sets, previews approved Steam changes, applies them through verified transactions, and preserves rollback evidence. It is not a replacement launcher.
 
-Older sprint maps and `docs/SPRINT_STATUS.md` are historical evidence, not the active backlog.
+## Current authority
 
-## Current Product Direction
+1. `docs/CURRENT_STATE.md` — verified current capability and known gaps.
+2. `docs/audit/REPOSITORY_REALITY_AUDIT.md` — audit evidence and limitations.
+3. `docs/design/sss-vision.png` — canonical visual target.
+4. `docs/planning/MASTER_ROADMAP.md` — dependency-ordered future work.
+5. `docs/planning/SPRINT_INDEX.md` — active implementation sequence.
+6. The active sprint and its Gemma prompt.
+7. Code and tests — final authority when documentation differs.
 
-Steam Shortcut Studio is a safe personal-library workshop for Steam and non-Steam games. It is not a replacement launcher.
+Older sprint maps and `docs/SPRINT_STATUS.md` are historical.
 
-Approved decisions:
+## Immediate order
 
-- Keep the Python core.
-- Keep the production CustomTkinter UI operational.
-- Build a measured PySide6 proof before deciding on migration.
-- Finish Windows before SteamOS/Bazzite expansion.
-- Make Playnite the first new optional source, followed by GOG and Battle.net.
-- Store direct and launcher-based launch recipes per game.
-- Use detailed app-owned notes with an optional short Steam summary.
-- Require an explicit target Steam profile.
-- Detect source changes automatically, but require approval before Steam writes.
-- Back up and restore collections before optional collection management.
+1. Fix the Windows CI failures recorded in the audit.
+2. Establish a green cross-platform baseline.
+3. Install the canonical SSS Vision asset and visual regression harness.
+4. Complete the isolated PySide6 proof and measured toolkit decision.
+5. Execute SSS Vision parity sprints in the chosen toolkit.
+6. Complete identity, reconciliation, profile-targeted apply, recovery, sources, and release work.
 
-## Immediate P0 Order
+## Do not rebuild
 
-Work only from a focused GitHub issue. Current P0 sequence:
+Reuse `LibraryStore`, `LibraryController`, `SelectionState`, `BackgroundJobQueue`, source adapters/coordinator, artwork policy/search/coordinator, image validation, shortcut/artwork transaction services, transaction history, and immutable job events.
 
-1. Installable Windows alpha.
-2. PySide6 library proof.
-3. 100/1,000/5,000-row UI benchmarks.
-4. Cross-source identity and reconciliation foundation.
-
-Do not combine UI migration, reconciliation, launcher adapters, packaging, and Steam-write changes in one pull request.
-
-## Existing Systems — Do Not Rebuild
-
-```text
-steam_shortcut_studio/selection.py
-steam_shortcut_studio/jobs.py
-steam_shortcut_studio/job_queue.py
-steam_shortcut_studio/library_controller.py
-steam_shortcut_studio/library_store.py
-steam_shortcut_studio/source_scans.py
-steam_shortcut_studio/sources/base.py
-steam_shortcut_studio/sources/epic.py
-steam_shortcut_studio/sources/steam.py
-steam_shortcut_studio/sources/local.py
-steam_shortcut_studio/artwork_policy.py
-steam_shortcut_studio/bulk_artwork.py
-steam_shortcut_studio/artwork_search_service.py
-steam_shortcut_studio/image_validation.py
-steam_shortcut_studio/transactions.py
-steam_shortcut_studio/file_transactions.py
-steam_shortcut_studio/shortcut_transactions.py
-steam_shortcut_studio/artwork_transactions.py
-steam_shortcut_studio/transaction_history.py
-```
-
-Reuse controllers, services, persistent IDs, transactions, and immutable job events.
-
-## Required Safety Rules
+## Hard safety rules
 
 - Never modify game installation files.
-- Never add direct Steam writes outside transaction services.
+- Never write Steam data directly from UI code or source adapters.
 - Never replace malformed active VDF data.
-- Never let worker threads touch UI widgets.
-- Never let partial source scans mark stored games missing.
-- Never discard manual overrides, artwork locks, rejected matches, notes, collections, or launch choices during rescans.
+- Never allow worker threads to manipulate widgets.
+- Never let partial or unavailable scans mark stored games missing.
+- Never discard manual overrides, artwork locks, rejected matches, notes, collections, or launch choices.
 - Never merge identities from title alone.
-- Never silently change the preferred launch recipe.
-- Never default writes to every Steam profile.
-- Never enable risky native Steam changes without ownership research, preview, verification, and rollback.
+- Never silently change a preferred launch recipe.
+- Never default writes to all Steam profiles.
+- Never show backup, verification, or rollback success without real evidence.
+- Never call a feature complete because a screen, button, class, or stub exists.
 
-## Implementation Discipline
+## Worker limits
 
-For each issue:
+Gemma receives one XS, S, or M sprint. Target 8K–20K input tokens; stop near 28K. Supply only directly relevant files, tests, crop references, and decisions. Gemma stops when acceptance criteria are met and does not start the next sprint.
 
-1. Read the issue and only the directly relevant design documents.
-2. Inspect current code before proposing new abstractions.
-3. Add or update tests with the implementation.
-4. Keep commits small and reversible.
-5. Record validation in the PR description.
-6. Update `docs/CURRENT_STATE.md` only when actual capability changes.
-7. Update `docs/PRODUCT_ROADMAP.md` only when priorities or approved decisions change.
+## Required finish
 
-## Validation
-
-Run focused tests for every touched subsystem. For a major integration PR, also run the relevant CI-equivalent commands from `.github/workflows/`.
-
-Minimum baseline:
-
-```text
-python -m compileall -q steam_shortcut_studio tests main.py
-python tests/foundation_test.py
-python tests/smoke_test.py
-```
-
-Add the transaction, persistence, source, artwork, UI, or packaging suites required by the change. Never mark work complete because code was written; provide passing evidence or name the blocker.
+Run focused tests, capture required screenshots, record commands/results, update `docs/planning/PERSISTENT_HANDOFF.md`, and state the exact next command. Failed or unavailable validation must be labeled, not hidden.
