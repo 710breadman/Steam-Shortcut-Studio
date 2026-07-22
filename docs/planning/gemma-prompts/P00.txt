@@ -1,0 +1,8 @@
+SPRINT P00. Build migration mechanics only; do not add schema-v2 features.
+
+Read:
+- docs/planning/sprints/P00-DATABASE-MIGRATION-RUNNER.md
+- steam_shortcut_studio/library_store.py
+- relevant library-store tests
+
+Implement ordered SQLite migration execution with pre-upgrade backup, version verification, idempotent current-schema open, unsupported-newer-schema refusal, and injected-failure preservation. Keep scope to migration infrastructure. Run focused tests and baseline-required persistence tests. Update handoff and stop.
