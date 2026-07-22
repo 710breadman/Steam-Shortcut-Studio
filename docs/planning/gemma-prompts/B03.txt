@@ -1,0 +1,3 @@
+SPRINT B03. No features.
+
+Read docs/planning/sprints/B03-CROSS-PLATFORM-BASELINE.md and active workflow files. Run the full required Windows/Ubuntu matrix. Produce machine-readable and Markdown baseline reports tied to the tested commit. Do not refactor or add product behavior. Update CURRENT_STATE and PERSISTENT_HANDOFF only with verified results. Stop.

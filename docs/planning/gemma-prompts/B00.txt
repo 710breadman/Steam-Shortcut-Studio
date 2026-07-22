@@ -1,0 +1,12 @@
+SPRINT B00. Evidence only. Do not fix code.
+
+Repo: 710breadman/Steam-Shortcut-Studio
+Branch: agent/final-audit-roadmap
+Read:
+- docs/planning/sprints/B00-WINDOWS-FAILURE-REPRODUCTION.md
+- .github/workflows/ci.yml
+- .github/workflows/source-cli.yml
+- tests/transaction_history_controller_test.py
+- tests/source_cli_test.py
+
+On Windows Python 3.11, install requirements and run both tests separately with unbuffered output. Repeat with 3.13 if installed. Record exact traceback, failing line, versions, temp path, exit code, and failure category. Do not modify production code. Update docs/planning/PERSISTENT_HANDOFF.md with evidence and exact next action. Stop.

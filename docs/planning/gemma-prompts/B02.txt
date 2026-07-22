@@ -1,0 +1,8 @@
+SPRINT B02. Use B00 evidence. Fix only the Windows source CLI defect.
+
+Read:
+- docs/planning/sprints/B02-FIX-WINDOWS-SOURCE-CLI.md
+- B00 evidence in docs/planning/PERSISTENT_HANDOFF.md
+- only implicated source CLI/scanner/store files and tests
+
+Add a regression test. Preserve blocked non-authoritative scan behavior and existing stored presence. Do not weaken executable validation or hide resource leaks. Run focused tests on Windows 3.11/3.13 and relevant Ubuntu CI. Update handoff and stop.
