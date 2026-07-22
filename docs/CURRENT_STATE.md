@@ -12,11 +12,12 @@ The intended production workflow is:
 1. Detect Steam and configured sources.
 2. Scan native Steam games, existing shortcuts, supported launchers, and loose folders.
 3. Normalize records into an app-owned persistent library.
-4. Select one or many games.
-5. Find metadata and complete artwork sets.
-6. Review uncertain identity, launch, or artwork decisions.
-7. Preview all Steam-owned changes for one explicit profile.
-8. Back up, apply, verify, and retain rollback evidence.
+4. Reconcile duplicate identities and launch choices conservatively.
+5. Select one or many games.
+6. Find metadata and artwork.
+7. Review uncertain identity, launch, or artwork decisions.
+8. Preview all Steam-owned changes for one explicit profile.
+9. Back up, apply, verify, and retain rollback evidence.
 
 ## Production-safe foundations
 
@@ -67,7 +68,7 @@ Implemented foundations include:
 - Policy routing to automatic accept, review, skip, or rejection.
 - Production grouped artwork transactions.
 
-The production artwork review experience is only partially integrated and has not passed the final SSS Vision or end-to-end acceptance gates.
+The production artwork review experience is partially integrated and has not passed a final end-to-end acceptance gate.
 
 ## Current sources
 
@@ -87,9 +88,9 @@ The production artwork review experience is only partially integrated and has no
 
 The production entry point uses a CustomTkinter shell with ttk/Tk components and a controller-backed persistent library. It includes a modern dark shell, navigation, command area, table, selection, inspector, artwork controls, source progress, and transaction-history access.
 
-This is not proof of SSS Vision parity. Before this audit there was no canonical repository copy of the exact reference, deterministic screenshot fixture, crop manifest, mixed visual metric, or accepted component-by-component parity report.
-
 A PySide6 proof is approved only as an isolated read-only experiment. Migration is not approved until measured evidence shows a clear win in responsiveness, interaction quality, scaling, maintainability, and packaging.
+
+Per owner direction, source-picture analysis and exact visual-parity work are deferred until the non-visual product is sorted and accepted.
 
 ## Known release blockers
 
@@ -97,7 +98,6 @@ A PySide6 proof is approved only as an isolated read-only experiment. Migration 
   - `tests/transaction_history_controller_test.py`
   - `tests/source_cli_test.py`
 - No verified green cross-platform baseline tied to the final planning commit.
-- No canonical SSS Vision regression harness or accepted parity evidence.
 - No first-class cross-source identity/reconciliation subsystem.
 - No versioned database migration mechanism.
 - Explicit Source/Steam/Studio states are incomplete.
@@ -109,4 +109,4 @@ A PySide6 proof is approved only as an isolated read-only experiment. Migration 
 
 ## Evidence limits
 
-The audit inspected repository files, pull requests, issues, commits, workflows, and workflow results through GitHub. The complete suite could not be run in the audit container because external Git cloning was unavailable. CI results are therefore treated as runtime evidence, while local-machine pass claims remain provisional unless linked to reproducible output.
+The audit inspected repository files, pull requests, issues, commits, workflows, and workflow results through GitHub. The complete suite could not be run in the audit container because external Git cloning was unavailable. CI results are runtime evidence; local-machine pass claims remain provisional unless linked to reproducible output.

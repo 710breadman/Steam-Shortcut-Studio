@@ -1,26 +1,24 @@
 # Steam Shortcut Studio — Product Roadmap
 
-The detailed dependency-ordered roadmap is now:
+Detailed planning lives in:
 
 - `docs/planning/MASTER_ROADMAP.md`
 - `docs/planning/SPRINT_INDEX.md`
 - `docs/planning/sprints/`
 - `docs/planning/gemma-prompts/`
 
-This file remains a short product-level map so old links do not become misleading.
-
 ## Priority sequence
 
 1. Restore a green Windows/Ubuntu CI baseline.
-2. Make the exact SSS Vision image canonical and measurable.
-3. Run the isolated PySide6 proof and toolkit decision gate.
-4. Complete production visual parity in the chosen toolkit.
-5. Add schema migrations, explicit states, identity clusters, reconciliation, and multiple launch recipes.
-6. Complete artwork review, profile-targeted preview/apply, restore, setup, and diagnostics.
+2. Consolidate repository, architecture, and workflow truth.
+3. Add schema migrations and explicit product-state contracts.
+4. Add cross-source identity clusters, evidence, remembered decisions, and reconciliation plans.
+5. Complete source review, launch choices, artwork review, preview, explicit-profile apply, verification, history, and restore.
+6. Prove Windows installer/portable delivery, first-run setup, diagnostics, upgrades, and uninstall.
 7. Add Playnite, GOG, and Battle.net through read-only capability-driven adapters.
-8. Prove Windows packaging, upgrade, uninstall, and clean-machine alpha acceptance.
-9. Add Explorer quick-add, structured notes, collections safety, and portable artwork tools.
-10. Research SteamOS/Bazzite only after the Windows alpha is accepted.
+8. Add approved quality-of-life features.
+9. Complete performance, accessibility, reliability, and toolkit decision gates.
+10. Begin source-picture analysis and visual-parity work only after the above is accepted.
 
 ## Permanent rules
 
@@ -31,4 +29,3 @@ This file remains a short product-level map so old links do not become misleadin
 - One explicit target Steam profile.
 - Every Steam-owned change is previewed, backed up, verified, and reversible.
 - Manual art, notes, collections, tags, identities, and launch choices are protected.
-- SSS Vision parity requires screenshot evidence, not a similar dark theme.
