@@ -1,0 +1,670 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Steam Shortcut Studio — UI Design Reference</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  * { box-sizing: border-box; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #1c3147; border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  select { -webkit-appearance: none; appearance: none; }
+  #app { height: 100vh; width: 100vw; overflow: hidden; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+"use strict";
+
+/*
+ * Self-contained design reference for Steam Shortcut Studio's modern UI.
+ * Plain DOM + vanilla JS, no build step and no external runtime required —
+ * open this file directly in a browser. Mock data only (GAME_SEED below);
+ * see prototypes/modern_shell.py for the real, data-backed implementation.
+ */
+
+const PALETTES = {
+  "Ocean Blue": { accent: "#1677ff", hover: "#2f8cff", selected: "#0f315f", border: "#1d4f8f" },
+  "Orion Purple": { accent: "#7c3aed", hover: "#8b5cf6", selected: "#35205c", border: "#6640a5" },
+  "Forest Green": { accent: "#12a66a", hover: "#22bd7b", selected: "#163f35", border: "#26745c" },
+  "Solar Amber": { accent: "#d97706", hover: "#f59e0b", selected: "#4a3218", border: "#8a5b1f" },
+  "Rose": { accent: "#db2777", hover: "#ec4899", selected: "#51223e", border: "#8e3765" }
+};
+const MONO_COLORS = ["#3a2930", "#243a2d", "#2c2a41", "#402a2a", "#2a3640", "#3d3421"];
+const NAV_ITEMS = [
+  ["\u25a6", "Library"], ["\u2197", "Shortcuts"], ["\u25a7", "Artwork"], ["\u2261", "Metadata"],
+  ["\u270e", "Tools"], ["\u2315", "Import / Scan"], ["\u25c8", "Backups"], ["\u2699", "Settings"],
+  ["\u271a", "Extensions"], ["\u24d8", "About"]
+];
+const GAME_SEED = [
+  ["Aurora Drift", "Steam", "Steam", "May 9, 2026", "70.4 GB", "Protected", 1593500],
+  ["Iron Vanguard", "Steam", "Steam", "May 7, 2026", "78.1 GB", "Ready", 1091500],
+  ["Nightfall Requiem", "Epic", "Windows", "May 5, 2026", "60.1 GB", "Review", null],
+  ["Skyward Ashes", "GOG", "Windows", "Apr 28, 2026", "119.0 GB", "Ready", null],
+  ["Crimson Foundry", "Steam", "Steam", "Apr 27, 2026", "103.2 GB", "Protected", 1145360],
+  ["Glass Horizon", "Steam", "Steam", "Apr 25, 2026", "15.1 GB", "Ready", 1145350],
+  ["Wraithbound", "Steam", "Steam", "Apr 20, 2026", "122.5 GB", "Review", 1086940],
+  ["Solstice Arena", "Xbox App", "Windows", "Apr 18, 2026", "66.8 GB", "Ready", null],
+  ["Hollow Meridian", "Epic", "Windows", "Apr 12, 2026", "74.5 GB", "Review", null],
+  ["Driftwood Saga", "GOG", "Windows", "Apr 10, 2026", "50.3 GB", "Ready", null],
+  ["Starlit Convoy", "Steam", "Steam", "Apr 6, 2026", "65.2 GB", "Protected", 1222140],
+  ["Copper Sky Rally", "Local Folder", "Windows", "Apr 4, 2026", "42.7 GB", "Ready", null],
+  ["Paperwing Chronicles", "Steam", "Steam", "Mar 30, 2026", "41.8 GB", "Review", 1687950],
+  ["Molten Vale", "Steam", "Steam", "Mar 28, 2026", "125.6 GB", "Protected", 1716740],
+  ["Quiet Harbor", "Steam", "Steam", "Mar 22, 2026", "28.3 GB", "Ready", 1245620],
+  ["Foxfire Legion", "Epic", "Windows", "Mar 18, 2026", "54.9 GB", "Review", null],
+  ["Rustbelt Riders", "GOG", "Windows", "Mar 12, 2026", "33.1 GB", "Ready", null],
+  ["Obsidian Choir", "Steam", "Steam", "Mar 4, 2026", "19.6 GB", "Protected", 1097840],
+  ["Pale Ferry", "Steam", "Steam", "Feb 26, 2026", "44.2 GB", "Ready", 1345620],
+  ["Thistlewood", "Local Folder", "Windows", "Feb 20, 2026", "12.8 GB", "Ready", null],
+  ["Vanishing Point", "Xbox App", "Windows", "Feb 14, 2026", "89.4 GB", "Review", null],
+  ["Emberlight Keep", "Steam", "Steam", "Feb 8, 2026", "57.7 GB", "Protected", 1462040],
+  ["Coral Static", "Steam", "Steam", "Jan 30, 2026", "24.5 GB", "Ready", 1298330],
+  ["Northbound", "Epic", "Windows", "Jan 22, 2026", "61.3 GB", "Review", null]
+];
+
+function mono(title) {
+  const parts = title.split(" ");
+  return (parts[0][0] + (parts[1] ? parts[1][0] : parts[0][1] || "")).toUpperCase();
+}
+function seededConfidence(i) { return 62 + ((i * 37) % 36); }
+
+const GAMES = GAME_SEED.map((row, i) => ({
+  id: "g" + i, title: row[0], source: row[1], platform: row[2], lastPlayed: row[3],
+  size: row[4], status: row[5], appId: row[6], mono: mono(row[0]),
+  monoColor: MONO_COLORS[i % MONO_COLORS.length], confidence: seededConfidence(i)
+}));
+
+const state = {
+  nav: "Library", accentName: "Ocean Blue", search: "", filter: "All Games",
+  sortCol: "title", sortDir: "asc", selected: [], activeId: "g0", tab: "Artwork",
+  page: 1, pageSize: 8, toast: null, modal: null, applyStep: 0,
+  autoArtSource: "SteamGridDB"
+};
+let toastTimer = null;
+let applyTimer = null;
+let applySteps = [];
+
+function setState(patch) {
+  Object.assign(state, typeof patch === "function" ? patch(state) : patch);
+  render();
+}
+
+// ---------- tiny DOM helper ----------
+function el(tag, style, props, children) {
+  const node = document.createElement(tag);
+  if (style) Object.assign(node.style, style);
+  if (props) {
+    for (const [key, value] of Object.entries(props)) {
+      if (key === "onClick") node.addEventListener("click", value);
+      else if (key === "onInput") node.addEventListener("input", value);
+      else if (key === "onChange") node.addEventListener("change", value);
+      else if (key === "text") node.textContent = value;
+      else if (key in node) node[key] = value;
+      else node.setAttribute(key, value);
+    }
+  }
+  (children || []).forEach((child) => { if (child) node.appendChild(child); });
+  return node;
+}
+
+function showToast(message) {
+  state.toast = message;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => setState({ toast: null }), 2600);
+  render();
+}
+
+// ---------- derived data ----------
+function filteredSortedGames() {
+  let list = GAMES.filter((g) => {
+    if (state.search && !g.title.toLowerCase().includes(state.search.toLowerCase())) return false;
+    if (state.filter === "Steam" && g.source !== "Steam") return false;
+    if (state.filter === "Non-Steam" && g.source === "Steam") return false;
+    if (state.filter === "Needs Review" && g.status !== "Review") return false;
+    if (state.filter === "Protected" && g.status !== "Protected") return false;
+    return true;
+  });
+  const dir = state.sortDir === "asc" ? 1 : -1;
+  list = [...list].sort((a, b) => {
+    if (state.sortCol === "size") return (parseFloat(a.size) - parseFloat(b.size)) * dir;
+    if (state.sortCol === "lastPlayed") return (new Date(a.lastPlayed) - new Date(b.lastPlayed)) * dir;
+    return a.title.localeCompare(b.title) * dir;
+  });
+  return list;
+}
+
+function sortBy(col) {
+  setState((s) => ({ sortCol: col, sortDir: s.sortCol === col && s.sortDir === "asc" ? "desc" : "asc" }));
+}
+function toggleSelect(id, e) {
+  e && e.stopPropagation();
+  const sel = state.selected;
+  setState({ selected: sel.includes(id) ? sel.filter((x) => x !== id) : [...sel, id] });
+}
+function activate(id) { setState({ activeId: id, tab: "Artwork" }); }
+function setPage(p) { setState({ page: p }); }
+
+function openApply() { setState({ modal: "confirm" }); }
+function closeModal() { clearInterval(applyTimer); setState({ modal: null, applyStep: 0 }); }
+function confirmApply() {
+  applySteps = ["Creating backup\u2026", "Writing shortcut data\u2026", "Writing artwork set\u2026", "Verifying writes\u2026"];
+  setState({ modal: "applying", applyStep: 0 });
+  let i = 0;
+  applyTimer = setInterval(() => {
+    i++;
+    if (i >= applySteps.length) {
+      clearInterval(applyTimer);
+      setState({ modal: "success" });
+    } else {
+      setState({ applyStep: i });
+    }
+  }, 550);
+}
+
+// ---------- static per-screen content (mock) ----------
+function screensFor() {
+  return {
+    "Shortcuts": {
+      title: "Shortcuts", subtitle: "Non-Steam shortcuts currently tracked by this app.",
+      items: GAMES.filter((g) => g.source !== "Steam").map((g) => ({
+        icon: "\u2197", title: g.title, detail: g.platform + " \u00b7 " + g.source,
+        actionLabel: "Edit", onClick: () => showToast("Editing shortcut for " + g.title)
+      }))
+    },
+    "Artwork": {
+      title: "Artwork", subtitle: "Games grouped by artwork completeness.",
+      items: GAMES.slice(0, 10).map((g) => ({
+        icon: "\u25a7", title: g.title, detail: g.confidence + "% match confidence",
+        actionLabel: "Find Art", onClick: () => showToast("Finding artwork for " + g.title)
+      }))
+    },
+    "Metadata": {
+      title: "Metadata", subtitle: "Bulk metadata refresh queue.",
+      items: GAMES.slice(0, 8).map((g) => ({
+        icon: "\u2261", title: g.title, detail: "Last refreshed 3 days ago",
+        actionLabel: "Refresh", onClick: () => showToast("Refreshing metadata for " + g.title)
+      }))
+    },
+    "Tools": {
+      title: "Tools", subtitle: "Maintenance utilities.",
+      items: [
+        { icon: "\U0001F5D1", title: "Delete Cached Artwork", detail: "Remove downloaded previews and search caches" },
+        { icon: "\u21ba", title: "Reset Settings to Defaults", detail: "Clears saved app settings" },
+        { icon: "\U0001F5CE", title: "Open Logs Folder", detail: "View recent activity logs" }
+      ].map((it) => ({ ...it, actionLabel: it.title.startsWith("Open") ? "Open" : "Run", onClick: () => showToast(it.title + " completed") }))
+    },
+    "Import / Scan": {
+      title: "Import / Scan", subtitle: "Bring games into the library from a source.",
+      items: [
+        { icon: "\u25c7", title: "Native Steam Install", detail: "Scan installed Steam games" },
+        { icon: "\u25c6", title: "Epic Games Launcher", detail: "Import Epic manifests (read-only)" },
+        { icon: "\u25a2", title: "Local Folder", detail: "Scan a loose game-collection folder" }
+      ].map((it) => ({ ...it, actionLabel: "Scan", onClick: () => showToast("Scanning: " + it.title) }))
+    },
+    "Backups": {
+      title: "Backups", subtitle: "Restore points created before writes.",
+      items: [
+        { icon: "\u25c8", title: "Restore Point \u2014 Jul 28, 2026 09:14", detail: "24.7 MB \u00b7 6 artwork files" },
+        { icon: "\u25c8", title: "Restore Point \u2014 Jul 21, 2026 18:02", detail: "11.2 MB \u00b7 2 shortcuts" }
+      ].map((it) => ({ ...it, actionLabel: "Restore", onClick: () => showToast("Restored: " + it.title) }))
+    },
+    "Settings": {
+      title: "Settings", subtitle: "Artwork sources and app preferences.",
+      items: [
+        { icon: "\u25ce", title: "Official Steam Artwork", detail: "Enabled \u2014 no API key required" },
+        { icon: "\u25ce", title: "SteamGridDB", detail: "Requires an API key" },
+        { icon: "\u25ce", title: "RAWG", detail: "Requires an API key" },
+        { icon: "\u25ce", title: "Wikimedia Fallback", detail: "Enabled \u2014 no API key required" }
+      ].map((it) => ({ ...it, actionLabel: "Toggle", onClick: () => showToast(it.title + " toggled") }))
+    },
+    "Extensions": { title: "Extensions", subtitle: "No extensions installed yet.", items: [] },
+    "About": {
+      title: "About Steam Shortcut Studio",
+      subtitle: "v1.6.2 \u00b7 Not affiliated with Valve, Steam, SteamGridDB, RAWG, or Wikimedia.",
+      items: [
+        { icon: "\u24d8", title: "Project Home", detail: "Personal game library manager", actionLabel: "View", onClick: () => showToast("Opening project info") }
+      ]
+    }
+  };
+}
+
+// ---------- render ----------
+function render() {
+  const palette = PALETTES[state.accentName];
+  const accent = palette.accent;
+  const games = filteredSortedGames();
+  const totalPages = Math.max(1, Math.ceil(games.length / state.pageSize));
+  const page = Math.min(state.page, totalPages);
+  const pageGames = games.slice((page - 1) * state.pageSize, page * state.pageSize);
+  const activeGame = GAMES.find((g) => g.id === state.activeId) || GAMES[0];
+  const isLibrary = state.nav === "Library";
+
+  const focusedId = document.activeElement && document.activeElement.id;
+  const caret = focusedId === "search-input" ? document.activeElement.selectionStart : null;
+
+  const root = el("div", {
+    display: "grid", gridTemplateColumns: "222px 1fr", gridTemplateRows: "auto 1fr auto",
+    height: "100vh", width: "100vw", background: "#07111f", color: "#f1f5f9",
+    fontFamily: "'Segoe UI', system-ui, sans-serif", overflow: "hidden", position: "relative"
+  });
+
+  // ---- sidebar ----
+  const sidebar = el("div", { gridRow: "1 / span 3", background: "#081625", display: "flex", flexDirection: "column", minHeight: "0", overflowY: "auto" });
+  const brand = el("div", { display: "flex", alignItems: "center", gap: "10px", padding: "20px 18px 18px" }, {}, [
+    el("div", { color: accent, fontSize: "30px", fontWeight: "700" }, { text: "\u25c9" }),
+    el("div", {}, {}, [
+      el("div", { fontSize: "14px", fontWeight: "700", letterSpacing: "0.5px" }, { text: "STEAM" }),
+      el("div", { fontSize: "11px", fontWeight: "700", letterSpacing: "0.5px" }, { text: "SHORTCUT STUDIO" }),
+      el("div", { fontSize: "9px", color: "#8fa3b8", display: "flex", alignItems: "center", gap: "6px", marginTop: "2px" }, {}, [
+        document.createTextNode("v1.6.2 "),
+        el("span", { background: accent, color: "#fff", fontSize: "8px", fontWeight: "700", padding: "1px 5px", borderRadius: "4px" }, { text: "PRO" })
+      ])
+    ])
+  ]);
+  sidebar.appendChild(brand);
+
+  const navList = el("div", { padding: "0 12px", display: "flex", flexDirection: "column", gap: "3px" });
+  NAV_ITEMS.forEach(([icon, label]) => {
+    const selected = label === state.nav;
+    navList.appendChild(el("div", {
+      display: "flex", alignItems: "center", gap: "10px", height: "40px", borderRadius: "9px",
+      padding: "0 12px", cursor: "pointer", fontSize: "13px", fontWeight: selected ? "700" : "500",
+      background: selected ? palette.selected : "transparent",
+      border: selected ? "1px solid " + palette.border : "1px solid transparent",
+      color: selected ? "#f1f5f9" : "#b7c5d4"
+    }, { onClick: () => setState({ nav: label }) }, [
+      el("span", { width: "18px", textAlign: "center", fontSize: "14px" }, { text: icon }),
+      el("span", {}, { text: label })
+    ]));
+  });
+  sidebar.appendChild(navList);
+  sidebar.appendChild(el("div", { flex: "1" }));
+
+  const appearanceCard = el("div", { margin: "8px 12px", background: "#0b1b2c", borderRadius: "12px", padding: "10px 12px" });
+  appearanceCard.appendChild(el("div", { fontSize: "10px", fontWeight: "700", color: "#8fa3b8", letterSpacing: "0.5px", marginBottom: "6px" }, { text: "APPEARANCE" }));
+  const swatchRow = el("div", { display: "flex", gap: "8px", alignItems: "center" });
+  Object.keys(PALETTES).forEach((name) => {
+    swatchRow.appendChild(el("div", {
+      width: "22px", height: "22px", borderRadius: "11px", cursor: "pointer",
+      background: PALETTES[name].accent,
+      border: name === state.accentName ? "2px solid #dceeff" : "2px solid transparent"
+    }, { onClick: () => setState({ accentName: name }) }));
+  });
+  swatchRow.appendChild(el("div", {
+    width: "22px", height: "22px", borderRadius: "11px", border: "1px dashed #3a4a5c",
+    display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", color: "#8fa3b8", cursor: "pointer"
+  }, { onClick: () => showToast("Custom accent colors coming soon"), text: "+" }));
+  appearanceCard.appendChild(swatchRow);
+  sidebar.appendChild(appearanceCard);
+
+  const libraryCard = el("div", { margin: "0 12px 16px", background: "#0b1b2c", borderRadius: "12px", padding: "12px" });
+  libraryCard.appendChild(el("div", { fontSize: "12px", fontWeight: "700", display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px" }, { text: "\u25b1 Steam Library" }));
+  libraryCard.appendChild(el("div", { fontSize: "10px", color: "#8fa3b8", marginBottom: "10px" }, { text: "D:\\SteamLibrary" }));
+  const storageTrack = el("div", { height: "7px", borderRadius: "4px", background: "#0d2135", overflow: "hidden" });
+  storageTrack.appendChild(el("div", { height: "100%", width: "76%", background: accent, borderRadius: "4px" }));
+  libraryCard.appendChild(storageTrack);
+  libraryCard.appendChild(el("div", { fontSize: "10px", color: "#8fa3b8", marginTop: "6px" }, { text: "142.1 GB of 1.86 TB used" }));
+  sidebar.appendChild(libraryCard);
+  root.appendChild(sidebar);
+
+  // ---- main content column ----
+  const main = el("div", { gridColumn: "2", padding: "12px 14px 8px", display: "flex", flexDirection: "column", gap: "8px", minHeight: "0" });
+
+  const topbar = el("div", { background: "#0b1b2c", borderRadius: "12px", padding: "8px 10px", display: "flex", alignItems: "center", gap: "4px" });
+  [
+    ["\u2315", "Scan", "Scan Folders & Libraries", () => showToast("Scanning folders & libraries\u2026")],
+    ["\u21bb", "Refresh Metadata", "Update Info & Artwork", () => showToast("Refreshing metadata for the library\u2026")],
+    ["\u2726", "Auto-Art", "Find & Match Artwork", () => showToast("Searching artwork sources for matches\u2026")],
+    ["\u25eb", "Preview", "Preview Changes", () => openPreview()]
+  ].forEach(([icon, title, subtitle, onClick]) => {
+    topbar.appendChild(el("div", { padding: "8px 14px", borderRadius: "9px", cursor: "pointer" }, { onClick }, [
+      el("div", { fontSize: "13px", fontWeight: "700", display: "flex", alignItems: "center", gap: "6px" }, { text: icon + " " + title }),
+      el("div", { fontSize: "10px", color: "#8fa3b8", marginLeft: "20px" }, { text: subtitle })
+    ]));
+  });
+  topbar.appendChild(el("div", { flex: "1" }));
+  topbar.appendChild(el("div", { fontSize: "10px", fontWeight: "700", color: "#f5b942", letterSpacing: "0.5px", marginRight: "10px" }, { text: "SAFE MODE" }));
+  const applyBtn = el("div", { marginLeft: "6px", padding: "8px 16px", borderRadius: "9px", cursor: "pointer", background: accent, color: "#fff" }, { onClick: openApply }, [
+    el("div", { fontSize: "13px", fontWeight: "700", display: "flex", alignItems: "center", gap: "6px" }, { text: "\u2b06 Apply Changes \u25be" }),
+    el("div", { fontSize: "10px", opacity: "0.8", marginLeft: "20px" }, { text: "Safely" })
+  ]);
+  topbar.appendChild(applyBtn);
+  main.appendChild(topbar);
+
+  if (isLibrary) {
+    main.appendChild(buildLibraryView());
+  } else {
+    main.appendChild(buildSimpleScreen());
+  }
+  root.appendChild(main);
+
+  function buildLibraryView() {
+    const wrap = el("div", { flex: "1", minHeight: "0", display: "grid", gridTemplateColumns: "minmax(0,1.15fr) minmax(0,1fr)", gap: "8px" });
+
+    // library panel
+    const panel = el("div", { background: "#0b1b2c", borderRadius: "12px", padding: "12px", display: "flex", flexDirection: "column", minHeight: "0" });
+    const controls = el("div", { display: "flex", gap: "8px", marginBottom: "10px" });
+    const searchInput = el("input", {
+      flex: "1", background: "#07111f", border: "1px solid #1c3147", borderRadius: "8px",
+      color: "#f1f5f9", fontSize: "12px", padding: "0 12px", height: "38px", outline: "none"
+    }, {
+      id: "search-input", placeholder: "Search games...", value: state.search,
+      onInput: (e) => setState({ search: e.target.value, page: 1 })
+    });
+    controls.appendChild(searchInput);
+    const filterSelect = el("select", {
+      background: "#10263b", border: "1px solid #1c3147", borderRadius: "8px", color: "#f1f5f9",
+      fontSize: "12px", padding: "0 10px", height: "38px"
+    }, { onChange: (e) => setState({ filter: e.target.value, page: 1 }) });
+    ["All Games", "Steam", "Non-Steam", "Needs Review", "Protected"].forEach((opt) => {
+      filterSelect.appendChild(el("option", {}, { value: opt, text: opt, selected: opt === state.filter }));
+    });
+    controls.appendChild(filterSelect);
+    panel.appendChild(controls);
+
+    const header = el("div", {
+      display: "grid", gridTemplateColumns: "26px minmax(0,2.2fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,0.7fr)",
+      gap: "6px", padding: "8px 10px", background: "#07111f", borderRadius: "7px",
+      fontSize: "10px", fontWeight: "700", color: "#8fa3b8", letterSpacing: "0.5px"
+    });
+    const arrow = (col) => (state.sortCol === col ? (state.sortDir === "asc" ? " \u2191" : " \u2193") : "");
+    header.appendChild(el("div", {}));
+    header.appendChild(el("div", { cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, { onClick: () => sortBy("title"), text: "TITLE" + arrow("title") }));
+    header.appendChild(el("div", { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, { text: "SOURCE" }));
+    header.appendChild(el("div", { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, { text: "PLATFORM" }));
+    header.appendChild(el("div", { cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, { onClick: () => sortBy("lastPlayed"), text: "LAST PLAYED" + arrow("lastPlayed") }));
+    header.appendChild(el("div", { cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, { onClick: () => sortBy("size"), text: "SIZE" + arrow("size") }));
+    panel.appendChild(header);
+
+    const rowsWrap = el("div", { flex: "1", overflowY: "auto", marginTop: "6px", display: "flex", flexDirection: "column", gap: "4px" });
+    pageGames.forEach((g) => {
+      const active = g.id === state.activeId;
+      const checked = state.selected.includes(g.id);
+      const row = el("div", {
+        display: "grid", gridTemplateColumns: "26px minmax(0,2.2fr) minmax(0,1fr) minmax(0,1fr) minmax(0,1fr) minmax(0,0.7fr)",
+        gap: "6px", alignItems: "center", padding: "8px 10px", borderRadius: "8px", cursor: "pointer",
+        background: active ? palette.selected : "#0d2135", border: "1px solid " + (active ? palette.border : "#1c3147")
+      }, { onClick: () => activate(g.id) });
+      row.appendChild(el("input", { width: "16px", height: "16px", accentColor: accent }, {
+        type: "checkbox", checked, onClick: (e) => toggleSelect(g.id, e)
+      }));
+      const titleGroup = el("div", { display: "flex", alignItems: "center", gap: "10px", minWidth: "0" });
+      titleGroup.appendChild(el("div", {
+        width: "34px", height: "34px", borderRadius: "7px", background: g.monoColor, display: "flex",
+        alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: "700", letterSpacing: "0.5px", flexShrink: "0"
+      }, { text: g.mono }));
+      titleGroup.appendChild(el("div", { fontSize: "12px", fontWeight: "600", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, { text: g.title }));
+      row.appendChild(titleGroup);
+      [g.source, g.platform, g.lastPlayed, g.size].forEach((value) => {
+        row.appendChild(el("div", { fontSize: "11px", color: "#b8c6d5", minWidth: "0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, { text: value }));
+      });
+      rowsWrap.appendChild(row);
+    });
+    panel.appendChild(rowsWrap);
+
+    if (state.selected.length > 0) {
+      const bulk = el("div", { background: "#10263b", borderRadius: "9px", padding: "9px 12px", marginTop: "8px", display: "flex", alignItems: "center", gap: "8px" });
+      bulk.appendChild(el("div", { fontSize: "11px", fontWeight: "700" }, { text: state.selected.length + " selected" }));
+      bulk.appendChild(el("div", { flex: "1" }));
+      ["Scan Selected", "Find Art", "Refresh Metadata", "Preview"].forEach((label) => {
+        bulk.appendChild(el("div", {
+          fontSize: "11px", fontWeight: "700", padding: "7px 12px", borderRadius: "7px", cursor: "pointer",
+          background: label === "Find Art" ? accent : "#0b1b2c", color: "#f1f5f9"
+        }, { onClick: () => showToast(label + " \u2014 " + state.selected.length + " game(s)"), text: label }));
+      });
+      bulk.appendChild(el("div", { fontSize: "11px", fontWeight: "700", padding: "7px 12px", cursor: "pointer", color: "#8fa3b8" }, { onClick: () => setState({ selected: [] }), text: "Clear" }));
+      panel.appendChild(bulk);
+    }
+
+    const footerRow = el("div", { display: "flex", alignItems: "center", paddingTop: "10px", fontSize: "11px", color: "#8fa3b8" });
+    footerRow.appendChild(el("div", {}, { text: games.length + " games" }));
+    footerRow.appendChild(el("div", { flex: "1" }));
+    const pager = el("div", { display: "flex", alignItems: "center", gap: "6px" });
+    pager.appendChild(el("div", { cursor: "pointer", padding: "0 4px" }, { onClick: () => setPage(Math.max(1, page - 1)), text: "\u2039" }));
+    Array.from({ length: totalPages }, (_, i) => i + 1).slice(0, 6).forEach((n) => {
+      pager.appendChild(el("div", {
+        width: "26px", height: "26px", borderRadius: "6px", display: "flex", alignItems: "center", justifyContent: "center",
+        fontSize: "11px", cursor: "pointer", fontWeight: n === page ? "700" : "400",
+        background: n === page ? accent : "transparent", color: "#f1f5f9"
+      }, { onClick: () => setPage(n), text: String(n) }));
+    });
+    pager.appendChild(el("div", { cursor: "pointer", padding: "0 4px" }, { onClick: () => setPage(Math.min(totalPages, page + 1)), text: "\u203a" }));
+    footerRow.appendChild(pager);
+    panel.appendChild(footerRow);
+
+    wrap.appendChild(panel);
+    wrap.appendChild(buildInspector());
+    return wrap;
+  }
+
+  function buildInspector() {
+    const inspector = el("div", { background: "#0b1b2c", borderRadius: "12px", padding: "14px", display: "flex", flexDirection: "column", minHeight: "0", overflowY: "auto" });
+    const heading = el("div", { display: "flex", gap: "12px", marginBottom: "12px" });
+    heading.appendChild(el("div", {
+      width: "52px", height: "52px", borderRadius: "9px", background: activeGame.monoColor, display: "flex",
+      alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: "700", flexShrink: "0"
+    }, { text: activeGame.mono }));
+    const headingText = el("div", { flex: "1", minWidth: "0" });
+    headingText.appendChild(el("div", { fontSize: "19px", fontWeight: "700", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }, { text: activeGame.title }));
+    const detailLine = (activeGame.appId ? "Steam App ID: " + activeGame.appId + "   \u2022   " : "")
+      + (activeGame.status === "Review" ? "Needs review" : "Installed") + "   \u2022   Last played " + activeGame.lastPlayed;
+    headingText.appendChild(el("div", { fontSize: "10px", color: "#8fa3b8", marginTop: "3px" }, { text: detailLine }));
+    heading.appendChild(headingText);
+    inspector.appendChild(heading);
+
+    const tabBar = el("div", { display: "flex", gap: "4px", background: "#07111f", borderRadius: "9px", padding: "4px", marginBottom: "12px" });
+    ["Artwork", "Details", "Metadata", "Links", "Local Files"].forEach((label) => {
+      const activeTab = label === state.tab;
+      tabBar.appendChild(el("div", {
+        flex: "1", textAlign: "center", padding: "7px 0", borderRadius: "6px", fontSize: "11px", fontWeight: "700", cursor: "pointer",
+        background: activeTab ? accent : "transparent", color: activeTab ? "#fff" : "#8fa3b8"
+      }, { onClick: () => setState({ tab: label }), text: label }));
+    });
+    inspector.appendChild(tabBar);
+
+    if (state.tab === "Artwork") inspector.appendChild(buildArtworkTab());
+    else if (state.tab === "Details") inspector.appendChild(buildKvRows([
+      ["Launch target", activeGame.appId ? "steam://rungameid/" + activeGame.appId : "Manual executable"],
+      ["Working directory", "D:\\Games\\" + activeGame.title.replace(/\s+/g, "")],
+      ["Compatibility tool", activeGame.platform === "Windows" ? "None" : "Proton Experimental"],
+      ["Source launcher", activeGame.source]
+    ]));
+    else if (state.tab === "Metadata") inspector.appendChild(buildKvRows([
+      ["Title", activeGame.title], ["Release year", "2025"], ["Developer", "Placeholder Studio"],
+      ["Publisher", "Placeholder Publishing"], ["Genres", "Action, Adventure"], ["Notes", "\u2014"]
+    ]));
+    else if (state.tab === "Links") {
+      const box = el("div", { display: "flex", flexDirection: "column", gap: "8px" });
+      box.appendChild(el("div", { background: "#0d2135", border: "1px solid #1c3147", borderRadius: "8px", padding: "12px", fontSize: "11px", color: "#8fa3b8" }, { text: "No external links added yet for " + activeGame.title + "." }));
+      inspector.appendChild(box);
+    } else if (state.tab === "Local Files") {
+      const box = el("div", { display: "flex", flexDirection: "column", gap: "8px" });
+      box.appendChild(el("div", { background: "#0d2135", border: "1px solid #1c3147", borderRadius: "8px", padding: "10px 12px", fontSize: "11px", color: "#8fa3b8" }, { text: "D:\\SteamLibrary\\steamapps\\common\\" + activeGame.title.replace(/\s+/g, "") }));
+      inspector.appendChild(box);
+    }
+    return inspector;
+  }
+
+  function buildKvRows(rows) {
+    const box = el("div", { display: "flex", flexDirection: "column", gap: "8px" });
+    rows.forEach(([label, value]) => {
+      box.appendChild(el("div", { background: "#0d2135", border: "1px solid #1c3147", borderRadius: "8px", padding: "10px 12px", display: "flex", justifyContent: "space-between" }, {}, [
+        el("div", { fontSize: "11px", color: "#8fa3b8" }, { text: label }),
+        el("div", { fontSize: "11px", fontWeight: "600" }, { text: value })
+      ]));
+    });
+    return box;
+  }
+
+  function buildArtworkTab() {
+    const container = el("div", {});
+    const grid = el("div", { display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: "8px" });
+    [["Portrait", "600 \u00d7 900"], ["Wide Capsule", "616 \u00d7 353"], ["Hero", "1920 \u00d7 620"], ["Logo", "512 \u00d7 256"], ["Icon", "256 \u00d7 256"]].forEach(([name, dims]) => {
+      const card = el("div", { background: "#0d2135", border: "1px solid #1c3147", borderRadius: "10px", minWidth: "0" });
+      card.appendChild(el("div", { fontSize: "10px", fontWeight: "700", color: "#c8d8e8", display: "flex", alignItems: "center", gap: "6px", padding: "10px 10px 8px" }, {}, [
+        document.createTextNode(name + " "),
+        el("span", { color: "#8fa3b8", fontWeight: "400" }, { text: dims }),
+        document.createTextNode(" "),
+        el("span", { color: "#34c878" }, { text: "\u2713" })
+      ]));
+      const preview = el("div", {
+        margin: "0 10px", height: "96px", borderRadius: "8px", background: activeGame.monoColor,
+        display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", fontWeight: "700"
+      }, { text: activeGame.mono });
+      card.appendChild(preview);
+      const buttons = el("div", { display: "flex", gap: "4px", padding: "8px 8px 10px" });
+      ["Auto Match", "Review", "Replace", "Clear"].forEach((label) => {
+        buttons.appendChild(el("div", {
+          flex: "1", textAlign: "center", padding: "6px 0", borderRadius: "6px", fontSize: "9px", fontWeight: "700", cursor: "pointer",
+          background: label === "Auto Match" ? accent : "transparent",
+          border: label === "Auto Match" ? "none" : "1px solid #1c3147",
+          color: label === "Clear" ? "#ef5350" : "#f1f5f9"
+        }, { onClick: () => showToast(name + ": " + label), text: label }));
+      });
+      card.appendChild(buttons);
+      grid.appendChild(card);
+    });
+    const autoArtCard = el("div", { background: "#0d2135", border: "1px solid #1c3147", borderRadius: "10px", padding: "12px", gridColumn: "2" });
+    autoArtCard.appendChild(el("div", { fontSize: "10px", fontWeight: "700", color: "#8fa3b8", letterSpacing: "0.5px", marginBottom: "8px" }, { text: "AUTO-ART SOURCE" }));
+    const sourceSelect = el("select", {
+      width: "100%", background: "#10263b", border: "1px solid #1c3147", borderRadius: "8px", color: "#f1f5f9",
+      fontSize: "12px", height: "34px", padding: "0 8px", marginBottom: "12px"
+    }, { onChange: (e) => setState({ autoArtSource: e.target.value }) });
+    ["SteamGridDB", "Official Steam", "Local Files", "Wikimedia", "RAWG"].forEach((opt) => {
+      sourceSelect.appendChild(el("option", {}, { value: opt, text: opt, selected: opt === state.autoArtSource }));
+    });
+    autoArtCard.appendChild(sourceSelect);
+    autoArtCard.appendChild(el("div", { fontSize: "11px", fontWeight: "700", color: "#34c878", display: "flex", justifyContent: "space-between", marginBottom: "6px" }, {}, [
+      el("span", {}, { text: "Match confidence" }), el("span", {}, { text: activeGame.confidence + "%" })
+    ]));
+    const confTrack = el("div", { height: "7px", borderRadius: "4px", background: "#0b1b2c", overflow: "hidden" });
+    confTrack.appendChild(el("div", { height: "100%", width: activeGame.confidence + "%", background: "#34c878", borderRadius: "4px" }));
+    autoArtCard.appendChild(confTrack);
+    grid.appendChild(autoArtCard);
+    container.appendChild(grid);
+
+    const safety = el("div", { background: "#0d2135", border: "1px solid #1c3147", borderRadius: "10px", padding: "12px", marginTop: "8px" });
+    safety.appendChild(el("div", { fontSize: "11px", fontWeight: "700", color: "#68aefc", letterSpacing: "0.5px", marginBottom: "10px" }, { text: "SAFETY & BACKUP" }));
+    const safetyGrid = el("div", { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px" });
+    [["\u25a3", "Backup Ready", "Grouped restore point"], ["\u2713", "Write Verification", "Read-back required"], ["\u21b6", "Rollback Available", "Automatic on failure"]].forEach(([icon, title, detail]) => {
+      const c = el("div", { background: "#10263b", borderRadius: "8px", padding: "9px 10px" });
+      c.appendChild(el("div", { fontSize: "10px", fontWeight: "700", color: "#34c878", display: "flex", alignItems: "center", gap: "6px" }, { text: icon + " " + title }));
+      c.appendChild(el("div", { fontSize: "9px", color: "#8fa3b8", marginTop: "3px" }, { text: detail }));
+      safetyGrid.appendChild(c);
+    });
+    safety.appendChild(safetyGrid);
+    const pendingCount = state.selected.length > 0 ? state.selected.length * 2 : 6;
+    safety.appendChild(el("div", { fontSize: "10px", color: "#68aefc", marginTop: "10px", cursor: "pointer" }, { onClick: () => openPreview(), text: "Changes to be applied: " + pendingCount + " artwork file(s)" }));
+    container.appendChild(safety);
+    return container;
+  }
+
+  function buildSimpleScreen() {
+    const screen = screensFor()[state.nav] || screensFor()["Settings"];
+    const card = el("div", { flex: "1", minHeight: "0", background: "#0b1b2c", borderRadius: "12px", padding: "20px", overflowY: "auto" });
+    card.appendChild(el("div", { fontSize: "18px", fontWeight: "700", marginBottom: "4px" }, { text: screen.title }));
+    card.appendChild(el("div", { fontSize: "12px", color: "#8fa3b8", marginBottom: "16px" }, { text: screen.subtitle }));
+    const list = el("div", { display: "flex", flexDirection: "column", gap: "8px" });
+    if (!screen.items.length) {
+      list.appendChild(el("div", { fontSize: "12px", color: "#8fa3b8" }, { text: "Nothing here yet." }));
+    }
+    screen.items.forEach((item) => {
+      const row = el("div", { background: "#0d2135", border: "1px solid #1c3147", borderRadius: "10px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "14px" });
+      row.appendChild(el("div", { width: "34px", height: "34px", borderRadius: "8px", background: "#10263b", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "15px" }, { text: item.icon }));
+      const text = el("div", { flex: "1" });
+      text.appendChild(el("div", { fontSize: "13px", fontWeight: "700" }, { text: item.title }));
+      text.appendChild(el("div", { fontSize: "11px", color: "#8fa3b8", marginTop: "2px" }, { text: item.detail }));
+      row.appendChild(text);
+      if (item.actionLabel) {
+        row.appendChild(el("div", { fontSize: "11px", fontWeight: "700", padding: "7px 14px", borderRadius: "7px", cursor: "pointer", background: accent, color: "#fff" }, { onClick: item.onClick || (() => {}), text: item.actionLabel }));
+      }
+      list.appendChild(row);
+    });
+    card.appendChild(list);
+    return card;
+  }
+
+  // ---- status footer ----
+  const statusBar = el("div", { gridColumn: "2", height: "28px", display: "flex", alignItems: "center", padding: "0 14px", fontSize: "11px", color: "#8fa3b8", background: "#081625" });
+  const statusLeft = el("div", { display: "flex", alignItems: "center", gap: "6px" });
+  statusLeft.appendChild(el("span", { color: "#34c878" }, { text: "\u25cf" }));
+  statusLeft.appendChild(document.createTextNode(" " + (state.modal ? "Working\u2026" : "Ready")));
+  statusBar.appendChild(statusLeft);
+  statusBar.appendChild(el("div", { flex: "1" }));
+  statusBar.appendChild(el("div", { display: "flex", alignItems: "center", gap: "6px" }, { text: "\u2713 Steam Connected" }));
+  statusBar.appendChild(el("div", { marginLeft: "14px" }, { text: "\u25cb No pending tasks" }));
+  root.appendChild(statusBar);
+
+  // ---- toast ----
+  if (state.toast) {
+    root.appendChild(el("div", {
+      position: "fixed", bottom: "44px", left: "50%", transform: "translateX(-50%)", background: "#10263b",
+      border: "1px solid " + palette.border, color: "#f1f5f9", padding: "10px 18px", borderRadius: "9px",
+      fontSize: "12px", fontWeight: "600", zIndex: "100", boxShadow: "0 8px 24px rgba(0,0,0,0.4)"
+    }, { text: state.toast }));
+  }
+
+  // ---- modal ----
+  if (state.modal) {
+    const backdrop = el("div", { position: "fixed", inset: "0", background: "rgba(2,8,16,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: "50" }, {
+      onClick: (e) => { if (e.target === e.currentTarget) closeModal(); }
+    });
+    const box = el("div", { background: "#0b1b2c", border: "1px solid #1c3147", borderRadius: "14px", padding: "22px", width: "420px" }, {
+      onClick: (e) => e.stopPropagation()
+    });
+    if (state.modal === "preview") {
+      box.appendChild(el("div", { fontSize: "15px", fontWeight: "700", marginBottom: "10px" }, { text: "Preview Changes" }));
+      const summary = state.selected.length > 0
+        ? state.selected.length + " selected game(s) will have artwork and shortcut data refreshed. A backup will be taken first."
+        : "No games selected. Select games in the library to preview specific changes, or Apply Changes to process the current filtered view.";
+      box.appendChild(el("div", { fontSize: "12px", color: "#8fa3b8", marginBottom: "14px" }, { text: summary }));
+      const actions = el("div", { display: "flex", justifyContent: "flex-end", gap: "8px" });
+      actions.appendChild(el("div", { padding: "9px 16px", borderRadius: "8px", cursor: "pointer", color: "#8fa3b8", fontSize: "12px", fontWeight: "700" }, { onClick: closeModal, text: "Close" }));
+      box.appendChild(actions);
+    } else if (state.modal === "confirm") {
+      box.appendChild(el("div", { fontSize: "15px", fontWeight: "700", marginBottom: "10px" }, { text: "Apply Changes Safely?" }));
+      box.appendChild(el("div", { fontSize: "12px", color: "#8fa3b8", marginBottom: "14px" }, { text: "A backup will be created before any Steam file is modified. Every write is verified and automatically reversible." }));
+      const actions = el("div", { display: "flex", justifyContent: "flex-end", gap: "8px" });
+      actions.appendChild(el("div", { padding: "9px 16px", borderRadius: "8px", cursor: "pointer", color: "#8fa3b8", fontSize: "12px", fontWeight: "700" }, { onClick: closeModal, text: "Cancel" }));
+      actions.appendChild(el("div", { padding: "9px 18px", borderRadius: "8px", cursor: "pointer", background: accent, color: "#fff", fontSize: "12px", fontWeight: "700" }, { onClick: confirmApply, text: "Apply Changes" }));
+      box.appendChild(actions);
+    } else if (state.modal === "applying") {
+      box.appendChild(el("div", { fontSize: "15px", fontWeight: "700", marginBottom: "10px" }, { text: "Applying changes\u2026" }));
+      box.appendChild(el("div", { fontSize: "11px", color: "#8fa3b8", marginBottom: "10px" }, { text: applySteps[state.applyStep] || "Preparing\u2026" }));
+      const track = el("div", { height: "8px", borderRadius: "4px", background: "#0d2135", overflow: "hidden" });
+      track.appendChild(el("div", { height: "100%", width: (Math.min(state.applyStep + 1, 4) / 4 * 100) + "%", background: accent, borderRadius: "4px", transition: "width 0.4s" }));
+      box.appendChild(track);
+    } else if (state.modal === "success") {
+      box.appendChild(el("div", { fontSize: "15px", fontWeight: "700", color: "#34c878", marginBottom: "10px" }, { text: "\u2713 Applied successfully" }));
+      box.appendChild(el("div", { fontSize: "12px", color: "#8fa3b8", marginBottom: "14px" }, { text: "Backup created, all writes verified, and a rollback point is available if you need to undo this change." }));
+      const actions = el("div", { display: "flex", justifyContent: "flex-end" });
+      actions.appendChild(el("div", { padding: "9px 18px", borderRadius: "8px", cursor: "pointer", background: accent, color: "#fff", fontSize: "12px", fontWeight: "700" }, { onClick: closeModal, text: "Done" }));
+      box.appendChild(actions);
+    }
+    backdrop.appendChild(box);
+    root.appendChild(backdrop);
+  }
+
+  const appEl = document.getElementById("app");
+  appEl.innerHTML = "";
+  appEl.appendChild(root);
+
+  if (caret !== null) {
+    const input = document.getElementById("search-input");
+    if (input) {
+      input.focus();
+      input.setSelectionRange(caret, caret);
+    }
+  }
+}
+
+function openPreview() { setState({ modal: "preview" }); }
+
+render();
+</script>
+</body>
+</html>

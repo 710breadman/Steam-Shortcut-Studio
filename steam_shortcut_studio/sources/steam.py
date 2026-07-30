@@ -126,6 +126,7 @@ class SteamLibraryAdapter:
                     launch_target=f"steam://rungameid/{appid}",
                     working_directory=install_path,
                     platform=platform,
+                    size_bytes=game.size_bytes,
                     source_record_path=str(
                         self.steam_root / "steamapps" / f"appmanifest_{appid}.acf"
                     ),

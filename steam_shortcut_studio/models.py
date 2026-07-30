@@ -166,6 +166,7 @@ class DetectedGame:
     source_type: str = "folder"
     source_note: str = ""
     steam_appid: int | None = None
+    size_bytes: int = 0
 
     @property
     def confidence(self) -> int:

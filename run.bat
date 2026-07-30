@@ -1,7 +1,8 @@
 @echo off
+cd /d "%~dp0"
 set "BUNDLED_PY=%USERPROFILE%\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe"
 if exist "%BUNDLED_PY%" (
-  "%BUNDLED_PY%" -m steam_shortcut_studio.app
+  "%BUNDLED_PY%" -m prototypes.modern_library
 ) else (
-  python -m steam_shortcut_studio.app
+  python -m prototypes.modern_library
 )

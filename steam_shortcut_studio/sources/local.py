@@ -142,6 +142,7 @@ class FolderScannerAdapter:
                     install_path=install_path,
                     launch_target=launch_target,
                     launch_arguments=game.launch_options,
+                    size_bytes=game.size_bytes,
                     working_directory=(
                         str(game.selected_exe.parent)
                         if game.selected_exe

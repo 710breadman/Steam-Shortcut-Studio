@@ -48,6 +48,10 @@ def scan_installed_steam_games(steam_path: Path) -> list[DetectedGame]:
                 appid = int(appid_text)
             except ValueError:
                 continue
+            try:
+                size_bytes = int(values.get("SizeOnDisk") or 0)
+            except ValueError:
+                size_bytes = 0
             install_path = steamapps / "common" / installdir if installdir else steamapps / "common" / name
             games.append(
                 DetectedGame(
@@ -59,6 +63,7 @@ def scan_installed_steam_games(steam_path: Path) -> list[DetectedGame]:
                     source_type="steam",
                     source_note="Installed Steam game",
                     steam_appid=appid,
+                    size_bytes=size_bytes,
                 )
             )
     games.sort(key=lambda game: game.display_title.casefold())

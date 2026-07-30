@@ -276,6 +276,24 @@ class GameScanner:
         candidates.sort(key=lambda item: str(item).casefold())
         return candidates
 
+    @staticmethod
+    def _directory_size_bytes(path: Path) -> int:
+        total = 0
+        try:
+            entries = os.scandir(path)
+        except OSError:
+            return total
+        with entries:
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        total += GameScanner._directory_size_bytes(Path(entry.path))
+                    elif entry.is_file(follow_symlinks=False):
+                        total += entry.stat(follow_symlinks=False).st_size
+                except OSError:
+                    continue
+        return total
+
     def scan(self, collection_root: Path) -> list[DetectedGame]:
         collection_root = collection_root.expanduser().resolve()
         if not collection_root.exists() or not collection_root.is_dir():
@@ -317,6 +335,7 @@ class GameScanner:
                 candidates=candidates,
                 selected_exe=selected,
                 selected=False,
+                size_bytes=self._directory_size_bytes(game_root),
             )
             games.append(game)
             self._game_found(game)
@@ -334,6 +353,7 @@ class GameScanner:
                 candidates=candidates,
                 selected_exe=selected,
                 selected=False,
+                size_bytes=candidates[0].size_bytes if candidates else 0,
             )
             games.append(game)
             self._game_found(game)
