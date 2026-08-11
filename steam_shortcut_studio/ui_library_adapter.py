@@ -74,6 +74,59 @@ def game_from_library_row(row: LibraryRow, *, selected: bool = False) -> Detecte
     return game
 
 
+def writable_game_skip_reason(row: LibraryRow) -> str:
+    """Return why `row` cannot produce a Steam shortcut, or "" if it can.
+
+    Native Steam rows are already known to Steam and need no shortcut entry.
+    Everything else needs a launch target that actually resolves to a file
+    right now (checked live, not cached) before it is safe to write.
+    """
+    if row.source.casefold() == "steam":
+        return "native Steam game (already known to Steam)"
+    if not row.launch_target.strip():
+        return "no launch target set"
+    if not Path(row.launch_target).is_file():
+        return "launch target missing on disk"
+    return ""
+
+
+def writable_game_from_library_row(row: LibraryRow) -> DetectedGame | None:
+    """Build a real, write-eligible `DetectedGame` for the Apply Changes flow.
+
+    Unlike `game_from_library_row` (always `selected_exe=None`; the legacy
+    UI's read-only Persistent Library display bridge), this is the write-path
+    counterpart used to actually stage a Steam shortcut. Returns None for
+    anything `writable_game_skip_reason` flags as ineligible.
+    """
+    if writable_game_skip_reason(row):
+        return None
+    exe_path = Path(row.launch_target)
+    metadata = GameMetadata(
+        clean_title=row.title,
+        title_locked=True,
+        extra={
+            LIBRARY_ITEM_ID_META: row.item_id,
+            LIBRARY_SOURCE_META: row.source,
+            LIBRARY_STATUS_META: row.status,
+            LIBRARY_LAUNCH_TARGET_META: row.launch_target,
+            LIBRARY_PLATFORM_META: row.platform,
+            LIBRARY_SIZE_META: str(row.size_bytes),
+        },
+    )
+    return DetectedGame(
+        title=row.title,
+        root_path=Path(row.install_path) if row.install_path else exe_path.parent,
+        source_title=row.title,
+        selected=True,
+        launch_options=row.launch_arguments,
+        metadata=metadata,
+        selected_exe=exe_path,
+        source_type="library",
+        source_note=f"Persistent library: {row.source} / {row.status}",
+        steam_appid=None,
+    )
+
+
 def games_from_library_snapshot(snapshot: LibrarySnapshot) -> list[DetectedGame]:
     selected_ids = snapshot.selected_ids
     return [

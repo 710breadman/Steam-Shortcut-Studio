@@ -473,15 +473,27 @@ Latest local integration evidence, 2026-07-12:
 
 Connect the production modern library table and selected-item actions incrementally on top of the controller-backed source scan bridge.
 
+**Update:** `prototypes/modern_shell.py`'s Apply Changes action now performs
+real, verified `shortcuts.vdf` writes for `LibraryRow`-backed rows. This was a
+deliberate, explicitly-approved departure from item 2/4 below (previously
+"preserve stored-row read-only behavior" / "add no new Steam writes"): it
+routes through the same unmodified `shortcut_transactions.upsert_games_transactional`
+transaction service the legacy UI already uses, via a new write-eligible
+adapter (`ui_library_adapter.writable_game_from_library_row`) that only
+resolves `selected_exe` for non-Steam rows with a launch target that exists
+on disk right now — native Steam rows, empty launch targets, and missing
+executables are always skipped and reported, never silently written. Artwork
+writes remain unwired.
+
 Next controller-backed UI work:
 
 1. Build the fuller artwork review workspace around persisted candidates and slot previews.
-2. Preserve stored-row read-only behavior in all Steam write paths.
+2. Wire Auto-Art / per-slot Auto Match to `BulkArtworkCoordinator` + a real provider search, then extend Apply Changes to cover artwork writes the same way shortcut writes are now covered.
 3. Keep the legacy scan/write workflows available during migration.
-4. Add no new Steam writes.
+4. Do not add a second, competing implementation of the transaction/verification logic — extend `shortcut_transactions.py` / `artwork_transactions.py` if new write scenarios are needed, don't bypass them.
 
 ## Next Codex Prompt
 
 ```text
-Read CODEX_START_HERE.md and all linked docs. The shortcut and artwork write paths are already transactional, verified, and live. Do not rebuild them. Continue production modern-library UI integration in small slices: add the modern shell structure, keep `LibraryController` and `SelectionState` as the source of truth, preserve legacy scan/write behavior during migration, and do not add new Steam write paths. Use stable IDs. Add tests without constructing a Tk window. Run the complete existing suite and update `SPRINT_STATUS` with exact evidence. Small reviewable commits.
+Read CODEX_START_HERE.md and all linked docs. The shortcut and artwork write paths are already transactional, verified, and live; the modern shell's Apply Changes button now writes real shortcuts through them for LibraryRow-backed rows (see ui_library_adapter.writable_game_from_library_row and modern_shell.py's _apply_changes/_apply_shortcuts_job). Do not rebuild any of this. Continue production modern-library UI integration in small slices: wire Auto-Art to BulkArtworkCoordinator + a real provider search, then extend Apply Changes to cover artwork writes through the existing artwork_transactions.py path. Keep `LibraryController` and `SelectionState` as the source of truth, preserve legacy scan/write behavior during migration, and always route writes through the existing transaction services rather than a new path. Use stable IDs. Add tests without constructing a Tk window. Run the complete existing suite and update `SPRINT_STATUS` with exact evidence. Small reviewable commits.
 ```

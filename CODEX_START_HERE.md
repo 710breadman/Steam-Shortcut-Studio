@@ -58,21 +58,29 @@ The immediate milestone is to connect the existing `LibraryController` to the pr
 - Poll `BackgroundJobQueue` events from the Tk thread.
 - Expose Epic, Steam, and folder scan actions through the controller.
 - Keep all current legacy capabilities available during migration.
-- Add no new Steam writes.
+
+**Update:** shortcut writes are now wired. `prototypes/modern_shell.py`'s Apply
+Changes button calls `shortcut_transactions.upsert_games_transactional`
+(backup → write → verify → rollback, unchanged) for `LibraryRow`s converted via
+the new `ui_library_adapter.writable_game_from_library_row` (native Steam rows,
+empty launch targets, and missing-on-disk executables are always skipped, never
+silently written). Artwork writes remain unwired — Auto-Art still needs
+`BulkArtworkCoordinator` connected to a real provider search before any artwork
+Apply path can be enabled honestly.
 
 After that boundary is proven, migrate the modern table and then connect real artwork providers to `BulkArtworkCoordinator`.
 
 ## Required Safety Rules
 
 - Do not modify game installation files.
-- Do not add direct Steam writes.
+- Do not add direct Steam writes — always go through `shortcut_transactions.py` / `artwork_transactions.py`, never write `shortcuts.vdf` or artwork files by hand.
 - Do not bypass `shortcut_transactions.py` or `artwork_transactions.py`.
 - Do not reintroduce malformed-VDF replacement behavior.
 - Do not swallow artwork transaction failures and continue with a partial game set.
 - Do not let worker threads touch UI widgets.
 - Do not let partial or unavailable source scans mark stored games missing.
 - Do not discard manual overrides, artwork locks, or rejected matches during rescans.
-- Do not enable prototype Apply actions merely because the interface exists.
+- Do not enable a prototype Apply/Auto-Art action merely because the interface exists — only enable it once it is wired to the real, verified transaction service (shortcut writes: done; artwork writes: still pending `BulkArtworkCoordinator`).
 - Keep risky native Steam fields read-only until their ownership and rollback behavior are proven.
 
 ## Existing Building Blocks

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
 import webbrowser
 from pathlib import Path
-from tkinter import filedialog, messagebox, StringVar
+from tkinter import filedialog, messagebox, simpledialog, StringVar
+from typing import Callable
+from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -13,28 +16,50 @@ if str(ROOT) not in sys.path:
 
 import customtkinter as ctk  # noqa: E402
 
+from steam_shortcut_studio.artwork import download_asset  # noqa: E402
+from steam_shortcut_studio.artwork_search_service import ArtworkProviderSearchService  # noqa: E402
 from steam_shortcut_studio.artwork_sources import (  # noqa: E402
     ARTWORK_SOURCE_LABELS,
 )
-from steam_shortcut_studio.jobs import JobState  # noqa: E402
+from steam_shortcut_studio.image_validation import validate_artwork_file  # noqa: E402
+from steam_shortcut_studio.job_queue import JobEvent, JobExecutionResult  # noqa: E402
+from steam_shortcut_studio.jobs import JobKind, JobRecord, JobState, TERMINAL_JOB_STATES  # noqa: E402
 from steam_shortcut_studio.library_controller import (  # noqa: E402
     LibraryController,
     LibraryRow,
 )
 from steam_shortcut_studio.library_store import (  # noqa: E402
+    ArtworkLock,
     LibraryStore,
     default_library_database,
 )
+from steam_shortcut_studio.models import ArtworkAsset, DetectedGame  # noqa: E402
 from steam_shortcut_studio.modern_library_view import format_size  # noqa: E402
 from steam_shortcut_studio.settings_store import AppSettings, SettingsStore  # noqa: E402
+from steam_shortcut_studio.shortcut_transactions import upsert_games_transactional  # noqa: E402
 from steam_shortcut_studio.sources.epic import (  # noqa: E402
     EpicManifestAdapter,
     default_epic_manifest_dir,
 )
 from steam_shortcut_studio.sources.local import FolderScannerAdapter  # noqa: E402
 from steam_shortcut_studio.sources.steam import SteamLibraryAdapter  # noqa: E402
-from steam_shortcut_studio.steam_detection import detect_steam_install  # noqa: E402
+from steam_shortcut_studio.steam_detection import (  # noqa: E402
+    detect_steam_install,
+    find_steam_profiles,
+    is_steam_running,
+    is_valid_steam_path,
+    reopen_steam,
+    shutdown_steam_for_write,
+)
+from steam_shortcut_studio.steamgrid import SteamGridDbClient  # noqa: E402
 from steam_shortcut_studio.transaction_history import list_transaction_history  # noqa: E402
+from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
+    game_from_library_row,
+    writable_game_from_library_row,
+    writable_game_skip_reason,
+)
+
+LOGGER = logging.getLogger(__name__)
 
 
 PALETTES = {
@@ -73,12 +98,19 @@ class ModernShell(ctk.CTk):
     """Production-data modern shell: Library workspace + sidebar screens.
 
     Backed by the real ``LibraryController`` / ``LibraryStore`` (no mock
-    games). Long-running work (source scans) runs on ``BackgroundJobQueue``
-    and is polled from the Tk thread via ``after`` per CODEX_START_HERE.
-    Artwork automation (auto-match) and Apply Changes remain intentionally
-    gated: those require the not-yet-wired BulkArtworkCoordinator / artwork
-    and shortcut transaction integration, and this UI must not claim success
-    it cannot back up (see docs/UI_UX_TARGET.md: "No fake safety").
+    games). Long-running work (source scans, Apply Changes, artwork search)
+    runs on ``BackgroundJobQueue`` and is polled from the Tk thread via
+    ``after`` per CODEX_START_HERE. Apply Changes writes real non-Steam
+    shortcuts through the same verified backup/write/verify/rollback
+    transaction service (``shortcut_transactions.upsert_games_transactional``)
+    the legacy UI uses. Per-slot Auto Match / Replace perform real artwork
+    search/download/validate and write the result straight to
+    ``LibraryStore.set_artwork_lock`` (same safety model as Clear Slot:
+    local cache + local SQLite only, nothing touches the real Steam grid
+    folder). The bulk top-bar Auto-Art button remains intentionally gated:
+    matching many games unattended needs a review-queue UI (like legacy's)
+    that doesn't exist yet, and this UI must not claim success it cannot
+    back up (see docs/UI_UX_TARGET.md: "No fake safety").
     """
 
     def __init__(
@@ -111,6 +143,7 @@ class ModernShell(ctk.CTk):
         self.row_frames: dict[str, ctk.CTkFrame] = {}
         self.row_checks: dict[str, ctk.CTkCheckBox] = {}
         self._ordered_ids: list[str] = []
+        self._pending_action_jobs: dict[str, Callable[[JobEvent], None]] = {}
 
         self.controller.refresh(include_missing=self.include_missing)
         self._auto_select_first()
@@ -250,7 +283,7 @@ class ModernShell(ctk.CTk):
 
         ctk.CTkLabel(topbar, text="SAFE MODE", text_color=COLORS["warning"], font=self._font(10, "bold")).grid(row=0, column=4, padx=12)
         self.apply_button = ctk.CTkButton(
-            topbar, text="\u2b06  Apply Changes\n    Preview required first", width=210, height=52, corner_radius=9,
+            topbar, text="\u2b06  Apply Changes\n    Safely", width=210, height=52, corner_radius=9,
             fg_color=self.palette["accent"], hover_color=self.palette["hover"], text_color="#fff",
             font=self._font(12, "bold"), command=self._apply_changes,
         )
@@ -267,34 +300,178 @@ class ModernShell(ctk.CTk):
 
     def _auto_art_info(self) -> None:
         messagebox.showinfo(
-            "Auto-Art not yet wired",
-            "Automated artwork matching needs BulkArtworkCoordinator wired to a real "
-            "provider search (SteamGridDB / Official Steam / RAWG / Wikimedia).\n\n"
-            "Use the Artwork tab in a game's inspector to see current lock/rejection "
-            "state once that integration lands.",
+            "Bulk Auto-Art not yet wired",
+            "Searching and matching artwork across many games at once needs a review "
+            "queue (like the legacy app's) before it can safely auto-lock results "
+            "unattended — that isn't built yet.\n\n"
+            "Per-slot matching already works today: open a game's Artwork tab and use "
+            "Auto Match or Replace on the slot you want.",
         )
+
+    def _apply_scope_rows(self) -> tuple[LibraryRow, ...]:
+        rows = self.controller.selected_rows() or self.controller.snapshot().rows
+        return tuple(rows)
+
+    def _partition_writable_rows(
+        self, rows: tuple[LibraryRow, ...]
+    ) -> tuple[list[tuple[LibraryRow, DetectedGame]], list[tuple[LibraryRow, str]]]:
+        eligible = []
+        skipped = []
+        for row in rows:
+            game = writable_game_from_library_row(row)
+            if game is None:
+                skipped.append((row, writable_game_skip_reason(row)))
+            else:
+                eligible.append((row, game))
+        return eligible, skipped
 
     def _preview_changes(self) -> None:
-        rows = self.controller.selected_rows() or self.controller.snapshot().rows
-        summary = self.controller.artwork_decision_summary(tuple(r.item_id for r in rows))
-        messagebox.showinfo(
-            "Preview changes",
-            f"{summary.item_count} game(s) in scope.\n"
-            f"{summary.locked_slots} artwork slot(s) currently locked.\n"
-            f"{summary.rejected_matches} previously rejected match(es).\n\n"
-            "No Steam files have been modified. This is a read-only preview.",
+        rows = self._apply_scope_rows()
+        eligible, skipped = self._partition_writable_rows(rows)
+        lines = [f"{len(eligible)} shortcut(s) will be added or updated in shortcuts.vdf."]
+        if skipped:
+            lines.append(f"\n{len(skipped)} game(s) in scope will be skipped:")
+            for row, reason in skipped[:20]:
+                lines.append(f"  \u2022 {row.title}: {reason}")
+            if len(skipped) > 20:
+                lines.append(f"  ...and {len(skipped) - 20} more.")
+        lines.append(
+            "\nArtwork is not written by this action (Auto-Art is not yet wired).\n"
+            "No Steam files have been modified. This is a read-only preview."
         )
+        messagebox.showinfo("Preview changes", "\n".join(lines))
 
     def _apply_changes(self) -> None:
-        messagebox.showwarning(
-            "Apply Changes is gated",
-            "Writing shortcuts/artwork is intentionally disabled in this build until "
-            "production controller \u2192 transaction-service integration is complete "
-            "(see CODEX_START_HERE.md: 'Add no new Steam writes').\n\n"
-            "When enabled, this action will stage a backup, write through "
-            "shortcut_transactions.py / artwork_transactions.py, verify by read-back, "
-            "and auto-roll back on any verification failure.",
+        rows = self._apply_scope_rows()
+        eligible, skipped = self._partition_writable_rows(rows)
+        if not eligible:
+            messagebox.showinfo(
+                "Nothing to apply",
+                "No game(s) in scope are eligible for a Steam shortcut write. Native "
+                "Steam rows, empty launch targets, and missing executables are always "
+                "skipped \u2014 use Preview to see why.",
+            )
+            return
+
+        steam_path_value = self.settings.steam_path
+        if not steam_path_value:
+            messagebox.showerror(
+                "Apply Changes",
+                "No Steam folder is configured. Use Import / Scan to detect or choose "
+                "your Steam install first.",
+            )
+            return
+        steam_path = Path(steam_path_value)
+
+        lines = [f"{len(eligible)} shortcut(s) will be added or updated in shortcuts.vdf."]
+        if skipped:
+            lines.append(f"{len(skipped)} game(s) will be skipped (see Preview for details).")
+        if is_steam_running():
+            lines.append(
+                "\nSteam is currently running and will be closed automatically, "
+                "then reopened once the write finishes."
+            )
+        lines.append(
+            "\nA backup is created and verified automatically; on any verification "
+            "failure the write is rolled back and Steam is left untouched."
         )
+        if not messagebox.askyesno("Apply Changes", "\n".join(lines)):
+            return
+
+        games = [game for _, game in eligible]
+        job_id = f"apply-shortcuts-{uuid4().hex[:12]}"
+        record = JobRecord(
+            job_id=job_id,
+            item_id="apply:shortcuts",
+            kind=JobKind.APPLY,
+            message=f"Queued write of {len(games)} shortcut(s)",
+        )
+        self._pending_action_jobs[job_id] = self._handle_apply_job_finished
+        self.apply_button.configure(state="disabled")
+        self.controller.job_queue.submit(
+            record,
+            lambda job, token, report_progress: self._apply_shortcuts_job(
+                steam_path, games, report_progress
+            ),
+        )
+        self._set_status(f"Applying {len(games)} shortcut(s) to Steam\u2026")
+
+    def _apply_shortcuts_job(self, steam_path: Path, games: list, report_progress) -> JobExecutionResult:
+        steam_closed = False
+        try:
+            report_progress(0.05, "Checking Steam status\u2026")
+            if is_valid_steam_path(steam_path):
+                steam_closed = shutdown_steam_for_write(steam_path)
+            elif is_steam_running():
+                raise RuntimeError(
+                    "Steam is running, but the configured Steam folder is not valid. "
+                    "Choose a valid Steam folder in Import / Scan before writing shortcuts."
+                )
+            report_progress(0.25, "Finding Steam profile\u2026")
+            profiles = find_steam_profiles(steam_path)
+            if not profiles:
+                raise RuntimeError(f"No Steam user profile found under {steam_path}.")
+            profile = profiles[0]
+            report_progress(0.4, f"Writing {len(games)} shortcut(s)\u2026")
+            result = upsert_games_transactional(
+                profile,
+                games,
+                update_existing=self.settings.update_existing_shortcuts,
+                default_tags=list(self.settings.default_tags),
+            )
+            if steam_closed:
+                report_progress(0.9, "Reopening Steam\u2026")
+                reopen_steam(steam_path)
+            return JobExecutionResult(
+                state=JobState.SUCCEEDED,
+                result={
+                    "added": result.added,
+                    "updated": result.updated,
+                    "backup": str(result.backup) if result.backup else "",
+                    "profile": profile.display_name,
+                },
+                message=f"Wrote {result.added} new and {result.updated} updated shortcut(s).",
+            )
+        except Exception:
+            if steam_closed:
+                try:
+                    reopen_steam(steam_path)
+                except Exception:
+                    LOGGER.warning(
+                        "Steam was closed for writing but could not be reopened.", exc_info=True
+                    )
+            raise
+
+    def _handle_apply_job_finished(self, event: JobEvent) -> None:
+        self.apply_button.configure(state="normal")
+        if event.state is JobState.SUCCEEDED:
+            added = event.result.get("added", 0)
+            updated = event.result.get("updated", 0)
+            backup_path = event.result.get("backup")
+            if not added and not updated:
+                backup = "No changes were needed — nothing to write."
+            elif backup_path:
+                backup = backup_path
+            else:
+                backup = "No prior shortcuts.vdf existed, so no backup was needed."
+            self._set_status(event.message or "Shortcuts applied.")
+            messagebox.showinfo(
+                "Apply Changes",
+                f"Added: {added}\n"
+                f"Updated: {updated}\n"
+                f"Steam profile: {event.result.get('profile', '')}\n"
+                f"Backup: {backup}\n\n"
+                "See the Backups screen for the full transaction record.",
+            )
+        else:
+            self._set_status(f"Apply Changes failed: {event.error or event.message}")
+            messagebox.showerror(
+                "Apply Changes failed",
+                f"{event.error or event.message}\n\n"
+                "Nothing is left partially written: any staged write is automatically "
+                "rolled back on verification failure, and the attempt is recorded on "
+                "the Backups screen.",
+            )
 
     # ---------- footer ----------
 
@@ -633,12 +810,225 @@ class ModernShell(ctk.CTk):
             self.controller.refresh(include_missing=self.include_missing)
             self._set_status(f"Cleared {slot_name} artwork lock.")
             self._render_content()
-        else:
+        elif label == "Auto Match":
+            self._start_auto_match(item_id, slot_key, slot_name)
+        elif label == "Replace":
+            self._start_replace(item_id, slot_key, slot_name)
+
+    # ---------- Auto-Art (per-slot search, download, lock) ----------
+
+    def _artwork_sources_enabled(self) -> bool:
+        return any(self.settings.artwork_sources.values())
+
+    def _search_artwork_candidates(self, row: LibraryRow, slot_key: str) -> list[ArtworkAsset]:
+        game = game_from_library_row(row)
+        client = SteamGridDbClient(self.settings.steamgriddb_api_key, Path(self.settings.cache_dir), LOGGER)
+        service = ArtworkProviderSearchService(LOGGER)
+        assets_by_kind = service.collect_assets(
+            game,
+            row.title,
+            client,
+            enabled_sources=self.settings.artwork_sources,
+            rawg_api_key=self.settings.rawg_api_key,
+        )
+        return assets_by_kind.get(slot_key, [])
+
+    @staticmethod
+    def _asset_source_label(asset: ArtworkAsset) -> str:
+        source = asset.raw.get("source") if asset.raw else ""
+        if source:
+            return str(source)
+        return "SteamGridDB" if "steamgriddb" in asset.url else ""
+
+    def _start_auto_match(self, item_id: str, slot_key: str, slot_name: str) -> None:
+        if not self._artwork_sources_enabled():
             messagebox.showinfo(
-                f"{slot_name}: {label}",
-                "Real artwork search/replace requires BulkArtworkCoordinator + a provider "
-                "(SteamGridDB/Official Steam/RAWG/Wikimedia) wired to this button.",
+                "Auto Match",
+                "No artwork source is enabled. Turn on at least one source (SteamGridDB, "
+                "Official Steam, Wikimedia, or RAWG) on the Settings screen first.",
             )
+            return
+        row = self.controller.row_map().get(item_id)
+        if row is None:
+            return
+        job_id = f"artwork-match-{uuid4().hex[:12]}"
+        record = JobRecord(
+            job_id=job_id,
+            item_id=item_id,
+            kind=JobKind.ARTWORK,
+            message=f"Searching artwork sources for {slot_name}…",
+        )
+        self._pending_action_jobs[job_id] = self._handle_artwork_match_finished
+        self.controller.job_queue.submit(
+            record,
+            lambda job, token, report_progress: self._auto_match_slot_job(row, slot_key, slot_name, report_progress),
+        )
+        self._set_status(f"Searching artwork sources for {slot_name}…")
+
+    def _auto_match_slot_job(
+        self, row: LibraryRow, slot_key: str, slot_name: str, report_progress
+    ) -> JobExecutionResult:
+        report_progress(0.1, f"Searching artwork sources for {slot_name}…")
+        try:
+            candidates = self._search_artwork_candidates(row, slot_key)
+        except Exception as exc:
+            raise RuntimeError(f"Artwork search failed: {exc}") from exc
+        if not candidates:
+            raise RuntimeError(f"No artwork candidates found for {slot_name}.")
+
+        cache_dir = Path(self.settings.cache_dir)
+        tried = candidates[:8]
+        for index, candidate in enumerate(tried):
+            report_progress(0.3 + 0.5 * index / max(len(tried), 1), f"Trying candidate {index + 1} of {len(tried)}…")
+            try:
+                path = download_asset(candidate, cache_dir)
+                validate_artwork_file(path)
+            except Exception:
+                continue
+            source = self._asset_source_label(candidate)
+            return JobExecutionResult(
+                state=JobState.SUCCEEDED,
+                result={
+                    "item_id": row.item_id,
+                    "slot": slot_key,
+                    "slot_name": slot_name,
+                    "candidate_id": candidate.asset_id,
+                    "source": source,
+                    "local_path": str(path),
+                },
+                message=f"Matched {slot_name} via {source or 'artwork search'}.",
+            )
+        raise RuntimeError(
+            f"Found {len(candidates)} candidate(s) for {slot_name}, but none downloaded/validated successfully."
+        )
+
+    def _lock_artwork_result(self, result: dict) -> None:
+        self.store.set_artwork_lock(
+            ArtworkLock(
+                item_id=result["item_id"],
+                slot=result["slot"],
+                candidate_id=result["candidate_id"],
+                source=result["source"],
+                local_path=result["local_path"],
+            )
+        )
+        self.controller.refresh(include_missing=self.include_missing)
+        self._render_content()
+
+    def _handle_artwork_match_finished(self, event: JobEvent) -> None:
+        if event.state is JobState.SUCCEEDED:
+            self._lock_artwork_result(event.result)
+            self._set_status(event.message or "Artwork matched.")
+        else:
+            self._set_status(f"Auto Match failed: {event.error or event.message}")
+            messagebox.showerror("Auto Match failed", event.error or event.message)
+
+    def _start_replace(self, item_id: str, slot_key: str, slot_name: str) -> None:
+        if not self._artwork_sources_enabled():
+            messagebox.showinfo(
+                "Replace",
+                "No artwork source is enabled. Turn on at least one source (SteamGridDB, "
+                "Official Steam, Wikimedia, or RAWG) on the Settings screen first.",
+            )
+            return
+        row = self.controller.row_map().get(item_id)
+        if row is None:
+            return
+        job_id = f"artwork-replace-{uuid4().hex[:12]}"
+        record = JobRecord(
+            job_id=job_id,
+            item_id=item_id,
+            kind=JobKind.ARTWORK,
+            message=f"Searching artwork sources for {slot_name}…",
+        )
+        self._pending_action_jobs[job_id] = self._handle_replace_job_finished
+        self.controller.job_queue.submit(
+            record,
+            lambda job, token, report_progress: self._replace_slot_job(row, slot_key, slot_name, report_progress),
+        )
+        self._set_status(f"Searching artwork sources for {slot_name}…")
+
+    def _replace_slot_job(
+        self, row: LibraryRow, slot_key: str, slot_name: str, report_progress
+    ) -> JobExecutionResult:
+        report_progress(0.1, f"Searching artwork sources for {slot_name}…")
+        try:
+            candidates = self._search_artwork_candidates(row, slot_key)
+        except Exception as exc:
+            raise RuntimeError(f"Artwork search failed: {exc}") from exc
+        if not candidates:
+            raise RuntimeError(f"No artwork candidates found for {slot_name}.")
+
+        cache_dir = Path(self.settings.cache_dir)
+        downloaded: list[dict] = []
+        tried = candidates[:10]
+        for index, candidate in enumerate(tried):
+            if len(downloaded) >= 3:
+                break
+            report_progress(0.2 + 0.6 * index / max(len(tried), 1), f"Checking candidate {index + 1} of {len(tried)}…")
+            try:
+                path = download_asset(candidate, cache_dir)
+                validate_artwork_file(path)
+            except Exception:
+                continue
+            downloaded.append(
+                {
+                    "candidate_id": candidate.asset_id,
+                    "source": self._asset_source_label(candidate),
+                    "local_path": str(path),
+                    "width": candidate.width,
+                    "height": candidate.height,
+                }
+            )
+        if not downloaded:
+            raise RuntimeError(
+                f"Found {len(candidates)} candidate(s) for {slot_name}, but none downloaded/validated successfully."
+            )
+        return JobExecutionResult(
+            state=JobState.SUCCEEDED,
+            result={
+                "item_id": row.item_id,
+                "slot": slot_key,
+                "slot_name": slot_name,
+                "candidates": downloaded,
+            },
+            message=f"Found {len(downloaded)} usable candidate(s) for {slot_name}.",
+        )
+
+    def _handle_replace_job_finished(self, event: JobEvent) -> None:
+        if event.state is not JobState.SUCCEEDED:
+            self._set_status(f"Replace failed: {event.error or event.message}")
+            messagebox.showerror("Replace failed", event.error or event.message)
+            return
+        slot_name = event.result["slot_name"]
+        candidates = event.result["candidates"]
+        lines = [f"Choose a {slot_name} image:"]
+        for index, candidate in enumerate(candidates, start=1):
+            lines.append(
+                f"  {index}. {candidate['width']}x{candidate['height']} "
+                f"— {candidate['source'] or 'unknown source'}"
+            )
+        messagebox.showinfo("Replace", "\n".join(lines))
+        choice = simpledialog.askinteger(
+            "Replace",
+            f"Enter a number from 1 to {len(candidates)} (Cancel to keep the current artwork):",
+            minvalue=1,
+            maxvalue=len(candidates),
+        )
+        if choice is None:
+            self._set_status(f"Replace cancelled for {slot_name}.")
+            return
+        chosen = candidates[choice - 1]
+        self._lock_artwork_result(
+            {
+                "item_id": event.result["item_id"],
+                "slot": event.result["slot"],
+                "candidate_id": chosen["candidate_id"],
+                "source": chosen["source"],
+                "local_path": chosen["local_path"],
+            }
+        )
+        self._set_status(f"Replaced {slot_name} via {chosen['source'] or 'artwork search'}.")
 
     # ---------- other sidebar screens (real data, honest gaps) ----------
 
@@ -741,10 +1131,16 @@ class ModernShell(ctk.CTk):
             if event.snapshot is not None:
                 self._render_library_card()
                 self._render_content()
-            if event.event.state in (JobState.SUCCEEDED, JobState.NEEDS_REVIEW):
-                self._set_status(event.event.message or "Scan finished.")
-            elif event.event.state is JobState.FAILED:
-                self._set_status(f"Scan failed: {event.event.error or event.event.message}")
+            job_event = event.event
+            if job_event.job_id in self._pending_action_jobs:
+                if job_event.state in TERMINAL_JOB_STATES:
+                    handler = self._pending_action_jobs.pop(job_event.job_id)
+                    handler(job_event)
+                continue
+            if job_event.state in (JobState.SUCCEEDED, JobState.NEEDS_REVIEW):
+                self._set_status(job_event.message or "Scan finished.")
+            elif job_event.state is JobState.FAILED:
+                self._set_status(f"Scan failed: {job_event.error or job_event.message}")
         self.after(200, self._poll_jobs)
 
     def _build_backups_screen(self) -> None:

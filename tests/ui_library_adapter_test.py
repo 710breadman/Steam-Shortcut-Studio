@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -31,6 +32,8 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     source_scan_adapters,
     source_scan_event_summary,
     source_scan_progress_summary,
+    writable_game_from_library_row,
+    writable_game_skip_reason,
 )
 
 
@@ -113,6 +116,52 @@ def test_native_steam_library_row_does_not_become_writable_native_game() -> None
     assert game.source_type == "library"
     assert not game.is_native_steam_game
     assert not game.is_managed_non_steam
+
+
+def test_writable_game_from_library_row_accepts_an_existing_launch_target() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        exe_path = Path(tmp) / "Example.exe"
+        exe_path.write_bytes(b"MZ")
+        row = _row("folder:one", "Example Game", launch_target=str(exe_path))
+
+        assert writable_game_skip_reason(row) == ""
+        game = writable_game_from_library_row(row)
+
+        assert game is not None
+        assert game.selected is True
+        assert game.selected_exe == exe_path
+        assert game.steam_appid is None
+        assert game.is_native_steam_game is False
+        assert game.is_managed_non_steam is True
+
+
+def test_writable_game_from_library_row_rejects_native_steam_rows() -> None:
+    row = _row(
+        "steam:424242",
+        "Native Example",
+        source="steam",
+        external_id="424242",
+        launch_target="steam://rungameid/424242",
+    )
+
+    assert writable_game_skip_reason(row) == "native Steam game (already known to Steam)"
+    assert writable_game_from_library_row(row) is None
+
+
+def test_writable_game_from_library_row_rejects_empty_launch_target() -> None:
+    row = _row("folder:two", "No Target", launch_target="")
+
+    assert writable_game_skip_reason(row) == "no launch target set"
+    assert writable_game_from_library_row(row) is None
+
+
+def test_writable_game_from_library_row_rejects_missing_launch_target() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        missing_path = Path(tmp) / "Ghost.exe"
+        row = _row("folder:three", "Missing Target", launch_target=str(missing_path))
+
+        assert writable_game_skip_reason(row) == "launch target missing on disk"
+        assert writable_game_from_library_row(row) is None
 
 
 def test_snapshot_selection_is_preserved() -> None:
@@ -254,6 +303,10 @@ def test_source_scan_progress_summary_formats_sources() -> None:
 if __name__ == "__main__":
     test_library_row_maps_to_read_only_legacy_game()
     test_native_steam_library_row_does_not_become_writable_native_game()
+    test_writable_game_from_library_row_accepts_an_existing_launch_target()
+    test_writable_game_from_library_row_rejects_native_steam_rows()
+    test_writable_game_from_library_row_rejects_empty_launch_target()
+    test_writable_game_from_library_row_rejects_missing_launch_target()
     test_snapshot_selection_is_preserved()
     test_library_display_update_contains_games_and_status()
     test_source_scan_adapters_cover_controller_backed_sources()
