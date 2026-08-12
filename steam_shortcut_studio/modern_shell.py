@@ -63,6 +63,7 @@ from .steam_detection import (
     reopen_steam,
     shutdown_steam_for_write,
 )
+from .shell_shortcuts import SHELL_SHORTCUTS, accelerator, shortcut_reference_text
 from .steam_playtime import format_last_played, load_last_played
 from .steamgrid import SteamGridDbClient
 from .transaction_history import (
@@ -191,8 +192,92 @@ class ModernShell(ctk.CTk):
         self._render_content()
 
         self._closing = False
+        self._search_entry: ctk.CTkEntry | None = None
+        self._bind_shortcuts()
         self._poll_after_id: str | None = self.after(200, self._poll_jobs)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    # ---------- keyboard ----------
+
+    def _bind_shortcuts(self) -> None:
+        handlers: dict[str, Callable[[], None]] = {
+            "focus_search": self._focus_search,
+            "select_all": self._select_all_visible,
+            "clear_selection": self._escape_pressed,
+            "toggle_active": self._toggle_active_row,
+            "move_up": lambda: self._move_active(-1),
+            "move_down": lambda: self._move_active(1),
+            "refresh": self._refresh_metadata,
+            "scan": self._open_import_scan,
+            "auto_art": self._start_bulk_auto_art,
+            "review_queue": lambda: self._set_nav("Artwork"),
+            "preview": self._preview_changes,
+            "apply": self._apply_changes,
+        }
+        for shortcut in SHELL_SHORTCUTS:
+            handler = handlers.get(shortcut.action)
+            if handler is None:
+                continue
+            for sequence in shortcut.sequences:
+                self.bind_all(
+                    sequence,
+                    lambda event, action=shortcut.action, run=handler: self._run_shortcut(event, action, run),
+                )
+
+    @staticmethod
+    def _is_text_entry(widget: object) -> bool:
+        return isinstance(widget, (ctk.CTkEntry, ctk.CTkTextbox)) or widget.__class__.__name__ in {
+            "Entry", "Text", "TEntry", "CTkEntry", "CTkTextbox",
+        }
+
+    def _run_shortcut(self, event, action: str, run: Callable[[], None]) -> str | None:
+        """Dispatch a shortcut unless the user is typing into a field.
+
+        Space and the arrow keys are ordinary characters inside a search box,
+        so a global binding must stand down there; Escape stays live so it can
+        back out of the search.
+        """
+        if self._is_text_entry(getattr(event, "widget", None)) and action != "clear_selection":
+            return None
+        run()
+        return "break"
+
+    def _focus_search(self) -> None:
+        if self.nav != "Library":
+            self._set_nav("Library")
+        if self._search_entry is not None:
+            self._search_entry.focus_set()
+
+    def _select_all_visible(self) -> None:
+        if self.nav != "Library":
+            return
+        self.controller.set_items_selected(tuple(self._ordered_ids), True)
+        self._render_content()
+
+    def _escape_pressed(self) -> None:
+        if self.controller.snapshot().selected_ids:
+            self._clear_selection()
+            return
+        if self.search_query or self.filter_value != "All Games":
+            self._clear_view_filters()
+            return
+        self.focus_set()
+
+    def _toggle_active_row(self) -> None:
+        active = self.controller.snapshot().active_item_id
+        if active is not None:
+            self._toggle_selected(active)
+
+    def _move_active(self, step: int) -> None:
+        if self.nav != "Library" or not self._ordered_ids:
+            return
+        active = self.controller.snapshot().active_item_id
+        if active in self._ordered_ids:
+            index = self._ordered_ids.index(active) + step
+        else:
+            index = 0 if step > 0 else len(self._ordered_ids) - 1
+        index = max(0, min(len(self._ordered_ids) - 1, index))
+        self._activate(self._ordered_ids[index])
 
     def _on_close(self) -> None:
         """Stop polling and release worker threads before the window goes away.
@@ -321,10 +406,10 @@ class ModernShell(ctk.CTk):
         topbar.grid(row=0, column=1, padx=(6, 14), pady=(12, 8), sticky="ew")
 
         actions = [
-            ("\u2315", "Scan", "Folders & libraries", self._open_import_scan),
-            ("\u21bb", "Refresh Metadata", "Reload stored library", self._refresh_metadata),
-            ("\u2726", "Auto-Art", "Find & match artwork", self._start_bulk_auto_art),
-            ("\u25eb", "Preview", "Preview changes", self._preview_changes),
+            ("\u2315", "Scan", f"Folders & libraries  ({accelerator('scan')})", self._open_import_scan),
+            ("\u21bb", "Refresh Metadata", f"Reload stored library  ({accelerator('refresh')})", self._refresh_metadata),
+            ("\u2726", "Auto-Art", f"Find & match artwork  ({accelerator('auto_art')})", self._start_bulk_auto_art),
+            ("\u25eb", "Preview", f"Preview changes  ({accelerator('preview')})", self._preview_changes),
         ]
         for column, (icon, title, subtitle, command) in enumerate(actions):
             button = ctk.CTkButton(
@@ -336,7 +421,7 @@ class ModernShell(ctk.CTk):
 
         ctk.CTkLabel(topbar, text="SAFE MODE", text_color=COLORS["warning"], font=self._font(10, "bold")).grid(row=0, column=4, padx=12)
         self.apply_button = ctk.CTkButton(
-            topbar, text="\u2b06  Apply Changes\n    Safely", width=210, height=52, corner_radius=9,
+            topbar, text=f"\u2b06  Apply Changes\n    Safely  ({accelerator('apply')})", width=210, height=52, corner_radius=9,
             fg_color=self.palette["accent"], hover_color=self.palette["hover"], text_color="#fff",
             font=self._font(12, "bold"), command=self._apply_changes,
         )
@@ -788,10 +873,14 @@ class ModernShell(ctk.CTk):
         controls = ctk.CTkFrame(library_panel, fg_color="transparent")
         controls.grid(row=0, column=0, padx=12, pady=(12, 8), sticky="ew")
         controls.grid_columnconfigure(0, weight=1)
-        search = ctk.CTkEntry(controls, placeholder_text="Search games...", height=36, corner_radius=8, border_color=COLORS["line"], fg_color=COLORS["window"])
+        search = ctk.CTkEntry(
+            controls, placeholder_text=f"Search games...  ({accelerator('focus_search')})",
+            height=36, corner_radius=8, border_color=COLORS["line"], fg_color=COLORS["window"],
+        )
         search.insert(0, self.search_query)
         search.grid(row=0, column=0, padx=(0, 8), sticky="ew")
         search.bind("<KeyRelease>", lambda e: self._on_search(search.get()))
+        self._search_entry = search
         ctk.CTkOptionMenu(
             controls, values=FILTER_OPTIONS, width=150, height=36, fg_color=COLORS["panel_soft"],
             button_color=COLORS["panel_soft"], button_hover_color=self.palette["selected"],
@@ -1948,6 +2037,12 @@ class ModernShell(ctk.CTk):
                 lambda: webbrowser.open(readme.as_uri()),
             )
             row += 1
+        self._list_row(
+            body, row, "\u2328", "Keyboard shortcuts",
+            "Every primary action has one", "Show",
+            lambda: messagebox.showinfo("Keyboard shortcuts", shortcut_reference_text()),
+        )
+        row += 1
         self._list_row(body, row, "\u2699", "Settings file", str(self.settings_store.settings_path), None)
         self._list_row(body, row + 1, "\u25a4", "Library database", str(self.database_path), None)
         self._list_row(

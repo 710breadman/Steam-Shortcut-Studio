@@ -246,6 +246,7 @@ Shipping and polish (live):
 - [x] Empty-state guidance on the Library screen, distinguishing an empty library (offering the three scans) from a filter that hides everything (offering to clear it)
 - [x] Closing the window cancels the poll loop and releases `LibraryController`'s worker threads, which previously stayed alive after the window was gone
 - [x] The `LAST PLAYED` column shows Steam's own record and is sortable; it previously showed a hardcoded em dash for every row
+- [x] Keyboard navigation covers the primary workflow (`docs/UI_UX_TARGET.md` Definition of Done), with accelerators shown on the controls and a reference on the About screen
 
 Confidence scoring (live):
 
@@ -596,6 +597,21 @@ Real last-played data, 2026-08-12:
 - Nothing is invented for Epic or folder games: they have no equivalent record and keep an em dash. A blank cell is honest; a fabricated date is not.
 - Added `tests/steam_playtime_test.py` (9 cases: the documented VDF path, never-played and malformed entries, Steam casing changes, unreadable/foreign files, multi-user merge, missing Steam path, recency wording, and a future timestamp not rendering as negative days) and wired it into CI.
 - Verified against the real Steam install on the development machine: 166 AppIDs with genuine records, formatting spanning "4 weeks ago" to "5 years ago".
+
+Keyboard navigation, 2026-08-12:
+
+- `docs/UI_UX_TARGET.md`'s Definition of Done requires that "keyboard navigation covers the primary workflow". The modern shell had no bindings at all. Added `steam_shortcut_studio/shell_shortcuts.py`: a Tk-free table that drives both the `bind_all` calls and the reference shown to the user, so a shortcut cannot be documented without being bound or bound without being discoverable.
+- Covers search focus, select all, clear, toggle, up/down inspection, refresh, scan, Auto-Art, review queue, preview, and apply.
+- A global binding stands down while the user is typing in a field — Space and the arrows are ordinary characters in a search box — while Escape stays live so it can back out of the search.
+- Accelerators now appear on the command-bar buttons and in the search placeholder, with a full reference on the About screen.
+- Added `tests/shell_shortcuts_test.py` (8 cases including a Definition-of-Done coverage assertion and a duplicate-binding guard) and wired it into CI.
+- Drove the real bindings against a real window: Down moved the inspected row, Space selected it, Ctrl+A selected all three, Esc cleared, Ctrl+R opened the review queue, F5 refreshed, and Space/Down typed into the search box correctly did nothing to the selection.
+
+### Remaining UX-target gaps
+
+- `Auto-Art` is a single button, not the split menu `UI_UX_TARGET.md` sketches. Worth noting *why*: `ArtworkSearchMode`'s three values currently produce identical plans, because `LibraryController.bulk_artwork_items()` never populates `existing_slots`, so `MISSING_ONLY` has nothing to exclude. Offering three modes that behave the same would be a fake distinction. Populating `existing_slots` from artwork already present in Steam's grid folder would make the menu meaningful.
+- Responsive behaviour (`Wide` / `Medium` / `Small Window` rules) is not implemented.
+- `Extensions` remains a placeholder, which matches its "Secondary or Later Navigation" status in the target.
 
 ## Known Risks
 

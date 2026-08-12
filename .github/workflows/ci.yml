@@ -123,6 +123,9 @@ jobs:
       - name: Run Steam last-played tests
         run: python tests/steam_playtime_test.py
 
+      - name: Run shell keyboard shortcut tests
+        run: python tests/shell_shortcuts_test.py
+
       - name: Run modern library view tests
         run: python tests/modern_library_view_test.py
 
