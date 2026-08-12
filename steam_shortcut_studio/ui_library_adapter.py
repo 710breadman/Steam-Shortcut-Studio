@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Iterable, Mapping
 
 from .library_controller import LibraryRow, LibrarySnapshot
-from .models import DetectedGame, GameMetadata
+from .library_store import ArtworkLock
+from .models import ArtworkAsset, DetectedGame, GameMetadata
 from .sources.base import SourceAdapter
 from .sources.epic import EpicManifestAdapter
 from .sources.local import FolderScannerAdapter
@@ -125,6 +126,84 @@ def writable_game_from_library_row(row: LibraryRow) -> DetectedGame | None:
         source_note=f"Persistent library: {row.source} / {row.status}",
         steam_appid=None,
     )
+
+
+def artwork_copy_skip_reason(row: LibraryRow, locks: list[ArtworkLock]) -> str:
+    """Return why `row` has nothing to copy into Steam's grid folder, or "" if it does.
+
+    A lock only counts if its cached file still exists on disk right now —
+    a cache that was cleared since the slot was matched must not silently
+    attempt a copy of a file that is no longer there.
+    """
+    valid_locks = [lock for lock in locks if lock.local_path and Path(lock.local_path).is_file()]
+    if not valid_locks:
+        return "no artwork locked"
+    if row.source.casefold() == "steam":
+        return "native Steam appid missing" if _steam_appid(row) is None else ""
+    return writable_game_skip_reason(row)
+
+
+def native_steam_artwork_game_from_library_row(row: LibraryRow) -> DetectedGame | None:
+    """Build a `DetectedGame` eligible for an artwork-only copy to Steam.
+
+    `writable_game_from_library_row` correctly excludes native Steam rows
+    (they never need a shortcut entry). This is the artwork-purpose
+    counterpart for that same row: sets `source_type="steam"` so
+    `DetectedGame.is_native_steam_game` is True, which is what
+    `copy_all_artwork_to_steam` checks for eligibility instead of
+    `is_managed_non_steam`. Returns None for non-Steam rows or an
+    unparseable AppID.
+    """
+    steam_appid = _steam_appid(row)
+    if row.source.casefold() != "steam" or steam_appid is None:
+        return None
+    metadata = GameMetadata(
+        clean_title=row.title,
+        title_locked=True,
+        extra={
+            LIBRARY_ITEM_ID_META: row.item_id,
+            LIBRARY_SOURCE_META: row.source,
+            LIBRARY_STATUS_META: row.status,
+            LIBRARY_LAUNCH_TARGET_META: row.launch_target,
+            LIBRARY_PLATFORM_META: row.platform,
+            LIBRARY_SIZE_META: str(row.size_bytes),
+        },
+    )
+    return DetectedGame(
+        title=row.title,
+        root_path=Path(row.install_path) if row.install_path else Path(),
+        source_title=row.title,
+        selected=True,
+        metadata=metadata,
+        selected_exe=None,
+        source_type="steam",
+        source_note=f"Persistent library: {row.source} / {row.status}",
+        steam_appid=steam_appid,
+    )
+
+
+def apply_locked_artwork(game: DetectedGame, locks: Iterable[ArtworkLock]) -> None:
+    """Populate `game.artwork` from `LibraryStore.list_artwork_locks(...)` rows.
+
+    Only locks whose cached file still exists on disk are applied. This is
+    the bridge `copy_all_artwork_to_steam` needs — nothing else in the repo
+    converts a persisted `ArtworkLock` back into the in-memory `ArtworkAsset`
+    shape the copy pipeline reads.
+    """
+    for lock in locks:
+        if not lock.local_path or not Path(lock.local_path).is_file():
+            continue
+        setattr(
+            game.artwork,
+            lock.slot,
+            ArtworkAsset(
+                kind=lock.slot,
+                asset_id=lock.candidate_id,
+                url="",
+                local_path=Path(lock.local_path),
+                raw={"source": lock.source} if lock.source else {},
+            ),
+        )
 
 
 def games_from_library_snapshot(snapshot: LibrarySnapshot) -> list[DetectedGame]:

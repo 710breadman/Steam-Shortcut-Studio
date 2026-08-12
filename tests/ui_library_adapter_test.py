@@ -7,17 +7,22 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from steam_shortcut_studio.library_controller import LibraryRow, LibrarySnapshot  # noqa: E402
+from steam_shortcut_studio.library_store import ArtworkLock  # noqa: E402
+from steam_shortcut_studio.steam_shortcuts import generate_appid, shortcut_from_game  # noqa: E402
 from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
     LIBRARY_ITEM_ID_META,
     LIBRARY_PLATFORM_META,
     LIBRARY_SIZE_META,
     apply_library_selection_to_games,
+    apply_locked_artwork,
+    artwork_copy_skip_reason,
     build_library_display_update,
     game_from_library_row,
     library_item_ids_between,
     library_item_ids_for_games,
     library_games_by_item_id,
     library_platform_for_game,
+    native_steam_artwork_game_from_library_row,
     persistent_library_notes_text,
     persistent_library_reason_text,
     library_size_for_game,
@@ -164,6 +169,111 @@ def test_writable_game_from_library_row_rejects_missing_launch_target() -> None:
         assert writable_game_from_library_row(row) is None
 
 
+def test_artwork_copy_skip_reason_requires_a_lock_with_an_existing_file() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        exe_path = Path(tmp) / "Game.exe"
+        exe_path.write_bytes(b"MZ")
+        row = _row("folder:art1", "Art Game", launch_target=str(exe_path))
+        assert artwork_copy_skip_reason(row, []) == "no artwork locked"
+
+        stale_lock = ArtworkLock(item_id=row.item_id, slot="grid", local_path=str(Path(tmp) / "gone.png"))
+        assert artwork_copy_skip_reason(row, [stale_lock]) == "no artwork locked"
+
+        real_file = Path(tmp) / "real.png"
+        real_file.write_bytes(b"fake-png-bytes")
+        good_lock = ArtworkLock(item_id=row.item_id, slot="grid", local_path=str(real_file))
+        assert artwork_copy_skip_reason(row, [good_lock]) == ""
+
+
+def test_artwork_copy_skip_reason_native_steam_appid() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        real_file = Path(tmp) / "real.png"
+        real_file.write_bytes(b"fake-png-bytes")
+        good_lock = ArtworkLock(item_id="steam:x", slot="grid", local_path=str(real_file))
+
+        valid_row = _row("steam:424242", "Native Example", source="steam", external_id="424242")
+        assert artwork_copy_skip_reason(valid_row, [good_lock]) == ""
+
+        bad_appid_row = _row("steam:bad", "Bad AppID", source="steam", external_id="not-a-number")
+        assert artwork_copy_skip_reason(bad_appid_row, [good_lock]) == "native Steam appid missing"
+
+
+def test_artwork_copy_skip_reason_reuses_shortcut_rules_for_non_steam_rows() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        real_file = Path(tmp) / "real.png"
+        real_file.write_bytes(b"fake-png-bytes")
+        good_lock = ArtworkLock(item_id="folder:x", slot="grid", local_path=str(real_file))
+
+        row = _row("folder:noexe", "No Exe", launch_target="")
+        assert artwork_copy_skip_reason(row, [good_lock]) == "no launch target set"
+
+
+def test_native_steam_artwork_game_from_library_row_is_artwork_eligible() -> None:
+    row = _row("steam:424242", "Native Example", source="steam", external_id="424242")
+
+    game = native_steam_artwork_game_from_library_row(row)
+
+    assert game is not None
+    assert game.selected is True
+    assert game.steam_appid == 424242
+    assert game.is_native_steam_game is True
+    assert game.is_managed_non_steam is False
+
+    assert native_steam_artwork_game_from_library_row(_row("folder:one", "Folder Game")) is None
+    assert native_steam_artwork_game_from_library_row(
+        _row("steam:bad", "Bad AppID", source="steam", external_id="nope")
+    ) is None
+
+
+def test_apply_locked_artwork_populates_selection_and_skips_stale_files() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        grid_file = Path(tmp) / "grid.png"
+        grid_file.write_bytes(b"fake-png-bytes")
+        missing_file = Path(tmp) / "missing.png"
+
+        game = native_steam_artwork_game_from_library_row(
+            _row("steam:424242", "Native Example", source="steam", external_id="424242")
+        )
+        assert game is not None
+
+        locks = [
+            ArtworkLock(item_id=game.metadata.extra[LIBRARY_ITEM_ID_META], slot="grid",
+                        candidate_id="c1", source="steamgriddb", local_path=str(grid_file)),
+            ArtworkLock(item_id=game.metadata.extra[LIBRARY_ITEM_ID_META], slot="hero",
+                        candidate_id="c2", source="steamgriddb", local_path=str(missing_file)),
+        ]
+        apply_locked_artwork(game, locks)
+
+        assert game.artwork.grid is not None
+        assert game.artwork.grid.local_path == grid_file
+        assert game.artwork.grid.asset_id == "c1"
+        assert game.artwork.hero is None, "a lock whose file no longer exists must not be applied"
+
+
+def test_artwork_copy_uses_the_same_appid_as_the_shortcut_write() -> None:
+    """Artwork and its shortcut must land under the identical computed AppID,
+    or Steam won't associate the grid image with the non-Steam shortcut entry."""
+    with tempfile.TemporaryDirectory() as tmp:
+        exe_path = Path(tmp) / "Game.exe"
+        exe_path.write_bytes(b"MZ")
+        grid_file = Path(tmp) / "grid.png"
+        grid_file.write_bytes(b"fake-png-bytes")
+        row = _row("folder:appid", "AppID Consistency", launch_target=str(exe_path))
+
+        shortcut_game = writable_game_from_library_row(row)
+        assert shortcut_game is not None
+        expected_appid = shortcut_from_game(shortcut_game).appid
+
+        artwork_game = writable_game_from_library_row(row)
+        assert artwork_game is not None
+        apply_locked_artwork(
+            artwork_game,
+            [ArtworkLock(item_id=row.item_id, slot="grid", candidate_id="c1", local_path=str(grid_file))],
+        )
+        actual_appid = generate_appid(artwork_game.selected_exe.resolve(), artwork_game.display_title)
+        assert actual_appid == expected_appid
+
+
 def test_snapshot_selection_is_preserved() -> None:
     first = _row("one", "One")
     second = _row("two", "Two")
@@ -307,6 +417,12 @@ if __name__ == "__main__":
     test_writable_game_from_library_row_rejects_native_steam_rows()
     test_writable_game_from_library_row_rejects_empty_launch_target()
     test_writable_game_from_library_row_rejects_missing_launch_target()
+    test_artwork_copy_skip_reason_requires_a_lock_with_an_existing_file()
+    test_artwork_copy_skip_reason_native_steam_appid()
+    test_artwork_copy_skip_reason_reuses_shortcut_rules_for_non_steam_rows()
+    test_native_steam_artwork_game_from_library_row_is_artwork_eligible()
+    test_apply_locked_artwork_populates_selection_and_skips_stale_files()
+    test_artwork_copy_uses_the_same_appid_as_the_shortcut_write()
     test_snapshot_selection_is_preserved()
     test_library_display_update_contains_games_and_status()
     test_source_scan_adapters_cover_controller_backed_sources()

@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 import customtkinter as ctk  # noqa: E402
 
-from steam_shortcut_studio.artwork import download_asset  # noqa: E402
+from steam_shortcut_studio.artwork import copy_all_artwork_to_steam, download_asset  # noqa: E402
 from steam_shortcut_studio.artwork_search_service import ArtworkProviderSearchService  # noqa: E402
 from steam_shortcut_studio.artwork_sources import (  # noqa: E402
     ARTWORK_SOURCE_LABELS,
@@ -52,9 +52,15 @@ from steam_shortcut_studio.steam_detection import (  # noqa: E402
     shutdown_steam_for_write,
 )
 from steam_shortcut_studio.steamgrid import SteamGridDbClient  # noqa: E402
-from steam_shortcut_studio.transaction_history import list_transaction_history  # noqa: E402
+from steam_shortcut_studio.transaction_history import (  # noqa: E402
+    list_artwork_transaction_history,
+    list_transaction_history,
+)
 from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
+    apply_locked_artwork,
+    artwork_copy_skip_reason,
     game_from_library_row,
+    native_steam_artwork_game_from_library_row,
     writable_game_from_library_row,
     writable_game_skip_reason,
 )
@@ -101,16 +107,19 @@ class ModernShell(ctk.CTk):
     games). Long-running work (source scans, Apply Changes, artwork search)
     runs on ``BackgroundJobQueue`` and is polled from the Tk thread via
     ``after`` per CODEX_START_HERE. Apply Changes writes real non-Steam
-    shortcuts through the same verified backup/write/verify/rollback
-    transaction service (``shortcut_transactions.upsert_games_transactional``)
-    the legacy UI uses. Per-slot Auto Match / Replace perform real artwork
-    search/download/validate and write the result straight to
-    ``LibraryStore.set_artwork_lock`` (same safety model as Clear Slot:
-    local cache + local SQLite only, nothing touches the real Steam grid
-    folder). The bulk top-bar Auto-Art button remains intentionally gated:
-    matching many games unattended needs a review-queue UI (like legacy's)
-    that doesn't exist yet, and this UI must not claim success it cannot
-    back up (see docs/UI_UX_TARGET.md: "No fake safety").
+    shortcuts AND copies real locked artwork into Steam's grid folder, in
+    one combined pass, through the same verified transaction services
+    (``shortcut_transactions.upsert_games_transactional`` /
+    ``artwork.copy_all_artwork_to_steam``) the legacy UI uses. Per-slot Auto
+    Match / Replace perform real artwork search/download/validate and write
+    the result to ``LibraryStore.set_artwork_lock`` (same safety model as
+    Clear Slot: local cache + local SQLite only) — matching/locking a slot
+    never touches the real Steam grid folder by itself; that only happens
+    when Apply Changes runs. The bulk top-bar Auto-Art button remains
+    intentionally gated: matching many games unattended needs a
+    review-queue UI (like legacy's) that doesn't exist yet, and this UI
+    must not claim success it cannot back up (see docs/UI_UX_TARGET.md:
+    "No fake safety").
     """
 
     def __init__(
@@ -312,44 +321,79 @@ class ModernShell(ctk.CTk):
         rows = self.controller.selected_rows() or self.controller.snapshot().rows
         return tuple(rows)
 
-    def _partition_writable_rows(
+    def _partition_apply_rows(
         self, rows: tuple[LibraryRow, ...]
-    ) -> tuple[list[tuple[LibraryRow, DetectedGame]], list[tuple[LibraryRow, str]]]:
-        eligible = []
-        skipped = []
+    ) -> tuple[
+        list[tuple[LibraryRow, DetectedGame]],
+        list[tuple[LibraryRow, str]],
+        list[tuple[LibraryRow, str]],
+        int,
+        int,
+    ]:
+        combined: list[tuple[LibraryRow, DetectedGame]] = []
+        shortcut_skipped: list[tuple[LibraryRow, str]] = []
+        artwork_skipped: list[tuple[LibraryRow, str]] = []
+        shortcut_count = 0
+        artwork_count = 0
         for row in rows:
             game = writable_game_from_library_row(row)
-            if game is None:
-                skipped.append((row, writable_game_skip_reason(row)))
+            if game is not None:
+                shortcut_count += 1
             else:
-                eligible.append((row, game))
-        return eligible, skipped
+                shortcut_skipped.append((row, writable_game_skip_reason(row)))
+
+            locks = [
+                lock for lock in self.store.list_artwork_locks(row.item_id)
+                if lock.local_path and Path(lock.local_path).is_file()
+            ]
+            art_reason = artwork_copy_skip_reason(row, locks)
+            if not art_reason:
+                artwork_count += 1
+                if game is None:
+                    game = native_steam_artwork_game_from_library_row(row)
+                if game is not None:
+                    apply_locked_artwork(game, locks)
+            else:
+                artwork_skipped.append((row, art_reason))
+
+            if game is not None:
+                combined.append((row, game))
+        return combined, shortcut_skipped, artwork_skipped, shortcut_count, artwork_count
 
     def _preview_changes(self) -> None:
         rows = self._apply_scope_rows()
-        eligible, skipped = self._partition_writable_rows(rows)
-        lines = [f"{len(eligible)} shortcut(s) will be added or updated in shortcuts.vdf."]
-        if skipped:
-            lines.append(f"\n{len(skipped)} game(s) in scope will be skipped:")
-            for row, reason in skipped[:20]:
-                lines.append(f"  \u2022 {row.title}: {reason}")
-            if len(skipped) > 20:
-                lines.append(f"  ...and {len(skipped) - 20} more.")
-        lines.append(
-            "\nArtwork is not written by this action (Auto-Art is not yet wired).\n"
-            "No Steam files have been modified. This is a read-only preview."
+        combined, shortcut_skipped, artwork_skipped, shortcut_count, artwork_count = (
+            self._partition_apply_rows(rows)
         )
+        lines = [
+            f"{shortcut_count} shortcut(s) will be added or updated in shortcuts.vdf.",
+            f"{artwork_count} game(s) have locked artwork that will be copied into Steam's grid folder.",
+        ]
+        if shortcut_skipped:
+            lines.append(f"\n{len(shortcut_skipped)} game(s) skipped for shortcuts:")
+            for row, reason in shortcut_skipped[:20]:
+                lines.append(f"  \u2022 {row.title}: {reason}")
+            if len(shortcut_skipped) > 20:
+                lines.append(f"  ...and {len(shortcut_skipped) - 20} more.")
+        if artwork_skipped:
+            lines.append(f"\n{len(artwork_skipped)} game(s) skipped for artwork:")
+            for row, reason in artwork_skipped[:20]:
+                lines.append(f"  \u2022 {row.title}: {reason}")
+            if len(artwork_skipped) > 20:
+                lines.append(f"  ...and {len(artwork_skipped) - 20} more.")
+        lines.append("\nNo Steam files have been modified. This is a read-only preview.")
         messagebox.showinfo("Preview changes", "\n".join(lines))
 
     def _apply_changes(self) -> None:
         rows = self._apply_scope_rows()
-        eligible, skipped = self._partition_writable_rows(rows)
-        if not eligible:
+        combined, shortcut_skipped, artwork_skipped, shortcut_count, artwork_count = (
+            self._partition_apply_rows(rows)
+        )
+        if not combined:
             messagebox.showinfo(
                 "Nothing to apply",
-                "No game(s) in scope are eligible for a Steam shortcut write. Native "
-                "Steam rows, empty launch targets, and missing executables are always "
-                "skipped \u2014 use Preview to see why.",
+                "No game(s) in scope are eligible for a Steam shortcut write or an "
+                "artwork copy. Use Preview to see why.",
             )
             return
 
@@ -363,40 +407,48 @@ class ModernShell(ctk.CTk):
             return
         steam_path = Path(steam_path_value)
 
-        lines = [f"{len(eligible)} shortcut(s) will be added or updated in shortcuts.vdf."]
-        if skipped:
-            lines.append(f"{len(skipped)} game(s) will be skipped (see Preview for details).")
+        lines = [
+            f"{shortcut_count} shortcut(s) will be added or updated in shortcuts.vdf.",
+            f"{artwork_count} game(s) will have locked artwork copied into Steam's grid folder.",
+        ]
+        if shortcut_skipped or artwork_skipped:
+            lines.append(
+                f"{len(shortcut_skipped)} skipped for shortcuts, "
+                f"{len(artwork_skipped)} skipped for artwork (see Preview for details)."
+            )
         if is_steam_running():
             lines.append(
                 "\nSteam is currently running and will be closed automatically, "
                 "then reopened once the write finishes."
             )
         lines.append(
-            "\nA backup is created and verified automatically; on any verification "
-            "failure the write is rolled back and Steam is left untouched."
+            "\nA backup is created and verified automatically for every file changed; "
+            "any failing file is rolled back individually and Steam is left untouched."
         )
         if not messagebox.askyesno("Apply Changes", "\n".join(lines)):
             return
 
-        games = [game for _, game in eligible]
-        job_id = f"apply-shortcuts-{uuid4().hex[:12]}"
+        games = [game for _, game in combined]
+        job_id = f"apply-changes-{uuid4().hex[:12]}"
         record = JobRecord(
             job_id=job_id,
-            item_id="apply:shortcuts",
+            item_id="apply:changes",
             kind=JobKind.APPLY,
-            message=f"Queued write of {len(games)} shortcut(s)",
+            message=f"Queued write of {shortcut_count} shortcut(s) and {artwork_count} artwork set(s)",
         )
         self._pending_action_jobs[job_id] = self._handle_apply_job_finished
         self.apply_button.configure(state="disabled")
         self.controller.job_queue.submit(
             record,
-            lambda job, token, report_progress: self._apply_shortcuts_job(
+            lambda job, token, report_progress: self._apply_changes_job(
                 steam_path, games, report_progress
             ),
         )
-        self._set_status(f"Applying {len(games)} shortcut(s) to Steam\u2026")
+        self._set_status(
+            f"Applying {shortcut_count} shortcut(s) and {artwork_count} artwork set(s) to Steam\u2026"
+        )
 
-    def _apply_shortcuts_job(self, steam_path: Path, games: list, report_progress) -> JobExecutionResult:
+    def _apply_changes_job(self, steam_path: Path, games: list, report_progress) -> JobExecutionResult:
         steam_closed = False
         try:
             report_progress(0.05, "Checking Steam status\u2026")
@@ -407,30 +459,52 @@ class ModernShell(ctk.CTk):
                     "Steam is running, but the configured Steam folder is not valid. "
                     "Choose a valid Steam folder in Import / Scan before writing shortcuts."
                 )
-            report_progress(0.25, "Finding Steam profile\u2026")
+            report_progress(0.2, "Finding Steam profile\u2026")
             profiles = find_steam_profiles(steam_path)
             if not profiles:
                 raise RuntimeError(f"No Steam user profile found under {steam_path}.")
             profile = profiles[0]
-            report_progress(0.4, f"Writing {len(games)} shortcut(s)\u2026")
-            result = upsert_games_transactional(
+
+            report_progress(0.35, "Writing shortcut(s)\u2026")
+            shortcut_result = upsert_games_transactional(
                 profile,
                 games,
                 update_existing=self.settings.update_existing_shortcuts,
                 default_tags=list(self.settings.default_tags),
             )
+
+            report_progress(0.6, "Copying artwork into Steam's grid folder\u2026")
+            artwork_failures: list[tuple[str, str]] = []
+            copied = copy_all_artwork_to_steam(
+                games,
+                profile,
+                error_handler=lambda game, exc: artwork_failures.append((game.display_title, str(exc))),
+            )
+            artwork_attempted = sum(
+                1 for game in games
+                if game.selected and (game.is_managed_non_steam or game.is_native_steam_game)
+            )
+
             if steam_closed:
                 report_progress(0.9, "Reopening Steam\u2026")
                 reopen_steam(steam_path)
             return JobExecutionResult(
                 state=JobState.SUCCEEDED,
                 result={
-                    "added": result.added,
-                    "updated": result.updated,
-                    "backup": str(result.backup) if result.backup else "",
+                    "added": shortcut_result.added,
+                    "updated": shortcut_result.updated,
+                    "backup": str(shortcut_result.backup) if shortcut_result.backup else "",
                     "profile": profile.display_name,
+                    "artwork_files_copied": len(copied),
+                    "artwork_attempted": artwork_attempted,
+                    "artwork_failed": len(artwork_failures),
+                    "artwork_failures": artwork_failures,
                 },
-                message=f"Wrote {result.added} new and {result.updated} updated shortcut(s).",
+                message=(
+                    f"Wrote {shortcut_result.added} new and {shortcut_result.updated} updated "
+                    f"shortcut(s); artwork copied for {artwork_attempted - len(artwork_failures)} "
+                    f"of {artwork_attempted} game(s)."
+                ),
             )
         except Exception:
             if steam_closed:
@@ -454,23 +528,42 @@ class ModernShell(ctk.CTk):
                 backup = backup_path
             else:
                 backup = "No prior shortcuts.vdf existed, so no backup was needed."
-            self._set_status(event.message or "Shortcuts applied.")
-            messagebox.showinfo(
-                "Apply Changes",
-                f"Added: {added}\n"
-                f"Updated: {updated}\n"
-                f"Steam profile: {event.result.get('profile', '')}\n"
-                f"Backup: {backup}\n\n"
-                "See the Backups screen for the full transaction record.",
-            )
+
+            artwork_attempted = event.result.get("artwork_attempted", 0)
+            artwork_failed = event.result.get("artwork_failed", 0)
+            artwork_copied = event.result.get("artwork_files_copied", 0)
+            artwork_failures = event.result.get("artwork_failures") or []
+
+            lines = [
+                f"Added: {added}",
+                f"Updated: {updated}",
+                f"Steam profile: {event.result.get('profile', '')}",
+                f"Backup: {backup}",
+            ]
+            if artwork_attempted:
+                ok = artwork_attempted - artwork_failed
+                lines.append(
+                    f"\nArtwork: copied for {ok} of {artwork_attempted} game(s) "
+                    f"({artwork_copied} file(s) written)."
+                )
+                if artwork_failed:
+                    lines.append(f"{artwork_failed} game(s) failed artwork copy:")
+                    for title, reason in artwork_failures[:10]:
+                        lines.append(f"  • {title}: {reason}")
+                    if artwork_failed > 10:
+                        lines.append(f"  ...and {artwork_failed - 10} more.")
+            lines.append("\nSee the Backups screen for the full transaction record.")
+            self._set_status(event.message or "Changes applied.")
+            messagebox.showinfo("Apply Changes", "\n".join(lines))
         else:
             self._set_status(f"Apply Changes failed: {event.error or event.message}")
             messagebox.showerror(
                 "Apply Changes failed",
                 f"{event.error or event.message}\n\n"
-                "Nothing is left partially written: any staged write is automatically "
-                "rolled back on verification failure, and the attempt is recorded on "
-                "the Backups screen.",
+                "Nothing is left partially written: any staged shortcuts.vdf write is "
+                "automatically rolled back on verification failure, and any artwork "
+                "file that started writing is rolled back individually too. The "
+                "attempt is recorded on the Backups screen.",
             )
 
     # ---------- footer ----------
@@ -1146,17 +1239,34 @@ class ModernShell(ctk.CTk):
     def _build_backups_screen(self) -> None:
         body = self._simple_screen("Backups", "Restore points recorded by the transaction system.")
         try:
-            entries = list_transaction_history()
-            if isinstance(entries, tuple):
-                entries = entries[0]
+            shortcut_entries = list_transaction_history()
+            if isinstance(shortcut_entries, tuple):
+                shortcut_entries = shortcut_entries[0]
         except Exception:  # noqa: BLE001
-            entries = []
+            shortcut_entries = []
+        try:
+            artwork_entries = list_artwork_transaction_history()
+        except Exception:  # noqa: BLE001
+            artwork_entries = []
+        entries = [*shortcut_entries, *artwork_entries]
         if not entries:
             ctk.CTkLabel(body, text="No transactions recorded yet.", text_color=COLORS["muted"], font=self._font(12)).grid(row=0, column=0, sticky="w")
             return
-        for index, entry in enumerate(sorted(entries, key=lambda e: e.updated_at, reverse=True)):
+        ordered = sorted(entries, key=lambda e: e.updated_at, reverse=True)
+        # Rendering every historical transaction as a widget can freeze the UI
+        # once real usage accumulates hundreds of entries (observed live this
+        # session: 446 real artwork transactions from months of prior use) --
+        # cap to the most recent 50, matching transaction_history.py's own
+        # retention_candidates(keep_latest=50) precedent.
+        shown, remainder = ordered[:50], len(ordered) - 50
+        for index, entry in enumerate(shown):
             detail = f"{entry.status} \u2022 {entry.updated_at.isoformat(timespec='minutes')}" + (" \u2022 restore available" if entry.restore_available else "")
             self._list_row(body, index, "\u25c8", entry.display_target, detail, None)
+        if remainder > 0:
+            ctk.CTkLabel(
+                body, text=f"...and {remainder} older transaction(s) not shown.",
+                text_color=COLORS["muted"], font=self._font(11),
+            ).grid(row=len(shown), column=0, padx=4, pady=(8, 0), sticky="w")
 
     def _build_settings_screen(self) -> None:
         body = self._simple_screen("Settings", "Artwork sources and app preferences (SettingsStore-backed).")

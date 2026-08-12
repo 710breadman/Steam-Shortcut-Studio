@@ -131,6 +131,111 @@ def list_transaction_history(
     return entries
 
 
+@dataclass(frozen=True, slots=True)
+class ArtworkTransactionHistoryEntry:
+    transaction_id: str
+    manifest_path: Path
+    transaction_dir: Path
+    status: str
+    updated_at: datetime
+    operation_count: int = 0
+    committed_count: int = 0
+    failed_count: int = 0
+    restored: bool = False
+    restore_verified: bool = False
+    error: str = ""
+    targets: tuple[str, ...] = ()
+    has_backup: bool = False
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in TERMINAL_STATUSES
+
+    @property
+    def restore_available(self) -> bool:
+        return self.has_backup
+
+    @property
+    def display_target(self) -> str:
+        if self.operation_count == 1 and self.targets:
+            return self.targets[0]
+        return f"{self.operation_count} artwork file(s)"
+
+
+def load_artwork_transaction_entry(manifest_path: Path) -> ArtworkTransactionHistoryEntry:
+    manifest = manifest_path.expanduser().resolve(strict=False)
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("Artwork transaction manifest root must be a JSON object.")
+
+    transaction_id = str(payload.get("transaction_id") or manifest.parent.name).strip()
+    if not transaction_id:
+        raise ValueError("Artwork transaction manifest has no transaction ID.")
+
+    transaction_dir = Path(
+        str(payload.get("transaction_dir") or manifest.parent)
+    ).expanduser().resolve(strict=False)
+
+    operations = payload.get("operations")
+    operations = operations if isinstance(operations, list) else []
+    committed = sum(1 for op in operations if isinstance(op, dict) and op.get("status") == "committed")
+    failed = sum(
+        1
+        for op in operations
+        if isinstance(op, dict) and op.get("status") in {"verification_failed", "error"}
+    )
+    targets = tuple(
+        Path(str(op.get("target_path"))).name
+        for op in operations
+        if isinstance(op, dict) and op.get("target_path")
+    )
+    has_backup = any(
+        isinstance(op, dict)
+        and op.get("original_exists")
+        and op.get("backup_path")
+        and Path(str(op.get("backup_path"))).is_file()
+        for op in operations
+    )
+
+    return ArtworkTransactionHistoryEntry(
+        transaction_id=transaction_id,
+        manifest_path=manifest,
+        transaction_dir=transaction_dir,
+        status=str(payload.get("status") or "unknown").strip() or "unknown",
+        updated_at=_parse_datetime(payload.get("updated_at"), fallback_path=manifest),
+        operation_count=len(operations),
+        committed_count=committed,
+        failed_count=failed,
+        has_backup=has_backup,
+        restored=bool(payload.get("restored", False)),
+        restore_verified=bool(payload.get("restore_verified", False)),
+        error=str(payload.get("error") or ""),
+        targets=targets,
+    )
+
+
+def list_artwork_transaction_history(
+    root: Path | None = None,
+    *,
+    include_invalid: bool = False,
+) -> list[ArtworkTransactionHistoryEntry] | tuple[list[ArtworkTransactionHistoryEntry], list[Path]]:
+    history_root = (root or default_transaction_root()).expanduser().resolve(strict=False)
+    entries: list[ArtworkTransactionHistoryEntry] = []
+    invalid: list[Path] = []
+
+    if history_root.exists():
+        for manifest in history_root.glob("*/artwork-manifest.json"):
+            try:
+                entries.append(load_artwork_transaction_entry(manifest))
+            except (OSError, ValueError, json.JSONDecodeError):
+                invalid.append(manifest)
+
+    entries.sort(key=lambda entry: (entry.updated_at, entry.transaction_id), reverse=True)
+    if include_invalid:
+        return entries, invalid
+    return entries
+
+
 def history_status_counts(entries: Iterable[TransactionHistoryEntry]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for entry in entries:
