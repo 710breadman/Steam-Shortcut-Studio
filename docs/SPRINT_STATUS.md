@@ -245,6 +245,7 @@ Shipping and polish (live):
 - [x] Details tab edits manual overrides (title, launch target, arguments, working directory, notes) with a reset-to-source action — previously the shell could only display them, forcing users into the classic UI to rename a game
 - [x] Empty-state guidance on the Library screen, distinguishing an empty library (offering the three scans) from a filter that hides everything (offering to clear it)
 - [x] Closing the window cancels the poll loop and releases `LibraryController`'s worker threads, which previously stayed alive after the window was gone
+- [x] The `LAST PLAYED` column shows Steam's own record and is sortable; it previously showed a hardcoded em dash for every row
 
 Confidence scoring (live):
 
@@ -587,6 +588,14 @@ Editing, empty states, and clean shutdown, 2026-08-12:
 - Fixed a shutdown bug found while testing: the shell rescheduled its `after` poll forever and never closed `LibraryController`, so closing the window left the repeating callback firing against a torn-down widget tree and the job queue's workers alive. `WM_DELETE_WINDOW` now cancels the poll and closes the controller.
 - Added `tests/library_edits_test.py` (9 cases including a real `LibraryStore` round trip proving an unrelated note survives a title-only save, and that reverting a title removes rather than pins the override) and wired it into CI.
 - Verified interactively against a temporary library: empty-library screen, filtered-empty screen, Details tab, a save that created exactly the two intended overrides while correctly declining to override the two fields matching source, and a reset that cleared them all.
+
+Real last-played data, 2026-08-12:
+
+- Added `steam_shortcut_studio/steam_playtime.py`, reading `UserLocalConfigStore/Software/Valve/Steam/apps/<appid>/LastPlayed` from every user's `localconfig.vdf` through the existing `vdf.load_text_vdf` parser rather than a new one. Read-only; a missing, unreadable, or foreign file yields no data instead of an error, so the library still renders when Steam has never run. Multiple accounts merge to the most recent play.
+- The modern shell's `LAST PLAYED` column previously showed a hardcoded em dash for every row. It now shows Steam's own record in human units and is sortable, with never-played rows grouped at one end rather than scattered by title. The map is parsed once per Steam path and re-read on Refresh Metadata.
+- Nothing is invented for Epic or folder games: they have no equivalent record and keep an em dash. A blank cell is honest; a fabricated date is not.
+- Added `tests/steam_playtime_test.py` (9 cases: the documented VDF path, never-played and malformed entries, Steam casing changes, unreadable/foreign files, multi-user merge, missing Steam path, recency wording, and a future timestamp not rendering as negative days) and wired it into CI.
+- Verified against the real Steam install on the development machine: 166 AppIDs with genuine records, formatting spanning "4 weeks ago" to "5 years ago".
 
 ## Known Risks
 

@@ -63,6 +63,7 @@ from .steam_detection import (
     reopen_steam,
     shutdown_steam_for_write,
 )
+from .steam_playtime import format_last_played, load_last_played
 from .steamgrid import SteamGridDbClient
 from .transaction_history import (
     list_artwork_transaction_history,
@@ -170,6 +171,8 @@ class ModernShell(ctk.CTk):
         self._pending_action_jobs: dict[str, Callable[[JobEvent], None]] = {}
         self.review_queue = ArtworkReviewQueue()
         self._preview_images: list[ctk.CTkImage] = []
+        self._last_played_cache: dict[int, int] | None = None
+        self._last_played_source: str | None = None
 
         self.controller.refresh(include_missing=self.include_missing)
         self._auto_select_first()
@@ -343,6 +346,9 @@ class ModernShell(ctk.CTk):
         self._set_nav("Import / Scan")
 
     def _refresh_metadata(self) -> None:
+        # Drop the cached play history too, so Refresh picks up games played
+        # since the window was opened.
+        self._last_played_cache = None
         self.controller.refresh(include_missing=self.include_missing)
         self._render_library_card()
         self._render_content()
@@ -794,7 +800,7 @@ class ModernShell(ctk.CTk):
 
         header = ctk.CTkFrame(library_panel, fg_color=COLORS["window"], corner_radius=7)
         header.grid(row=1, column=0, padx=12, sticky="ew")
-        cols = [("", 0, None), ("TITLE", 4, "title"), ("SOURCE", 2, None), ("PLATFORM", 2, None), ("LAST PLAYED", 2, None), ("SIZE", 1, "size")]
+        cols = [("", 0, None), ("TITLE", 4, "title"), ("SOURCE", 2, None), ("PLATFORM", 2, None), ("LAST PLAYED", 2, "last_played"), ("SIZE", 1, "size")]
         for column, (label, weight, sort_key) in enumerate(cols):
             header.grid_columnconfigure(column, weight=weight, minsize=32 if column == 0 else 60)
             text = label + (" \u2191" if sort_key and self.sort_col == sort_key and self.sort_dir else " \u2193" if sort_key and self.sort_col == sort_key else "")
@@ -844,6 +850,24 @@ class ModernShell(ctk.CTk):
         ctk.CTkLabel(footer_row, text=f"{len(rows)} game(s)", text_color=COLORS["muted"], font=self._font(11)).pack(side="left")
 
         self._build_inspector()
+
+    def _last_played_for(self, row: LibraryRow) -> int:
+        """Steam's own last-played timestamp, or 0 when there is no record.
+
+        Only native Steam rows have one. Nothing is invented for launcher or
+        folder games -- a blank cell is honest, a fabricated date is not.
+        """
+        if row.source.casefold() != "steam" or not row.external_id.isdigit():
+            return 0
+        return self._last_played_map().get(int(row.external_id), 0)
+
+    def _last_played_map(self) -> dict[int, int]:
+        """Read Steam's play history once per settings change, not per row."""
+        steam_path = self.settings.steam_path or ""
+        if self._last_played_cache is None or self._last_played_source != steam_path:
+            self._last_played_cache = load_last_played(steam_path)
+            self._last_played_source = steam_path
+        return self._last_played_cache
 
     def _build_empty_library_state(self, parent) -> None:
         """Say what to do next, rather than showing an unexplained empty table.
@@ -922,6 +946,10 @@ class ModernShell(ctk.CTk):
         reverse = not self.sort_dir
         if self.sort_col == "size":
             rows.sort(key=lambda r: r.size_bytes, reverse=reverse)
+        elif self.sort_col == "last_played":
+            # Never-played rows sort together at the far end either way, rather
+            # than being scattered through the list by their titles.
+            rows.sort(key=lambda r: (self._last_played_for(r), r.title.casefold()), reverse=reverse)
         else:
             rows.sort(key=lambda r: r.title.casefold(), reverse=reverse)
         return rows
@@ -970,8 +998,12 @@ class ModernShell(ctk.CTk):
         title_lbl.grid(row=0, column=1, padx=6, pady=9, sticky="ew")
         title_lbl.bind("<Button-1>", lambda e, item=row.item_id: self._activate(item))
 
-        last_played = "\u2014"
-        values = [row.source.title(), row.platform.title() or "PC", last_played, format_size(row.size_bytes)]
+        values = [
+            row.source.title(),
+            row.platform.title() or "PC",
+            format_last_played(self._last_played_for(row)),
+            format_size(row.size_bytes),
+        ]
         for column, value in enumerate(values, start=2):
             lbl = ctk.CTkLabel(frame, text=value, anchor="w", text_color="#b8c6d5", font=self._font(10))
             lbl.grid(row=0, column=column, padx=6, pady=9, sticky="ew")

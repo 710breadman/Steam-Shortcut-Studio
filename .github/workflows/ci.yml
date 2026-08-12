@@ -120,6 +120,9 @@ jobs:
       - name: Run manual override edit tests
         run: python tests/library_edits_test.py
 
+      - name: Run Steam last-played tests
+        run: python tests/steam_playtime_test.py
+
       - name: Run modern library view tests
         run: python tests/modern_library_view_test.py
 
