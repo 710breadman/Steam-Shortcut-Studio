@@ -242,6 +242,9 @@ Shipping and polish (live):
 - [x] Artwork tab shows the real locked image, its provider, and an explicit "file missing" state when the cache entry is gone
 - [x] Footer cancel control appears while this shell's jobs are in flight
 - [x] About screen exposes settings path, library database path, and a way into the classic interface
+- [x] Details tab edits manual overrides (title, launch target, arguments, working directory, notes) with a reset-to-source action — previously the shell could only display them, forcing users into the classic UI to rename a game
+- [x] Empty-state guidance on the Library screen, distinguishing an empty library (offering the three scans) from a filter that hides everything (offering to clear it)
+- [x] Closing the window cancels the poll loop and releases `LibraryController`'s worker threads, which previously stayed alive after the window was gone
 
 Confidence scoring (live):
 
@@ -575,6 +578,15 @@ Real artwork confidence scoring, 2026-08-12:
 - Added `tests/artwork_scoring_test.py` (22 cases: provenance reading, identity per method, provider ceilings, conflict detection and its suppression, coherence penalties, weakest-link identity, range safety against hostile input, and end-to-end policy outcomes) and wired it into CI. Updated the bulk-search tests to assert real scores.
 - Verified the resulting decisions across ten realistic scenarios: native Steam by AppID → auto-accept; SteamGridDB exact title → auto-accept; unverifiable, RAWG, Wikimedia, edition mismatch, mixed name-resolved sources, and incomplete sets → review; wrong game → reject.
 - Every `tests/*_test.py` passes; the shell smoke render passes.
+
+Editing, empty states, and clean shutdown, 2026-08-12:
+
+- Added `steam_shortcut_studio/library_edits.py`. `LibraryStore.save_overrides` replaces every column, so a caller that supplies only the edited field silently erases the rest — every save now carries the complete set. An edit that matches the launcher's own value stores *no* override, so a value is never pinned and a later launcher rename still shows through.
+- Added an editable Details tab to the modern shell (title, launch target, arguments, working directory, notes) with a reset-to-source action. The shell previously displayed these read-only, so renaming a game meant dropping into the classic UI.
+- Added empty-state guidance to the Library screen, distinguishing "your library is empty" (offering Steam / Epic / folder scans, and saying plainly that scanning only reads) from "a filter hides everything" (offering to clear it). A first-run user previously saw a blank table with no explanation.
+- Fixed a shutdown bug found while testing: the shell rescheduled its `after` poll forever and never closed `LibraryController`, so closing the window left the repeating callback firing against a torn-down widget tree and the job queue's workers alive. `WM_DELETE_WINDOW` now cancels the poll and closes the controller.
+- Added `tests/library_edits_test.py` (9 cases including a real `LibraryStore` round trip proving an unrelated note survives a title-only save, and that reverting a title removes rather than pins the override) and wired it into CI.
+- Verified interactively against a temporary library: empty-library screen, filtered-empty screen, Details tab, a save that created exactly the two intended overrides while correctly declining to override the two fields matching source, and a reset that cleared them all.
 
 ## Known Risks
 

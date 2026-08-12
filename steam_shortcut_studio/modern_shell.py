@@ -39,6 +39,13 @@ from .image_validation import validate_artwork_file
 from .job_queue import JobEvent, JobExecutionResult
 from .jobs import JobKind, JobRecord, JobState, TERMINAL_JOB_STATES
 from .library_controller import LibraryController, LibraryRow
+from .library_edits import (
+    OVERRIDE_FIELDS,
+    build_manual_overrides,
+    describe_override_changes,
+    field_label,
+    override_change_message,
+)
 from .library_store import ArtworkLock, LibraryStore, default_library_database
 from .models import ArtworkAsset, DetectedGame
 from .modern_library_view import format_size, initial_active_item_id
@@ -180,7 +187,30 @@ class ModernShell(ctk.CTk):
         self._build_footer()
         self._render_content()
 
-        self.after(200, self._poll_jobs)
+        self._closing = False
+        self._poll_after_id: str | None = self.after(200, self._poll_jobs)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self) -> None:
+        """Stop polling and release worker threads before the window goes away.
+
+        Without this, the repeating `after` callback fires against a
+        half-destroyed widget tree, and `LibraryController`'s job queue keeps
+        its workers alive -- which can leave the process running after the
+        window has closed, mid-scan.
+        """
+        self._closing = True
+        if self._poll_after_id is not None:
+            try:
+                self.after_cancel(self._poll_after_id)
+            except Exception:  # noqa: BLE001 - already torn down
+                pass
+            self._poll_after_id = None
+        try:
+            self.controller.close(wait=False, cancel_pending=True)
+        except Exception:  # noqa: BLE001 - shutdown must not raise
+            LOGGER.debug("Library controller did not close cleanly.", exc_info=True)
+        self.destroy()
 
     # ---------- font / small helpers ----------
 
@@ -781,8 +811,11 @@ class ModernShell(ctk.CTk):
         self._ordered_ids = [r.item_id for r in rows]
         self.row_frames.clear()
         self.row_checks.clear()
-        for row in rows:
-            self._add_game_row(rows_frame, row)
+        if rows:
+            for row in rows:
+                self._add_game_row(rows_frame, row)
+        else:
+            self._build_empty_library_state(rows_frame)
 
         selection = self.controller.snapshot()
         if selection.selected_count:
@@ -811,6 +844,65 @@ class ModernShell(ctk.CTk):
         ctk.CTkLabel(footer_row, text=f"{len(rows)} game(s)", text_color=COLORS["muted"], font=self._font(11)).pack(side="left")
 
         self._build_inspector()
+
+    def _build_empty_library_state(self, parent) -> None:
+        """Say what to do next, rather than showing an unexplained empty table.
+
+        Distinguishes an empty library from a filter that hides everything --
+        telling a first-run user to "clear the search" would be useless advice,
+        and telling someone with 200 hidden games to "scan a source" would be
+        wrong.
+        """
+        total = len(self.controller.snapshot().rows)
+        card = ctk.CTkFrame(parent, fg_color="transparent")
+        card.grid(row=0, column=0, sticky="ew", pady=40)
+        card.grid_columnconfigure(0, weight=1)
+
+        if total:
+            ctk.CTkLabel(
+                card, text="No games match this view", font=self._font(15, "bold"),
+            ).grid(row=0, column=0, pady=(0, 6))
+            ctk.CTkLabel(
+                card,
+                text=f"{total} game(s) are in your library but hidden by the current search or filter.",
+                text_color=COLORS["muted"], font=self._font(11), wraplength=420,
+            ).grid(row=1, column=0, pady=(0, 14))
+            ctk.CTkButton(
+                card, text="Clear search and filter", height=32, width=190, corner_radius=7,
+                font=self._font(11, "bold"), fg_color=self.palette["accent"],
+                hover_color=self.palette["hover"], command=self._clear_view_filters,
+            ).grid(row=2, column=0)
+            return
+
+        ctk.CTkLabel(card, text="Your library is empty", font=self._font(15, "bold")).grid(row=0, column=0, pady=(0, 6))
+        ctk.CTkLabel(
+            card,
+            text=(
+                "Scan a source to bring your games in. Scanning only reads — it writes "
+                "to this app's own database, never to Steam or your games."
+            ),
+            text_color=COLORS["muted"], font=self._font(11), wraplength=420,
+        ).grid(row=1, column=0, pady=(0, 14))
+        buttons = ctk.CTkFrame(card, fg_color="transparent")
+        buttons.grid(row=2, column=0)
+        for label, command, accent in [
+            ("Scan Steam", self._scan_steam, True),
+            ("Scan Epic", self._scan_epic, False),
+            ("Scan a folder", self._scan_folder, False),
+        ]:
+            ctk.CTkButton(
+                buttons, text=label, height=32, width=130, corner_radius=7,
+                font=self._font(11, "bold"),
+                fg_color=self.palette["accent"] if accent else "transparent",
+                border_width=0 if accent else 1, border_color=COLORS["line"],
+                hover_color=self.palette["hover"] if accent else COLORS["line"],
+                command=command,
+            ).pack(side="left", padx=4)
+
+    def _clear_view_filters(self) -> None:
+        self.search_query = ""
+        self.filter_value = "All Games"
+        self._render_content()
 
     def _visible_rows(self) -> list[LibraryRow]:
         rows = list(self.controller.snapshot().rows)
@@ -943,12 +1035,7 @@ class ModernShell(ctk.CTk):
         if self.tab == "Artwork":
             self._build_artwork_tab(body, row)
         elif self.tab == "Details":
-            self._build_kv_rows(body, [
-                ("Launch target", row.launch_target or "\u2014"),
-                ("Launch arguments", row.launch_arguments or "\u2014"),
-                ("Working directory", row.working_directory or "\u2014"),
-                ("Launch target exists", "Unknown" if row.launch_target_exists is None else str(row.launch_target_exists)),
-            ])
+            self._build_details_tab(body, row)
         elif self.tab == "Metadata":
             self._build_kv_rows(body, [
                 ("Title", row.title), ("Source", row.source), ("External ID", row.external_id or "\u2014"),
@@ -968,6 +1055,155 @@ class ModernShell(ctk.CTk):
             card.grid_columnconfigure(1, weight=1)
             ctk.CTkLabel(card, text=label, anchor="w", text_color=COLORS["muted"], font=self._font(11)).grid(row=0, column=0, padx=12, pady=8, sticky="w")
             ctk.CTkLabel(card, text=value, anchor="e", font=self._font(11, "bold")).grid(row=0, column=1, padx=12, pady=8, sticky="e")
+
+    # ---------- Details tab (manual overrides) ----------
+
+    def _source_values(self, row: LibraryRow) -> dict[str, str]:
+        """The launcher's own values for a row, ignoring any overrides."""
+        resolved = self.store.resolve_item(row.item_id)
+        record = resolved.record if resolved is not None else None
+        return {
+            "display_title": getattr(record, "title", "") or "",
+            "launch_target": getattr(record, "launch_target", "") or "",
+            "launch_arguments": getattr(record, "launch_arguments", "") or "",
+            "working_directory": getattr(record, "working_directory", "") or "",
+            "notes": "",
+        }
+
+    def _current_values(self, row: LibraryRow) -> dict[str, str]:
+        resolved = self.store.resolve_item(row.item_id)
+        return {
+            "display_title": row.title,
+            "launch_target": row.launch_target,
+            "launch_arguments": row.launch_arguments,
+            "working_directory": row.working_directory,
+            "notes": getattr(resolved, "notes", "") or "",
+        }
+
+    def _build_details_tab(self, parent, row: LibraryRow) -> None:
+        current = self._current_values(row)
+        launch_state = (
+            "Unknown" if row.launch_target_exists is None
+            else ("Yes" if row.launch_target_exists else "No — this game cannot be written to Steam")
+        )
+        rows = [(field_label(field), current[field] or "—") for field in OVERRIDE_FIELDS]
+        rows.append(("Launch target exists", launch_state))
+        self._build_kv_rows(parent, rows)
+
+        overridden = sorted(row.overridden_fields)
+        footer = ctk.CTkFrame(parent, fg_color="transparent")
+        footer.grid(row=len(rows), column=0, sticky="ew", pady=(10, 0))
+        ctk.CTkLabel(
+            footer,
+            text=(
+                "Overridden: " + ", ".join(field_label(field) for field in overridden)
+                if overridden else "No manual overrides — showing the launcher's own values."
+            ),
+            anchor="w", text_color=COLORS["muted"], font=self._font(10), wraplength=420,
+        ).pack(fill="x", padx=4, pady=(0, 8))
+        ctk.CTkButton(
+            footer, text="Edit details", height=30, width=130, corner_radius=7,
+            font=self._font(11, "bold"), fg_color=self.palette["accent"],
+            hover_color=self.palette["hover"], command=lambda: self._edit_details(row.item_id),
+        ).pack(side="left", padx=4)
+        if overridden:
+            ctk.CTkButton(
+                footer, text="Reset to source", height=30, width=140, corner_radius=7,
+                font=self._font(11, "bold"), fg_color="transparent", border_width=1,
+                border_color=COLORS["line"], text_color=COLORS["danger"],
+                hover_color=COLORS["line"], command=lambda: self._reset_details(row.item_id),
+            ).pack(side="left", padx=4)
+
+    def _edit_details(self, item_id: str) -> None:
+        row = self.controller.row_map().get(item_id)
+        if row is None:
+            return
+        current = self._current_values(row)
+
+        dialog = ctk.CTkToplevel(self)
+        dialog.title(f"Edit details — {row.title}")
+        dialog.geometry("620x430")
+        dialog.configure(fg_color=COLORS["window"])
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            dialog,
+            text="Blank a field, or type the launcher's own value, to drop the override.",
+            anchor="w", text_color=COLORS["muted"], font=self._font(10), wraplength=580,
+        ).grid(row=0, column=0, padx=18, pady=(16, 8), sticky="ew")
+
+        entries: dict[str, ctk.CTkEntry] = {}
+        body = ctk.CTkFrame(dialog, fg_color=COLORS["panel"], corner_radius=10)
+        body.grid(row=1, column=0, padx=16, sticky="nsew")
+        body.grid_columnconfigure(1, weight=1)
+        dialog.grid_rowconfigure(1, weight=1)
+        for index, field in enumerate(OVERRIDE_FIELDS):
+            ctk.CTkLabel(
+                body, text=field_label(field), anchor="w", width=140,
+                text_color=COLORS["muted"], font=self._font(11),
+            ).grid(row=index, column=0, padx=(14, 8), pady=8, sticky="w")
+            entry = ctk.CTkEntry(
+                body, height=32, corner_radius=7, border_color=COLORS["line"],
+                fg_color=COLORS["window"], font=self._font(11),
+            )
+            entry.insert(0, current.get(field, ""))
+            entry.grid(row=index, column=1, padx=(0, 14), pady=8, sticky="ew")
+            entries[field] = entry
+
+        actions = ctk.CTkFrame(dialog, fg_color="transparent")
+        actions.grid(row=2, column=0, padx=16, pady=14, sticky="ew")
+
+        def save() -> None:
+            edits = {field: entry.get() for field, entry in entries.items()}
+            self._save_details(item_id, edits)
+            dialog.destroy()
+
+        ctk.CTkButton(
+            actions, text="Save", height=32, width=110, corner_radius=7,
+            font=self._font(11, "bold"), fg_color=self.palette["accent"],
+            hover_color=self.palette["hover"], command=save,
+        ).pack(side="right", padx=4)
+        ctk.CTkButton(
+            actions, text="Cancel", height=32, width=110, corner_radius=7,
+            font=self._font(11, "bold"), fg_color="transparent", border_width=1,
+            border_color=COLORS["line"], text_color=COLORS["muted"],
+            hover_color=COLORS["line"], command=dialog.destroy,
+        ).pack(side="right", padx=4)
+
+    def _active_overrides(self, row: LibraryRow) -> dict[str, str]:
+        """The override values currently in effect, for change reporting."""
+        current = self._current_values(row)
+        return {
+            field: current.get(field, "") if field in row.overridden_fields or field == "notes" else ""
+            for field in OVERRIDE_FIELDS
+        }
+
+    def _save_details(self, item_id: str, edits: dict[str, str]) -> None:
+        row = self.controller.row_map().get(item_id)
+        if row is None:
+            return
+        previous = self._active_overrides(row)
+        try:
+            overrides = build_manual_overrides(item_id, edits, self._source_values(row))
+            self.store.save_overrides(overrides)
+        except (ValueError, KeyError) as exc:
+            messagebox.showerror("Edit details", f"Could not save these details: {exc}")
+            return
+        self.controller.refresh(include_missing=self.include_missing)
+        self._set_status(override_change_message(describe_override_changes(previous, overrides)))
+        self._render_library_card()
+        self._render_content()
+
+    def _reset_details(self, item_id: str) -> None:
+        if not messagebox.askyesno(
+            "Reset to source",
+            "Drop every manual override for this game and go back to the values its "
+            "launcher reports?\n\nArtwork locks and rejected matches are not affected.",
+        ):
+            return
+        self._save_details(item_id, {field: "" for field in OVERRIDE_FIELDS})
 
     def _build_artwork_tab(self, parent, row: LibraryRow) -> None:
         slots = [("Portrait", "grid", "600 \u00d7 900"), ("Wide Capsule", "wide", "616 \u00d7 353"),
@@ -1565,6 +1801,8 @@ class ModernShell(ctk.CTk):
             messagebox.showerror("Scan failed to start", str(exc))
 
     def _poll_jobs(self) -> None:
+        if self._closing:
+            return
         for event in self.controller.poll_events():
             if event.snapshot is not None:
                 self._render_library_card()
@@ -1583,7 +1821,7 @@ class ModernShell(ctk.CTk):
             elif job_event.state is JobState.FAILED:
                 self._set_status(f"Scan failed: {job_event.error or job_event.message}")
         self._refresh_cancel_button()
-        self.after(200, self._poll_jobs)
+        self._poll_after_id = self.after(200, self._poll_jobs)
 
     def _handle_bulk_artwork_event(self, event: JobEvent) -> None:
         accepted = rejected = 0

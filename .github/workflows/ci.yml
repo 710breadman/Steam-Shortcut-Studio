@@ -117,6 +117,9 @@ jobs:
       - name: Run library persistence tests
         run: python tests/library_store_test.py
 
+      - name: Run manual override edit tests
+        run: python tests/library_edits_test.py
+
       - name: Run modern library view tests
         run: python tests/modern_library_view_test.py
 
