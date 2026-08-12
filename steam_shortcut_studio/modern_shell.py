@@ -10,20 +10,17 @@ from tkinter import filedialog, messagebox, simpledialog, StringVar
 from typing import Callable
 from uuid import uuid4
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+import customtkinter as ctk
 
-import customtkinter as ctk  # noqa: E402
-
-from steam_shortcut_studio.artwork import copy_all_artwork_to_steam, download_asset  # noqa: E402
-from steam_shortcut_studio.artwork_bulk_search import build_provider_searcher  # noqa: E402
-from steam_shortcut_studio.artwork_queue_status import (  # noqa: E402
+from . import __app_name__, __version__
+from .artwork import copy_all_artwork_to_steam, download_asset
+from .artwork_bulk_search import build_provider_searcher
+from .artwork_queue_status import (
     artwork_plan_no_jobs_message,
     artwork_plan_selection_required_message,
     artwork_queue_submission_message,
 )
-from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
+from .artwork_review_workspace import (
     ArtworkReviewQueue,
     artwork_queue_progress_text,
     artwork_review_action_message,
@@ -35,41 +32,23 @@ from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
     build_artwork_review_summary,
     review_result_slot_count,
 )
-from steam_shortcut_studio.artwork_search_service import ArtworkProviderSearchService  # noqa: E402
-from steam_shortcut_studio.artwork_sources import (  # noqa: E402
-    ARTWORK_SOURCE_LABELS,
-)
-from steam_shortcut_studio.bulk_artwork import (  # noqa: E402
-    ArtworkSearchMode,
-    BulkArtworkCoordinator,
-)
-from steam_shortcut_studio.image_validation import validate_artwork_file  # noqa: E402
-from steam_shortcut_studio.job_queue import JobEvent, JobExecutionResult  # noqa: E402
-from steam_shortcut_studio.jobs import JobKind, JobRecord, JobState, TERMINAL_JOB_STATES  # noqa: E402
-from steam_shortcut_studio.library_controller import (  # noqa: E402
-    LibraryController,
-    LibraryRow,
-)
-from steam_shortcut_studio.library_store import (  # noqa: E402
-    ArtworkLock,
-    LibraryStore,
-    default_library_database,
-)
-from steam_shortcut_studio.models import ArtworkAsset, DetectedGame  # noqa: E402
-from steam_shortcut_studio.selection import SelectionState  # noqa: E402
-from steam_shortcut_studio.modern_library_view import (  # noqa: E402
-    format_size,
-    initial_active_item_id,
-)
-from steam_shortcut_studio.settings_store import AppSettings, SettingsStore  # noqa: E402
-from steam_shortcut_studio.shortcut_transactions import upsert_games_transactional  # noqa: E402
-from steam_shortcut_studio.sources.epic import (  # noqa: E402
-    EpicManifestAdapter,
-    default_epic_manifest_dir,
-)
-from steam_shortcut_studio.sources.local import FolderScannerAdapter  # noqa: E402
-from steam_shortcut_studio.sources.steam import SteamLibraryAdapter  # noqa: E402
-from steam_shortcut_studio.steam_detection import (  # noqa: E402
+from .artwork_search_service import ArtworkProviderSearchService
+from .artwork_sources import ARTWORK_SOURCE_LABELS
+from .bulk_artwork import ArtworkSearchMode, BulkArtworkCoordinator
+from .image_validation import validate_artwork_file
+from .job_queue import JobEvent, JobExecutionResult
+from .jobs import JobKind, JobRecord, JobState, TERMINAL_JOB_STATES
+from .library_controller import LibraryController, LibraryRow
+from .library_store import ArtworkLock, LibraryStore, default_library_database
+from .models import ArtworkAsset, DetectedGame
+from .modern_library_view import format_size, initial_active_item_id
+from .selection import SelectionState
+from .settings_store import AppSettings, SettingsStore
+from .shortcut_transactions import upsert_games_transactional
+from .sources.epic import EpicManifestAdapter, default_epic_manifest_dir
+from .sources.local import FolderScannerAdapter
+from .sources.steam import SteamLibraryAdapter
+from .steam_detection import (
     detect_steam_install,
     find_steam_profiles,
     is_steam_running,
@@ -77,12 +56,12 @@ from steam_shortcut_studio.steam_detection import (  # noqa: E402
     reopen_steam,
     shutdown_steam_for_write,
 )
-from steam_shortcut_studio.steamgrid import SteamGridDbClient  # noqa: E402
-from steam_shortcut_studio.transaction_history import (  # noqa: E402
+from .steamgrid import SteamGridDbClient
+from .transaction_history import (
     list_artwork_transaction_history,
     list_transaction_history,
 )
-from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
+from .ui_library_adapter import (
     apply_locked_artwork,
     artwork_copy_skip_reason,
     game_from_library_row,
@@ -92,6 +71,8 @@ from steam_shortcut_studio.ui_library_adapter import (  # noqa: E402
 )
 
 LOGGER = logging.getLogger(__name__)
+PACKAGE_ROOT = Path(__file__).resolve().parent
+REPO_ROOT = PACKAGE_ROOT.parent
 
 
 PALETTES = {
@@ -163,7 +144,8 @@ class ModernShell(ctk.CTk):
         self.settings_store = settings_store or SettingsStore()
         self.settings: AppSettings = self.settings_store.load()
         self.include_missing = include_missing
-        self.store = LibraryStore(database or default_library_database())
+        self.database_path = Path(database or default_library_database())
+        self.store = LibraryStore(self.database_path)
         self.controller = LibraryController(self.store)
 
         self.accent_name = "Ocean Blue"
@@ -660,14 +642,59 @@ class ModernShell(ctk.CTk):
         footer.grid(row=2, column=1, sticky="ew")
         footer.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(footer, textvariable=self.status_text, anchor="w", text_color=COLORS["muted"], font=self._font(10)).grid(row=0, column=0, padx=14, pady=5, sticky="ew")
+        self.cancel_button = ctk.CTkButton(
+            footer, text="Cancel", height=20, width=64, corner_radius=6, font=self._font(9, "bold"),
+            fg_color="transparent", border_width=1, border_color=COLORS["line"],
+            text_color=COLORS["muted"], hover_color=COLORS["line"], command=self._cancel_running_jobs,
+        )
+        self.cancel_button.grid(row=0, column=1, padx=(0, 10))
+        self.cancel_button.grid_remove()
         steam_state = "Steam path set" if self.settings.steam_path else "Steam path not configured"
-        ctk.CTkLabel(footer, text=f"\u25cf  {steam_state}", text_color=COLORS["success"] if self.settings.steam_path else COLORS["warning"], font=self._font(10)).grid(row=0, column=1, padx=14)
+        ctk.CTkLabel(footer, text=f"\u25cf  {steam_state}", text_color=COLORS["success"] if self.settings.steam_path else COLORS["warning"], font=self._font(10)).grid(row=0, column=2, padx=14)
+
+    def _running_job_ids(self) -> tuple[str, ...]:
+        """Job IDs this shell started that have not reached a terminal state."""
+        tracked = set(self._pending_action_jobs) | set(self.review_queue.job_ids)
+        return tuple(
+            job_id
+            for job_id in tracked
+            if (record := self.controller.job_queue.get(job_id)) is not None
+            and record.state not in TERMINAL_JOB_STATES
+        )
+
+    def _refresh_cancel_button(self) -> None:
+        if not hasattr(self, "cancel_button"):
+            return
+        if self._running_job_ids():
+            self.cancel_button.grid()
+        else:
+            self.cancel_button.grid_remove()
+
+    def _cancel_running_jobs(self) -> None:
+        """Ask in-flight jobs to stop at their next safe checkpoint.
+
+        Cancellation is cooperative: `BulkArtworkCoordinator` and the provider
+        searcher check the token between candidates, so a search stops without
+        leaving a half-written cache entry. An Apply Changes job that has
+        already started writing is *not* interrupted mid-transaction -- the
+        transaction services own that, and their rollback is what makes a
+        failed write safe.
+        """
+        running = self._running_job_ids()
+        if not running:
+            return
+        for job_id in running:
+            self.controller.job_queue.cancel(job_id)
+        self._set_status(f"Cancel requested for {len(running)} job(s). Stopping at the next safe checkpoint\u2026")
 
     # ---------- content dispatch ----------
 
     def _render_content(self) -> None:
         for child in self.content.winfo_children():
             child.destroy()
+        # Tk drops an image the moment nothing references it, so previews for
+        # the screen being replaced are released here and rebuilt below.
+        self._preview_images.clear()
         if self.nav == "Library":
             self._build_library_screen()
         else:
@@ -945,19 +972,40 @@ class ModernShell(ctk.CTk):
     def _build_artwork_tab(self, parent, row: LibraryRow) -> None:
         slots = [("Portrait", "grid", "600 \u00d7 900"), ("Wide Capsule", "wide", "616 \u00d7 353"),
                   ("Hero", "hero", "1920 \u00d7 620"), ("Logo", "logo", "512 \u00d7 256"), ("Icon", "icon", "256 \u00d7 256")]
+        locks = {lock.slot: lock for lock in self.store.list_artwork_locks(row.item_id)}
         grid = ctk.CTkFrame(parent, fg_color="transparent")
         grid.grid(row=0, column=0, sticky="ew")
         grid.grid_columnconfigure((0, 1), weight=1)
         for index, (name, slot_key, dims) in enumerate(slots):
             locked = slot_key in row.locked_slots
+            lock = locks.get(slot_key)
+            cached = Path(lock.local_path) if lock and lock.local_path else None
+            on_disk = cached is not None and cached.is_file()
             card = ctk.CTkFrame(grid, fg_color=COLORS["panel_alt"], border_width=1, border_color=COLORS["line"], corner_radius=10)
             card.grid(row=index // 2, column=index % 2, padx=5, pady=5, sticky="nsew")
-            status = "\u2713 Locked" if locked else "Not fetched"
+            if not locked:
+                status = "Not fetched"
+            elif on_disk:
+                status = "\u2713 Locked"
+            else:
+                # A lock whose cache file is gone cannot be applied to Steam,
+                # so say so here rather than showing a confident green check.
+                status = "\u26a0 Locked, file missing"
             ctk.CTkLabel(card, text=f"{name}  {dims}  {status}", anchor="w", text_color="#c8d8e8", font=self._font(10, "bold")).pack(fill="x", padx=10, pady=(10, 6))
             preview = ctk.CTkFrame(card, height=90, fg_color=COLORS["panel_soft"], corner_radius=8)
             preview.pack(fill="x", padx=10)
             preview.pack_propagate(False)
-            ctk.CTkLabel(preview, text=_monogram(row.title), font=self._font(15, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+            image = self._thumbnail(str(cached), box=(150, 84)) if on_disk else None
+            if image is not None:
+                self._preview_images.append(image)
+                ctk.CTkLabel(preview, image=image, text="").place(relx=0.5, rely=0.5, anchor="center")
+            else:
+                ctk.CTkLabel(preview, text=_monogram(row.title), font=self._font(15, "bold")).place(relx=0.5, rely=0.5, anchor="center")
+            if lock is not None and lock.source:
+                ctk.CTkLabel(
+                    card, text=f"via {lock.source}", anchor="w",
+                    text_color=COLORS["muted"], font=self._font(9),
+                ).pack(fill="x", padx=10, pady=(4, 0))
             buttons = ctk.CTkFrame(card, fg_color="transparent")
             buttons.pack(fill="x", padx=8, pady=8)
             for label in ["Auto Match", "Replace", "Clear"]:
@@ -1252,7 +1300,6 @@ class ModernShell(ctk.CTk):
     def _build_review_queue_section(
         self, parent, grid_row: int, pending_ids: tuple[str, ...], active_jobs: int
     ) -> None:
-        self._preview_images.clear()
         row_map = self.controller.row_map()
         titles = {item_id: row.title for item_id, row in row_map.items()}
         decisions = self.controller.artwork_decision_summary(pending_ids or ())
@@ -1525,6 +1572,7 @@ class ModernShell(ctk.CTk):
                 self._set_status(job_event.message or "Scan finished.")
             elif job_event.state is JobState.FAILED:
                 self._set_status(f"Scan failed: {job_event.error or job_event.message}")
+        self._refresh_cancel_button()
         self.after(200, self._poll_jobs)
 
     def _handle_bulk_artwork_event(self, event: JobEvent) -> None:
@@ -1607,16 +1655,65 @@ class ModernShell(ctk.CTk):
         ctk.CTkLabel(body, text="Extension support is not implemented in this build.", text_color=COLORS["muted"], font=self._font(12)).grid(row=0, column=0, sticky="w")
 
     def _build_about_screen(self) -> None:
-        body = self._simple_screen("About Steam Shortcut Studio", "Not affiliated with Valve, Steam, SteamGridDB, RAWG, or Wikimedia.")
-        self._list_row(body, 0, "\u24d8", "Project README", str(ROOT / "README.md"), "Open", lambda: webbrowser.open((ROOT / "README.md").as_uri()))
-        self._list_row(body, 1, "\u2699", "Settings file", str(self.settings_store.settings_path), None)
+        body = self._simple_screen(
+            f"About {__app_name__} {__version__}",
+            "Not affiliated with Valve, Steam, SteamGridDB, RAWG, or Wikimedia.",
+        )
+        row = 0
+        readme = REPO_ROOT / "README.md"
+        if readme.is_file():
+            # Absent in a packaged build, where there is no repo checkout.
+            self._list_row(
+                body, row, "\u24d8", "Project README", str(readme), "Open",
+                lambda: webbrowser.open(readme.as_uri()),
+            )
+            row += 1
+        self._list_row(body, row, "\u2699", "Settings file", str(self.settings_store.settings_path), None)
+        self._list_row(body, row + 1, "\u25a4", "Library database", str(self.database_path), None)
+        self._list_row(
+            body, row + 2, "\u270e", "Classic interface",
+            "Opens the original window; every workflow not yet in this UI lives there",
+            "Open", self._open_classic_ui,
+        )
+
+    def _open_classic_ui(self) -> None:
+        """Launch the legacy window in a separate process.
+
+        The classic UI still owns workflows this shell has not replaced (live
+        scan detail editing, per-game exe/title overrides, custom artwork
+        files). Running it in its own process keeps two Tk mainloops from
+        fighting, and keeps a shell crash from taking the classic UI with it.
+        """
+        if not messagebox.askyesno(
+            "Open classic interface",
+            "Open the original Steam Shortcut Studio window in a separate process?\n\n"
+            "Both interfaces read the same library database and settings. Avoid "
+            "applying changes from both at once.",
+        ):
+            return
+        # A frozen build has no importable -m entry point, so it re-launches
+        # itself with the flag main.py understands instead.
+        frozen = getattr(sys, "frozen", False)
+        command = (
+            [sys.executable, "--classic"] if frozen
+            else [sys.executable, "-m", "steam_shortcut_studio.app"]
+        )
+        try:
+            subprocess.Popen(command, cwd=None if frozen else str(REPO_ROOT))
+            self._set_status("Opened the classic interface in a separate process.")
+        except OSError as exc:
+            messagebox.showerror(
+                "Classic interface",
+                f"Could not start the classic interface: {exc}",
+            )
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     ctk.set_appearance_mode("dark")
     app = ModernShell()
     app.mainloop()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

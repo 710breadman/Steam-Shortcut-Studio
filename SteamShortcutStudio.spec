@@ -18,7 +18,10 @@ datas += [
 ]
 binaries = []
 hiddenimports = []
-for package in ('PIL', 'certifi'):
+# customtkinter ships its own theme JSON and assets, so it must be collected
+# whole -- the modern shell is the default interface and will not start
+# without them.
+for package in ('PIL', 'certifi', 'customtkinter'):
     tmp_ret = collect_all(package)
     datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 

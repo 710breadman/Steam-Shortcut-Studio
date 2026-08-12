@@ -133,8 +133,9 @@ steam_shortcut_studio/transaction_history.py
 Modern UI references:
 
 ```text
-prototypes/modern_shell.py
-prototypes/modern_library.py
+steam_shortcut_studio/modern_shell.py   (the shipped default interface)
+main.py                                 (entry point; --classic opens the legacy window)
+prototypes/modern_library.py            (dev launcher for the same shell)
 docs/UI_UX_TARGET.md
 ```
 
@@ -153,8 +154,9 @@ The modern shell reads that same database, and can write Steam — but only on a
 explicit Apply Changes, and only through the verified transaction services:
 
 ```text
-python -m pip install -r requirements-ui-prototype.txt
-python prototypes/modern_library.py
+python -m pip install -r requirements.txt
+python main.py               # modern shell, the shipped default
+python main.py --classic     # the original window
 ```
 
 ## Validation Expectations

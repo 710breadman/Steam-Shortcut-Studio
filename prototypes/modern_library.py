@@ -1,3 +1,9 @@
+"""Developer entry point for the modern shell.
+
+The shell itself now lives in `steam_shortcut_studio/modern_shell.py` -- it is
+production code and ships in packaged builds through `main.py`. This file stays
+as the convenience launcher that `run.bat` / `run.ps1` and the docs point at.
+"""
 from __future__ import annotations
 
 import argparse
@@ -12,7 +18,7 @@ if str(ROOT) not in sys.path:
 import customtkinter as ctk  # noqa: E402
 
 from steam_shortcut_studio.library_store import default_library_database  # noqa: E402
-from prototypes import modern_shell  # noqa: E402
+from steam_shortcut_studio.modern_shell import ModernShell  # noqa: E402
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -36,7 +42,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     ctk.set_appearance_mode("dark")
-    app = modern_shell.ModernShell(args.database, include_missing=args.include_missing)
+    app = ModernShell(args.database, include_missing=args.include_missing)
     app.mainloop()
     return 0
 

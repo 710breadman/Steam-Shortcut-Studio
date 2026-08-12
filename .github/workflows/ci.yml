@@ -165,11 +165,14 @@ jobs:
       - name: Install optional prototype dependency
         run: python -m pip install --upgrade pip -r requirements-ui-prototype.txt
 
-      - name: Compile modern prototypes
-        run: python -m py_compile prototypes/modern_shell.py prototypes/modern_library.py
+      - name: Compile modern shell and launchers
+        run: python -m py_compile steam_shortcut_studio/modern_shell.py prototypes/modern_library.py main.py
 
-      - name: Import modern shells without creating a window
-        run: python -c "import runpy; shell = runpy.run_path('prototypes/modern_shell.py', run_name='prototype_import'); library = runpy.run_path('prototypes/modern_library.py', run_name='prototype_library_import'); assert 'ModernShell' in shell; assert 'main' in library"
+      - name: Import modern shell without creating a window
+        run: python -c "from steam_shortcut_studio.modern_shell import ModernShell; import main; assert main.run_modern and main.run_classic; print('ok')"
+
+      - name: Entry point defaults to the modern shell and accepts --classic
+        run: python tests/entry_point_test.py
 
       - name: Run persistent library prototype mapping tests
         run: python tests/prototype_library_test.py

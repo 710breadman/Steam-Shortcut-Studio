@@ -1,7 +1,10 @@
 # Steam Shortcut Studio is intentionally standard-library-first.
-# Pillow is optional, but enables JPEG/WebP artwork previews in the GUI.
+# Pillow enables JPEG/WebP artwork previews and the modern shell's artwork
+# thumbnails. The classic window still runs without it.
 Pillow>=10.0
-# Production CustomTkinter shell.
+# The modern shell is the default interface, so this is a production
+# dependency, not an optional one. main.py falls back to the classic window if
+# it is somehow missing from a build, but a correct build always includes it.
 customtkinter==6.0.0
 # Bundled Linux builds use certifi so HTTPS artwork/API calls do not depend on
 # a distro-specific CA bundle being visible from the PyInstaller runtime.

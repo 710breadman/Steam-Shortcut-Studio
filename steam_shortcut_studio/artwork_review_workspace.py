@@ -228,6 +228,11 @@ class ArtworkReviewQueue:
         return job_id in self._job_items
 
     @property
+    def job_ids(self) -> tuple[str, ...]:
+        """Jobs submitted but not yet finished, for cancellation and busy state."""
+        return tuple(self._job_items)
+
+    @property
     def active_job_count(self) -> int:
         return len(self._job_items)
 

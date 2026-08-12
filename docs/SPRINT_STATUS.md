@@ -30,7 +30,7 @@ Before changing code:
 - **Next visible milestone:** Genuinely strong complete matches auto-accept instead of every match needing review
 - **Launcher fix:** `run.ps1` and `run.bat` now require a Python with `customtkinter`, so repo launch helpers open the modern shell instead of the bundled legacy fallback.
 - **Priority feature after that:** Remaining Windows launcher adapters (GOG, Playnite, EA, Ubisoft, Battle.net)
-- **Latest UI slice:** `prototypes/modern_shell.py` is the real production shell (launched by `run.bat` / `run.ps1` via `prototypes/modern_library.py`). It reads the real persistent library through `LibraryController` / `LibraryStore`, runs every long operation on `BackgroundJobQueue` with Tk-thread polling, and has no mock game data left. Apply Changes performs real transactional shortcut writes *and* real locked-artwork copies into Steam's grid folder in one pass; per-slot Auto Match / Replace / Clear perform real provider search, download, validation, and lock/unlock against local cache + SQLite only.
+- **Latest UI slice:** `steam_shortcut_studio/modern_shell.py` is the shipped default interface. `main.py` opens it, `main.py --classic` opens the original window, and `run.bat` / `run.ps1` now both run that same entry point. It reads the real persistent library through `LibraryController` / `LibraryStore`, runs every long operation on `BackgroundJobQueue` with Tk-thread polling, and has no mock game data left. Apply Changes performs real transactional shortcut writes *and* real locked-artwork copies into Steam's grid folder in one pass; per-slot and bulk artwork matching are both live.
 - **Verification note, 2026-08-12:** every `tests/*_test.py` suite in the repo passes on Windows / Python 3.11, plus `python -m compileall -q steam_shortcut_studio tests main.py` and the CI `ui-prototype` import check. Two suites (`prototype_library_test.py`, `prototype_shell_selection_test.py`) had to be repaired first — see the Validation log for details.
 
 ## Approved Product Decisions
@@ -181,14 +181,16 @@ click is already one supervised action.
 
 ## Modern UI
 
-### Modern Shell — Live, No Longer Read-Only
+### Modern Shell — Live and Shipped
 
-`prototypes/modern_shell.py` is no longer a prototype in behavior, only in
-location. It is what `run.bat` / `run.ps1` launch.
+The shell lives at `steam_shortcut_studio/modern_shell.py` and is the default
+interface in packaged builds, not a prototype in any sense.
 
 ```text
-python -m pip install -r requirements-ui-prototype.txt
-python prototypes/modern_library.py
+python -m pip install -r requirements.txt
+python main.py                 # modern shell (default)
+python main.py --classic       # original window
+python prototypes/modern_library.py   # dev launcher, same shell
 ```
 
 Implemented:
@@ -229,6 +231,15 @@ Bulk artwork review queue (live):
 - [x] Accept / Reject / Skip / Retry per item, plus Accept All / Reject All / Skip All
 - [x] Accept locks locally only — Apply Changes stays the single path into Steam
 - [x] Failed jobs surface their error instead of being queued as reviewable
+
+Shipping and polish (live):
+
+- [x] The shell is packaged and shipped — `main.py` opens it by default, `--classic` opens the legacy window, and a missing GUI dependency degrades to the classic window instead of failing to start
+- [x] `requirements.txt`, the PyInstaller spec, and the Linux release build all collect `customtkinter`
+- [x] `run.bat` and `run.ps1` run the same entry point as a packaged build (they previously launched two *different* UIs)
+- [x] Artwork tab shows the real locked image, its provider, and an explicit "file missing" state when the cache entry is gone
+- [x] Footer cancel control appears while this shell's jobs are in flight
+- [x] About screen exposes settings path, library database path, and a way into the classic interface
 
 Not yet done:
 
@@ -525,6 +536,20 @@ Bulk artwork review queue, 2026-08-12:
 - Added `tests/artwork_bulk_search_test.py` (7 assertions incl. a regression guard that the placeholder scores can never clear `ArtworkMatchPolicy`'s auto thresholds) and 10 new cases in `tests/artwork_review_workspace_test.py`, covering the coordinator → queue → accept/reject chain against a real `LibraryStore`
 - Added the new suite to `.github/workflows/ci.yml`
 - Ran every `tests/*_test.py` on Windows / Python 3.11: all pass. Also constructed a real `ModernShell` against a temporary library and rendered all ten screens, including the review queue with one decodable and one missing candidate file, without error
+
+Shipping the modern shell, 2026-08-12:
+
+- Found that packaged releases shipped the **legacy** UI: `build-release.yml` builds `main.py` → `steam_shortcut_studio.app` → `.ui.main`, and `requirements.txt` did not even list `customtkinter`, so the modern shell could not have been packaged at all. Every modern-shell feature reached zero released users.
+- Also found `run.ps1` launched the legacy UI while `run.bat` launched the modern shell — the two dev launchers disagreed about what the app is.
+- Moved `prototypes/modern_shell.py` to `steam_shortcut_studio/modern_shell.py` and converted it to relative imports; `prototypes/modern_library.py` remains as the dev launcher
+- Rewrote `main.py` as a real entry point: modern shell by default, `--classic` for the legacy window, `--database` / `--include-missing` pass-through, and an `ImportError` fallback to the classic window so a packaging mistake degrades the interface instead of leaving no app. Unexpected errors still propagate rather than being masked by the fallback.
+- Added `customtkinter` to `requirements.txt`, `SteamShortcutStudio.spec` (`collect_all`, needed for its theme JSON), and the Linux `--collect-all` list
+- Pointed `run.bat` and `run.ps1` at `main.py` so developers run exactly what users run
+- Added `tests/entry_point_test.py` (5 cases: default routing, `--classic`, argument pass-through, the degrade-to-classic path, and a guard that a real failure is not silently swallowed) and wired it into CI
+- Artwork tab now renders the real locked image with its provider, and distinguishes "✓ Locked" from "⚠ Locked, file missing" instead of showing a confident check for an unusable lock
+- Added a footer Cancel control that cancels this shell's in-flight jobs cooperatively
+- Re-ran every `tests/*_test.py`: all pass. Re-ran the shell smoke render with a real locked PNG plus a lock pointing at a deleted file; all ten screens render.
+- **Not verified here:** no PyInstaller build was run (PyInstaller is not installed in this environment), so the packaging changes are correct by inspection but unproven. Build both targets before tagging a release.
 
 ## Known Risks
 
