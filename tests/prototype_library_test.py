@@ -6,11 +6,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from prototypes.modern_library import format_size, load_library_games  # noqa: E402
 from steam_shortcut_studio.library_store import (  # noqa: E402
     ArtworkLock,
     LibraryStore,
     ManualOverrides,
+)
+from steam_shortcut_studio.modern_library_view import (  # noqa: E402
+    format_size,
+    load_modern_library_rows,
 )
 from steam_shortcut_studio.sources.base import SourceLibraryItem, stable_source_item_id  # noqa: E402
 
@@ -47,10 +50,10 @@ def test_persistent_library_maps_to_modern_shell_rows() -> None:
             ArtworkLock(item_id=customized.stable_id, slot="grid")
         )
 
-        games = load_library_games(database)
-        by_title = {game.title: game for game in games}
+        rows = load_modern_library_rows(database)
+        by_title = {row.title: row for row in rows}
 
-        assert list(by_title) == ["My Custom Title", "Ready Game", "Review Game"]
+        assert [row.title for row in rows] == ["My Custom Title", "Ready Game", "Review Game"]
         assert by_title["Ready Game"].source == "Epic"
         assert by_title["Ready Game"].platform == "Windows"
         assert by_title["Ready Game"].size == "5.0 GB"
@@ -68,13 +71,13 @@ def test_missing_items_are_hidden_by_default_and_optional() -> None:
         store.replace_source_snapshot("epic", [present, missing])
         store.replace_source_snapshot("epic", [present])
 
-        visible = load_library_games(database)
-        all_games = load_library_games(database, include_missing=True)
+        visible = load_modern_library_rows(database)
+        all_rows = load_modern_library_rows(database, include_missing=True)
 
-        assert [game.title for game in visible] == ["Present"]
-        assert {game.title for game in all_games} == {"Present", "Missing"}
-        missing_game = next(game for game in all_games if game.title == "Missing")
-        assert missing_game.status == "Missing"
+        assert [row.title for row in visible] == ["Present"]
+        assert {row.title for row in all_rows} == {"Present", "Missing"}
+        missing_row = next(row for row in all_rows if row.title == "Missing")
+        assert missing_row.status == "Missing"
 
 
 def test_size_formatting_is_stable() -> None:

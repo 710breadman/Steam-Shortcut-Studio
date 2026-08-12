@@ -58,7 +58,8 @@ Inspect stored library:
 python -m steam_shortcut_studio.cli list-library
 ```
 
-Open real stored games in the approved modern read-only interface:
+Open the real modern interface (this one can write Steam, but only via Apply
+Changes, and only through the verified transaction services):
 
 ```powershell
 python -m pip install -r requirements-ui-prototype.txt
@@ -79,14 +80,28 @@ python prototypes/modern_library.py
 
 ## Remaining High-Priority Work
 
-1. Connect `LibraryController` to the production legacy UI incrementally.
-2. Replace the production game list with the modern multi-select table.
-3. Extract artwork/metadata provider orchestration from `ui.py`.
-4. Connect real provider results to `BulkArtworkCoordinator`.
-5. Build the production artwork review queue and progress controls.
-6. Connect transaction history to the production Backups view.
-7. Add GOG, Playnite, EA, Ubisoft, and Battle.net adapters.
-8. Expand safe native Steam controls only after field ownership research and rollback tests.
+1. Build the bulk artwork review queue in the modern shell, then wire the
+   top-bar `Auto-Art` tile and bulk `Find Art` button to
+   `BulkArtworkCoordinator` behind it. This is the only functional stub left in
+   the modern shell.
+2. Replace the hardcoded 70/60 confidence placeholders with real identity and
+   set-coherence scoring, so `ArtworkMatchPolicy`'s auto-accept path (92/85)
+   becomes reachable instead of routing every match to review.
+3. Add GOG, Playnite, EA, Ubisoft, and Battle.net adapters.
+4. Reduce `ui.py` (still 5,600+ lines) as the modern shell takes over its
+   workflows; retire legacy paths only once the modern equivalent is proven.
+5. Expand safe native Steam controls only after field ownership research and
+   rollback tests.
+
+## Completed Since the Last Revision
+
+- `LibraryController` is connected to both the legacy UI and the modern shell.
+- Artwork and metadata provider orchestration is extracted from `ui.py`.
+- Real provider results reach `BulkArtworkCoordinator` on the legacy path.
+- Transaction history is connected to the Backups views, including artwork
+  transactions, which were previously invisible everywhere.
+- The modern shell writes real shortcuts and copies real locked artwork into
+  Steam through the existing verified transaction services.
 
 ## Work Boundary
 

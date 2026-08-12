@@ -166,7 +166,7 @@ jobs:
         run: python -m py_compile prototypes/modern_shell.py prototypes/modern_library.py
 
       - name: Import modern shells without creating a window
-        run: python -c "import runpy; shell = runpy.run_path('prototypes/modern_shell.py', run_name='prototype_import'); library = runpy.run_path('prototypes/modern_library.py', run_name='prototype_library_import'); assert 'ModernShell' in shell; assert 'load_library_games' in library"
+        run: python -c "import runpy; shell = runpy.run_path('prototypes/modern_shell.py', run_name='prototype_import'); library = runpy.run_path('prototypes/modern_library.py', run_name='prototype_library_import'); assert 'ModernShell' in shell; assert 'main' in library"
 
       - name: Run persistent library prototype mapping tests
         run: python tests/prototype_library_test.py

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -115,6 +116,22 @@ def load_modern_library_rows(
         )
     rows.sort(key=lambda row: (row.title.casefold(), row.item_id))
     return rows
+
+
+def initial_active_item_id(
+    rows: Sequence[LibraryRow] | Sequence[ModernLibraryRow],
+    active_item_id: str | None = None,
+) -> str | None:
+    """Pick the row a freshly opened library view should inspect.
+
+    Keeps an existing `active_item_id` when it is still present, otherwise
+    falls back to the first row. Tk-free so the modern shell's startup
+    behaviour is testable without constructing a window.
+    """
+    item_ids = [row.item_id for row in rows]
+    if active_item_id is not None and active_item_id in item_ids:
+        return active_item_id
+    return item_ids[0] if item_ids else None
 
 
 def modern_library_row_for_game(game: DetectedGame) -> ModernLibraryRow:

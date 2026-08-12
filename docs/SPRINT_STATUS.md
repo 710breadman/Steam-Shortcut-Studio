@@ -24,12 +24,13 @@ Before changing code:
 - **First launcher complete:** Epic Games Launcher read-only manifest adapter
 - **Current controller foundation:** Tk-free persistent `LibraryController`
 - **Additional sources complete:** read-only native Steam and loose-folder adapters
-- **Current active engineering track:** Production modern-library UI integration
-- **Next visible milestone:** Production modern library view backed by persistent data
+- **Write loop complete:** modern shell Apply Changes writes real shortcuts *and* copies locked artwork into Steam's grid folder
+- **Current active engineering track:** Bulk artwork review queue in the modern shell
+- **Next visible milestone:** Top-bar Auto-Art / bulk `Find Art` backed by `BulkArtworkCoordinator` and a real review surface
 - **Launcher fix:** `run.ps1` and `run.bat` now require a Python with `customtkinter`, so repo launch helpers open the modern shell instead of the bundled legacy fallback.
-- **Priority feature after that:** Real provider integration for `Find Artwork for Selected`
-- **Latest UI slice:** Rule-file-driven UI reconstruction branch `codex/ui-reconstruction` now uses the app icon, a custom-drawn left navigation rail, a dark blue top command bar with larger command tiles and a split apply area, a modern search/filter strip in the library workspace, a 1448×1086 shell, and a reference-style visible library table in modern mode with checkbox/title/source/platform/last-played/size/menu columns. The shell now also forces the modern blue theme, hides the legacy menubar in modern mode, and keeps the persistent library startup path, selection helpers, scan orchestration, and modern table compatibility intact while moving the production window closer to the approved reference hierarchy.
-- **Verification note:** `python -m compileall -q steam_shortcut_studio tests main.py`, `python tests/foundation_test.py`, `python tests/settings_store_test.py`, `python tests/modern_library_view_test.py`, `python tests/ui_library_adapter_test.py`, `python tests/ui_compatibility_test.py`, `python tests/selection_bulk_controller_test.py`, `python -c "from steam_shortcut_studio.ui import MainWindow; app=MainWindow(); print('init-ok'); app.destroy()"`, and `python tests/smoke_test.py` passed. Fresh visual captures were taken from `_ui_after_menu_patch.png` after relaunch.
+- **Priority feature after that:** Remaining Windows launcher adapters (GOG, Playnite, EA, Ubisoft, Battle.net)
+- **Latest UI slice:** `prototypes/modern_shell.py` is the real production shell (launched by `run.bat` / `run.ps1` via `prototypes/modern_library.py`). It reads the real persistent library through `LibraryController` / `LibraryStore`, runs every long operation on `BackgroundJobQueue` with Tk-thread polling, and has no mock game data left. Apply Changes performs real transactional shortcut writes *and* real locked-artwork copies into Steam's grid folder in one pass; per-slot Auto Match / Replace / Clear perform real provider search, download, validation, and lock/unlock against local cache + SQLite only.
+- **Verification note, 2026-08-12:** every `tests/*_test.py` suite in the repo passes on Windows / Python 3.11, plus `python -m compileall -q steam_shortcut_studio tests main.py` and the CI `ui-prototype` import check. Two suites (`prototype_library_test.py`, `prototype_shell_selection_test.py`) had to be repaired first — see the Validation log for details.
 
 ## Approved Product Decisions
 
@@ -164,23 +165,26 @@ Remaining:
 - [x] Extract current provider searches from `ui.py`
 - [x] Convert provider responses into validated coordinator outcomes
 - [x] Persist accepted/rejected candidate decisions through the library store
-- [x] Connect progress, review, retry, and apply controls to the production modern UI
+- [x] Connect progress, review, retry, and apply controls to the legacy production UI
+- [ ] Connect bulk `Find Artwork for Selected` to the modern shell behind a real review queue
+
+The legacy `ui.py` path is fully wired (`queue_persistent_artwork_searches`,
+artwork decisions dialog, accept/reject/skip/retry). The modern shell is **not**:
+its top-bar `Auto-Art` tile and the bulk bar's `Find Art` button both open an
+explanatory dialog (`ModernShell._auto_art_info`) instead of queueing work,
+because unattended bulk matching needs a review surface the modern shell does
+not have yet. Per-slot Auto Match / Replace are fully live and deliberately
+bypass the coordinator (a per-slot click is one supervised action).
 
 ## Modern UI
 
-### Read-Only Prototype — Complete
+### Modern Shell — Live, No Longer Read-Only
 
-Run the design mock:
+`prototypes/modern_shell.py` is no longer a prototype in behavior, only in
+location. It is what `run.bat` / `run.ps1` launch.
 
 ```text
 python -m pip install -r requirements-ui-prototype.txt
-python prototypes/modern_shell.py
-```
-
-Run with real persistent library data:
-
-```text
-python -m steam_shortcut_studio.cli scan-epic
 python prototypes/modern_library.py
 ```
 
@@ -193,14 +197,31 @@ Implemented:
 - [x] Persistent library row mapping is shared through a production package view model
 - [x] Manual-title-aware ordering
 - [x] Multi-game selection
-- [x] Prototype selection state uses shared `SelectionState`
+- [x] Selection state uses shared `SelectionState` through `LibraryController`
+- [x] Startup active-row choice uses Tk-free `initial_active_item_id`
 - [x] Contextual bulk action bar
-- [x] Visible `Find Art` action
-- [x] Artwork inspector and match panel
-- [x] Backup/verification/rollback cards
+- [x] Artwork inspector with real locked-slot state
 - [x] Missing and review states
-- [x] Apply disabled in the prototype
+- [x] Real Steam / Epic / local-folder scans through `LibraryController.scan_source`
+- [x] Tools, Settings, and About screens backed by `SettingsStore`
+- [x] Backups screen shows both shortcut and artwork transactions
 - [x] Windows and Linux import/mapping tests
+
+Write path (all through the existing, unmodified transaction services):
+
+- [x] Apply Changes writes shortcuts via `shortcut_transactions.upsert_games_transactional`
+- [x] Apply Changes copies locked artwork via `artwork.copy_all_artwork_to_steam`
+- [x] Both run in one background job inside one Steam-closed window
+- [x] Preview and confirm report shortcut and artwork eligibility separately, with per-row skip reasons
+- [x] Per-game artwork failures are surfaced, not swallowed as legacy `ui.py` does
+- [x] Per-slot Auto Match / Replace / Clear operate on local cache + SQLite only
+
+Not yet done:
+
+- [ ] Bulk Auto-Art / bulk `Find Art` (gated behind the missing review queue)
+- [ ] Real identity/set-coherence scoring to replace hardcoded confidence values
+- [ ] Extensions screen (placeholder text only)
+- [ ] `_visible_rows` search/filter/sort still duplicates `modern_library_view.py` logic instead of reusing it
 
 ### Production UI — Remaining
 
@@ -285,7 +306,10 @@ python -m steam_shortcut_studio.cli transaction-history
 python prototypes/modern_library.py
 ```
 
-The CLI and prototype do not write Steam shortcuts or artwork.
+The CLI never writes Steam shortcuts or artwork — it only touches the app-owned
+SQLite database. The modern shell (`prototypes/modern_library.py`) **does** write
+Steam, but only when you click Apply Changes, and only through the verified
+transaction services.
 
 ## Merged Pull Requests
 
@@ -460,40 +484,71 @@ Latest local integration evidence, 2026-07-12:
 - Added `metadata_service_factory.py` so metadata provider toggles and `MetadataService` construction are tested outside `ui.py`
 - Re-ran the full local Windows Python 3.11 CI-equivalent suite after metadata service factory extraction; all commands in `Validation`, `tests/source_cli_test.py`, and optional prototype checks passed
 
+Modern shell integration evidence, 2026-08-11 to 2026-08-12 (commits `53c398b`, `3736998`, `b599cdc`):
+
+- Replaced the mock-data modern prototype with a real `LibraryController` / `LibraryStore`-backed shell and pointed `run.bat` / `run.ps1` at it
+- Added `ui_library_adapter.writable_game_from_library_row` / `writable_game_skip_reason` and wired Apply Changes to `shortcut_transactions.upsert_games_transactional`
+- Added `ui_library_adapter.artwork_copy_skip_reason` / `native_steam_artwork_game_from_library_row` / `apply_locked_artwork` — the previously missing bridge from persisted `ArtworkLock` rows to the `DetectedGame.artwork` shape `copy_all_artwork_to_steam` consumes — and extended Apply Changes to copy artwork in the same pass
+- Added `transaction_history.list_artwork_transaction_history`; artwork transactions were invisible on the Backups screen before this (wrong manifest filename/schema)
+- Wired per-slot Auto Match / Replace to real provider search, download, and `validate_artwork_file`, locking results through `LibraryStore.set_artwork_lock`
+- Verified live against a real Steam profile and real cached artwork: shortcut write, artwork copy under both a native Steam AppID and a computed non-Steam AppID, per-game failure isolation, and Backups visibility
+
+Suite repair and full-suite evidence, 2026-08-12:
+
+- Ran every `tests/*_test.py` on Windows / Python 3.11 and found `prototype_library_test.py` and `prototype_shell_selection_test.py` failing at import: the modern shell rewrite removed `MockGame`, `initial_selection_state`, `load_library_games`, and the prototype-local `format_size` those suites imported. The `ui-prototype` CI job asserted the same removed `load_library_games` symbol, so that job was red on `main` too.
+- Retargeted `prototype_library_test.py` at `modern_library_view.load_modern_library_rows` / `format_size`, which is where that mapping behavior now lives; assertions are unchanged in substance
+- Added Tk-free `modern_library_view.initial_active_item_id`, used it in `ModernShell._auto_select_first`, and retargeted `prototype_shell_selection_test.py` at it through a real `LibraryController`
+- Corrected the `ui-prototype` import assertion in `.github/workflows/ci.yml`
+- Re-ran the whole suite: every `tests/*_test.py` passes, plus `python -m compileall -q steam_shortcut_studio tests main.py` and the CI import check
+
 ## Known Risks
 
-- `ui.py` still contains too many responsibilities
+- `ui.py` still contains too many responsibilities (5,600+ lines)
 - Current provider download, auto-selection, and review presentation still run through the legacy UI path
-- The prototype must not become a second implementation of domain logic
+- **Confidence scores are placeholders.** `ui.py:3377` hardcodes `identity_score=70` / `set_coherence_score=60` for every real provider result, so `ArtworkMatchPolicy`'s automatic thresholds (92 / 85) are unreachable and no real match ever auto-accepts. Any UI that shows "match confidence" today would be showing a constant, not a measurement.
+- The modern shell must not become a second implementation of domain logic; `ModernShell._visible_rows` already duplicates search/filter/sort logic that `modern_library_view.py` owns
+- The Backups screen caps rendering at the 50 most recent transactions; older restore points exist on disk but are not listed
+- Two prototype suites silently broke when the modern shell was rewritten and were only caught by running the suite by hand — the `ui-prototype` CI job was red on `main` from `53c398b` until `2026-08-12`
 - Native Steam setting ownership varies by platform and may be overwritten by Steam
 - The custom VDF parser needs broader fixtures before supporting unknown future field types
 - New launcher database adapters must avoid locking or modifying live launcher data
 
 ## Exact Next Action
 
-Connect the production modern library table and selected-item actions incrementally on top of the controller-backed source scan bridge.
+**Already done — do not rebuild:** the modern shell's Apply Changes performs
+real, verified `shortcuts.vdf` writes *and* real locked-artwork copies into
+Steam's grid folder, both through the unmodified
+`shortcut_transactions.upsert_games_transactional` /
+`artwork.copy_all_artwork_to_steam` services, in one background job inside one
+Steam-closed window. Per-slot Auto Match / Replace / Clear are live. Artwork
+transactions are visible on the Backups screen via
+`transaction_history.list_artwork_transaction_history`.
 
-**Update:** `prototypes/modern_shell.py`'s Apply Changes action now performs
-real, verified `shortcuts.vdf` writes for `LibraryRow`-backed rows. This was a
-deliberate, explicitly-approved departure from item 2/4 below (previously
-"preserve stored-row read-only behavior" / "add no new Steam writes"): it
-routes through the same unmodified `shortcut_transactions.upsert_games_transactional`
-transaction service the legacy UI already uses, via a new write-eligible
-adapter (`ui_library_adapter.writable_game_from_library_row`) that only
-resolves `selected_exe` for non-Steam rows with a launch target that exists
-on disk right now — native Steam rows, empty launch targets, and missing
-executables are always skipped and reported, never silently written. Artwork
-writes remain unwired.
+**Next:** build the bulk artwork review queue in the modern shell, then wire
+the top-bar `Auto-Art` tile and the bulk bar's `Find Art` button to
+`BulkArtworkCoordinator` behind it.
 
-Next controller-backed UI work:
+Why this is the gate: `ArtworkMatchPolicy` sends anything below 92 identity /
+85 set-coherence to `JobState.NEEDS_REVIEW`, and the only real provider
+searcher in the repo (`ui.py:3372`) reports hardcoded 70/60 — so in practice
+*every* bulk match lands in review. Without a review surface the modern shell
+has nowhere to put those results, which is why the bulk buttons are gated
+rather than wired.
 
-1. Build the fuller artwork review workspace around persisted candidates and slot previews.
-2. Wire Auto-Art / per-slot Auto Match to `BulkArtworkCoordinator` + a real provider search, then extend Apply Changes to cover artwork writes the same way shortcut writes are now covered.
-3. Keep the legacy scan/write workflows available during migration.
-4. Do not add a second, competing implementation of the transaction/verification logic — extend `shortcut_transactions.py` / `artwork_transactions.py` if new write scenarios are needed, don't bypass them.
+Constraints for this work:
+
+1. Consume the existing Tk-free pieces — `BulkArtworkCoordinator`,
+   `ArtworkMatchPolicy`, `artwork_review_workspace.py`,
+   `LibraryController.accept_artwork_review_result` /
+   `reject_artwork_review_result` — do not reimplement them in the shell.
+2. Do not mirror legacy `ui.py`'s review logic into a third implementation.
+3. Keep the legacy scan/write workflows working during migration.
+4. Never bypass `shortcut_transactions.py` / `artwork_transactions.py` for writes.
+5. Accepting a candidate must only lock it locally; getting it into Steam stays
+   an explicit Apply Changes step.
 
 ## Next Codex Prompt
 
 ```text
-Read CODEX_START_HERE.md and all linked docs. The shortcut and artwork write paths are already transactional, verified, and live; the modern shell's Apply Changes button now writes real shortcuts through them for LibraryRow-backed rows (see ui_library_adapter.writable_game_from_library_row and modern_shell.py's _apply_changes/_apply_shortcuts_job). Do not rebuild any of this. Continue production modern-library UI integration in small slices: wire Auto-Art to BulkArtworkCoordinator + a real provider search, then extend Apply Changes to cover artwork writes through the existing artwork_transactions.py path. Keep `LibraryController` and `SelectionState` as the source of truth, preserve legacy scan/write behavior during migration, and always route writes through the existing transaction services rather than a new path. Use stable IDs. Add tests without constructing a Tk window. Run the complete existing suite and update `SPRINT_STATUS` with exact evidence. Small reviewable commits.
+Read CODEX_START_HERE.md and all linked docs. The shortcut AND artwork write paths are transactional, verified, and live in the modern shell's Apply Changes (see ui_library_adapter.writable_game_from_library_row / artwork_copy_skip_reason / apply_locked_artwork and modern_shell.py's _apply_changes/_apply_changes_job). Per-slot Auto Match/Replace/Clear are live too. Do not rebuild any of this. The next slice is the bulk artwork review queue in prototypes/modern_shell.py: a screen that shows NEEDS_REVIEW results from BulkArtworkCoordinator with per-slot candidate previews and accept/reject/skip/retry, then wiring the top-bar Auto-Art tile and the bulk bar's Find Art button to submit selected rows through the coordinator. Reuse artwork_review_workspace.py, LibraryController.accept_artwork_review_result/reject_artwork_review_result, and ArtworkProviderSearchService — do not write a third copy of legacy ui.py's review logic. Accepting a candidate locks it locally only; Apply Changes stays the single path into Steam. Keep LibraryController and SelectionState as the source of truth. Use stable IDs. Add tests without constructing a Tk window. Run every tests/*_test.py suite and update SPRINT_STATUS with exact evidence. Small reviewable commits.
 ```

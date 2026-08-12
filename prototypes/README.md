@@ -41,6 +41,15 @@ The file in this bundle (`Steam Shortcut Studio.dc.html`) is a **design referenc
 ## Fidelity
 **High-fidelity.** Treat colors, spacing, radii, type sizes, and layout proportions below as final. Recreate pixel-close using customtkinter's available styling (corner_radius, fg_color, border_width/color, font) — some effects (CSS grid track shrinking, text-overflow ellipsis) will need Tkinter-appropriate equivalents (fixed column widths, `wraplength`/truncation).
 
+> **Everything from here down describes the `.dc.html` design reference, not the
+> shipped Python.** It is still the spec for look, layout, and interaction
+> shape, but its "currently toast-only" / "wire this up later" notes are stale:
+> per-slot artwork actions, Apply Changes, scans, Backups, Tools, and Settings
+> are all live in `modern_shell.py` — see the sections above. Where the two
+> disagree about what *works today*, the sections above win. The one behavior
+> note below that is still accurate as pending work is the bulk `Auto-Art` /
+> `Find Art` path, which is gated on a review queue that does not exist yet.
+
 ## Screens / Views
 
 ### 1. Library (default view)

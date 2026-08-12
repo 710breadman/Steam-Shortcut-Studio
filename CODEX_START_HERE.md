@@ -24,7 +24,10 @@ Already implemented and merged:
 - Read-only native Steam library adapter
 - Read-only loose/local folder adapter
 - Epic, Steam, and folder scan CLIs
-- Approved modern UI prototype using real stored library data
+- Approved modern UI shell using real stored library data
+- Modern shell Apply Changes: real transactional shortcut writes plus real locked-artwork copies into Steam, in one pass
+- Per-slot artwork Auto Match / Replace / Clear against real providers
+- Artwork transactions visible in transaction history
 
 Do not recreate these systems or route around them.
 
@@ -48,27 +51,36 @@ Then inspect the current repository. Documentation describes intent; code and te
 
 ## Active Engineering Goal
 
-Work on **incremental production modern-library integration** under issues #4, #5, and #7.
+Build the **bulk artwork review queue** in `prototypes/modern_shell.py`, then
+wire the top-bar `Auto-Art` tile and the bulk bar's `Find Art` button to
+`BulkArtworkCoordinator` behind it.
 
-The immediate milestone is to connect the existing `LibraryController` to the production UI without replacing the whole application at once:
+Already wired — do not rebuild:
 
-- Add a controller-backed library view adapter for the legacy UI.
-- Render immutable `LibraryRow` data using stable IDs.
-- Use `SelectionState` for active and bulk selection.
-- Poll `BackgroundJobQueue` events from the Tk thread.
-- Expose Epic, Steam, and folder scan actions through the controller.
-- Keep all current legacy capabilities available during migration.
+- `LibraryController` is connected to both the legacy UI and the modern shell,
+  rendering immutable `LibraryRow` data by stable ID with `SelectionState` for
+  active and bulk selection, and polling `BackgroundJobQueue` from the Tk thread.
+- Epic, Steam, and folder scans are exposed through `LibraryController.scan_source`.
+- **Shortcut writes** — modern shell Apply Changes calls
+  `shortcut_transactions.upsert_games_transactional` (backup → write → verify →
+  rollback, unchanged) for `LibraryRow`s converted via
+  `ui_library_adapter.writable_game_from_library_row`. Native Steam rows, empty
+  launch targets, and missing-on-disk executables are always skipped, never
+  silently written.
+- **Artwork writes** — the same Apply Changes pass copies each row's locked
+  artwork into Steam's grid folder via `artwork.copy_all_artwork_to_steam`,
+  bridged from persisted `ArtworkLock` rows by
+  `ui_library_adapter.apply_locked_artwork` / `artwork_copy_skip_reason` /
+  `native_steam_artwork_game_from_library_row`. Per-game failures are reported,
+  not swallowed.
+- **Per-slot Auto Match / Replace / Clear** — real provider search, download,
+  and validation, locking to local cache + SQLite only.
 
-**Update:** shortcut writes are now wired. `prototypes/modern_shell.py`'s Apply
-Changes button calls `shortcut_transactions.upsert_games_transactional`
-(backup → write → verify → rollback, unchanged) for `LibraryRow`s converted via
-the new `ui_library_adapter.writable_game_from_library_row` (native Steam rows,
-empty launch targets, and missing-on-disk executables are always skipped, never
-silently written). Artwork writes remain unwired — Auto-Art still needs
-`BulkArtworkCoordinator` connected to a real provider search before any artwork
-Apply path can be enabled honestly.
-
-After that boundary is proven, migrate the modern table and then connect real artwork providers to `BulkArtworkCoordinator`.
+The remaining gap is bulk matching. `ArtworkMatchPolicy` routes anything below
+92 identity / 85 set-coherence to `NEEDS_REVIEW`, and the only real provider
+searcher reports hardcoded 70/60 (`ui.py:3377`) — so every real bulk match needs
+review, and the modern shell has nowhere to show it yet. Build that surface
+before wiring the bulk buttons.
 
 ## Required Safety Rules
 
@@ -80,7 +92,8 @@ After that boundary is proven, migrate the modern table and then connect real ar
 - Do not let worker threads touch UI widgets.
 - Do not let partial or unavailable source scans mark stored games missing.
 - Do not discard manual overrides, artwork locks, or rejected matches during rescans.
-- Do not enable a prototype Apply/Auto-Art action merely because the interface exists — only enable it once it is wired to the real, verified transaction service (shortcut writes: done; artwork writes: still pending `BulkArtworkCoordinator`).
+- Do not enable a modern-shell action merely because the interface exists — only enable it once it is wired to the real, verified service behind it (shortcut writes: done; artwork copy-to-Steam: done; bulk Auto-Art: still gated on the review queue).
+- Do not display a confidence number sourced from the hardcoded 70/60 placeholders as if it were a measurement.
 - Keep risky native Steam fields read-only until their ownership and rollback behavior are proven.
 
 ## Existing Building Blocks
@@ -118,18 +131,24 @@ prototypes/modern_library.py
 docs/UI_UX_TARGET.md
 ```
 
-## Current Usable Read-Only Workflows
+## Current Usable Workflows
+
+Read-only — these write only the app-owned SQLite database:
 
 ```text
 python -m steam_shortcut_studio.cli scan-epic
 python -m steam_shortcut_studio.source_cli scan-steam --steam-root "C:\Program Files (x86)\Steam"
 python -m steam_shortcut_studio.source_cli scan-folder --root "D:\PC Games"
 python -m steam_shortcut_studio.cli list-library
+```
+
+The modern shell reads that same database, and can write Steam — but only on an
+explicit Apply Changes, and only through the verified transaction services:
+
+```text
 python -m pip install -r requirements-ui-prototype.txt
 python prototypes/modern_library.py
 ```
-
-These scan commands write only the app-owned SQLite database. The prototype reads that database and does not write Steam.
 
 ## Validation Expectations
 

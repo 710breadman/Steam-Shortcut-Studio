@@ -34,7 +34,10 @@ from steam_shortcut_studio.library_store import (  # noqa: E402
     default_library_database,
 )
 from steam_shortcut_studio.models import ArtworkAsset, DetectedGame  # noqa: E402
-from steam_shortcut_studio.modern_library_view import format_size  # noqa: E402
+from steam_shortcut_studio.modern_library_view import (  # noqa: E402
+    format_size,
+    initial_active_item_id,
+)
 from steam_shortcut_studio.settings_store import AppSettings, SettingsStore  # noqa: E402
 from steam_shortcut_studio.shortcut_transactions import upsert_games_transactional  # noqa: E402
 from steam_shortcut_studio.sources.epic import (  # noqa: E402
@@ -179,8 +182,9 @@ class ModernShell(ctk.CTk):
 
     def _auto_select_first(self) -> None:
         snapshot = self.controller.snapshot()
-        if snapshot.rows and snapshot.active_item_id is None:
-            self.controller.set_active(snapshot.rows[0].item_id)
+        item_id = initial_active_item_id(snapshot.rows, snapshot.active_item_id)
+        if item_id is not None and item_id != snapshot.active_item_id:
+            self.controller.set_active(item_id)
 
     def _set_status(self, message: str) -> None:
         self.status_text.set(message)
