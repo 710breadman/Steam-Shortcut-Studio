@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 import logging
 from pathlib import Path
 from typing import Callable
 
 from .artwork import download_asset
 from .artwork_policy import ArtworkEvidence
+from .artwork_scoring import ArtworkScore
 from .bulk_artwork import ARTWORK_SLOTS, ArtworkSearchOutcome
 from .image_validation import ArtworkFileInfo, validate_artwork_file
 from .models import ArtworkAsset
@@ -71,19 +73,29 @@ def validated_artwork_assets_to_search_outcome(
     *,
     cache_dir: Path,
     provider: str,
-    identity_score: int,
-    set_coherence_score: int,
-    reasons: tuple[str, ...],
+    identity_score: int = 0,
+    set_coherence_score: int = 0,
+    reasons: tuple[str, ...] = (),
+    scorer: Callable[[Mapping[str, ArtworkAsset]], ArtworkScore] | None = None,
     downloader: Callable[[ArtworkAsset, Path], Path] = download_asset,
     validator: Callable[[str | Path], ArtworkFileInfo] = validate_artwork_file,
     logger: logging.Logger | None = None,
 ) -> ArtworkSearchOutcome:
+    """Download, validate, and score one candidate per requested slot.
+
+    When `scorer` is supplied it decides the evidence from the assets actually
+    selected -- which is the only point where that is knowable, since a slot's
+    winner is whichever candidate downloads and decodes first. The static
+    `identity_score` / `set_coherence_score` arguments remain for callers that
+    are reporting a known-empty or known-unverifiable result.
+    """
     requested = set(requested_slots)
     found_slots: set[str] = set()
     candidate_ids: dict[str, str] = {}
     urls: dict[str, str] = {}
     validated_files: dict[str, dict[str, object]] = {}
     rejected_candidates: dict[str, list[str]] = {}
+    selected: dict[str, ArtworkAsset] = {}
 
     for slot in ARTWORK_SLOTS:
         if slot not in requested:
@@ -100,6 +112,9 @@ def validated_artwork_assets_to_search_outcome(
             found_slots.add(slot)
             candidate_ids[slot] = asset.asset_id
             urls[slot] = asset.url
+            # Prefer the decoded file's real dimensions over whatever the
+            # provider advertised; the scorer judges slot shape from these.
+            selected[slot] = replace(asset, width=info.width or asset.width, height=info.height or asset.height)
             validated_files[slot] = {
                 "path": str(info.path),
                 "format": info.format,
@@ -110,13 +125,26 @@ def validated_artwork_assets_to_search_outcome(
             }
             break
 
-    return ArtworkSearchOutcome(
-        evidence=ArtworkEvidence(
+    if scorer is not None:
+        score = scorer(selected)
+        evidence = ArtworkEvidence(
+            identity_score=score.identity_score,
+            set_coherence_score=score.set_coherence_score,
+            conflicting_edition=score.conflicting_edition,
+            conflicting_year=score.conflicting_year,
+            source=provider,
+            reasons=reasons + score.reasons,
+        )
+    else:
+        evidence = ArtworkEvidence(
             identity_score=identity_score,
             set_coherence_score=set_coherence_score,
             source=provider,
             reasons=reasons,
-        ),
+        )
+
+    return ArtworkSearchOutcome(
+        evidence=evidence,
         found_slots=frozenset(found_slots),
         provider=provider,
         candidate_ids=candidate_ids,
@@ -124,5 +152,6 @@ def validated_artwork_assets_to_search_outcome(
             "candidate_urls": urls,
             "validated_files": validated_files,
             "rejected_candidates": rejected_candidates,
+            "identity_reasons": list(score.reasons) if scorer is not None else [],
         },
     )

@@ -80,10 +80,9 @@ python prototypes/modern_library.py
 
 ## Remaining High-Priority Work
 
-1. Replace the hardcoded 70/60 confidence placeholders in
-   `artwork_bulk_search.py` with real identity and set-coherence scoring, so
-   `ArtworkMatchPolicy`'s auto-accept path (92/85) becomes reachable instead of
-   routing every single match to the review queue.
+1. Validate `artwork_scoring.py`'s thresholds against a real library. They are
+   reasoned, not measured, and this is what turns them from plausible into
+   trusted.
 2. Add GOG, Playnite, EA, Ubisoft, and Battle.net adapters.
 3. Reduce `ui.py` (still 5,600+ lines) as the modern shell takes over its
    workflows; retire legacy paths only once the modern equivalent is proven.
@@ -101,6 +100,10 @@ python prototypes/modern_library.py
   Steam through the existing verified transaction services.
 - Bulk Auto-Art submits selected rows through `BulkArtworkCoordinator` into a
   real review queue with per-slot previews and accept/reject/skip/retry.
+- Artwork confidence is measured from real provider evidence, so strong
+  complete matches auto-accept and wrong games are rejected outright.
+- The modern shell is the shipped default interface; `main.py --classic` still
+  opens the original window.
 
 ## Work Boundary
 

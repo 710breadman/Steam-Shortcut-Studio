@@ -26,8 +26,10 @@ Before changing code:
 - **Additional sources complete:** read-only native Steam and loose-folder adapters
 - **Write loop complete:** modern shell Apply Changes writes real shortcuts *and* copies locked artwork into Steam's grid folder
 - **Bulk artwork complete:** `Auto-Art` / `Find Art` submit through `BulkArtworkCoordinator` into a real review queue on the Artwork screen
-- **Current active engineering track:** Real artwork identity and set-coherence scoring
-- **Next visible milestone:** Genuinely strong complete matches auto-accept instead of every match needing review
+- **Shipping complete:** the modern shell is the default interface in packaged builds; `main.py --classic` opens the legacy window
+- **Scoring complete:** `artwork_scoring.py` produces real confidence from provider evidence, so strong complete matches auto-accept
+- **Current active engineering track:** Remaining Windows launcher adapters (GOG, Playnite, EA, Ubisoft, Battle.net)
+- **Next visible milestone:** One library covering every launcher on the machine
 - **Launcher fix:** `run.ps1` and `run.bat` now require a Python with `customtkinter`, so repo launch helpers open the modern shell instead of the bundled legacy fallback.
 - **Priority feature after that:** Remaining Windows launcher adapters (GOG, Playnite, EA, Ubisoft, Battle.net)
 - **Latest UI slice:** `steam_shortcut_studio/modern_shell.py` is the shipped default interface. `main.py` opens it, `main.py --classic` opens the original window, and `run.bat` / `run.ps1` now both run that same entry point. It reads the real persistent library through `LibraryController` / `LibraryStore`, runs every long operation on `BackgroundJobQueue` with Tk-thread polling, and has no mock game data left. Apply Changes performs real transactional shortcut writes *and* real locked-artwork copies into Steam's grid folder in one pass; per-slot and bulk artwork matching are both live.
@@ -241,9 +243,19 @@ Shipping and polish (live):
 - [x] Footer cancel control appears while this shell's jobs are in flight
 - [x] About screen exposes settings path, library database path, and a way into the classic interface
 
+Confidence scoring (live):
+
+- [x] `artwork_scoring.py` scores identity and set coherence from real provider evidence — no placeholders remain
+- [x] `artwork_search_service` stamps match provenance (`sss_match`) so scoring knows whether a game was resolved by AppID or by name
+- [x] Identity is the weakest slot's confidence, not the average, so one wrong image cannot ride along with four certain ones
+- [x] Edition and year conflicts populate `ArtworkEvidence`, and are suppressed for identifier-resolved matches (the policy checks conflicts before scores, so a certain match must not be sent to review over edition wording)
+- [x] Wrong-shape images and name-resolved provider spread reduce set coherence
+- [x] Strong complete matches now reach `AUTO_ACCEPT`; weak ones still route to the review queue and wrong games are rejected
+- [x] The review queue shows the measured confidence and the reason for it
+
 Not yet done:
 
-- [ ] Real identity/set-coherence scoring to replace hardcoded confidence values
+- [ ] Validate the scoring thresholds against a labelled corpus of real matches
 - [ ] Per-slot candidate alternatives in the review queue (it shows the one validated candidate per slot the searcher selected)
 - [ ] Cancel control for in-flight bulk artwork jobs in the modern shell
 - [ ] Extensions screen (placeholder text only)
@@ -551,11 +563,25 @@ Shipping the modern shell, 2026-08-12:
 - Re-ran every `tests/*_test.py`: all pass. Re-ran the shell smoke render with a real locked PNG plus a lock pointing at a deleted file; all ten screens render.
 - **Not verified here:** no PyInstaller build was run (PyInstaller is not installed in this environment), so the packaging changes are correct by inspection but unproven. Build both targets before tagging a release.
 
+Real artwork confidence scoring, 2026-08-12:
+
+- Added `steam_shortcut_studio/artwork_scoring.py`: a pure, network-free, Tk-free scorer. Identity is decided by *how the match was established* — an AppID the library row owns is certain (100), a provider ID resolved from that AppID is near-certain (97), a name match is a provider-trust ceiling scaled by `scanner.similarity`, and an unverifiable match is capped at 80, below the policy's 92 threshold, on purpose.
+- Identity for a set is the **minimum** across slots, not the mean: four certain slots must not carry one wrong image into an automatic apply.
+- Added `stamp_match_provenance` to `artwork_search_service.py` and applied it at all six collection sites (official Steam, Steam Store, Wikimedia, RAWG, and both SteamGridDB paths). The service already refused weak title matches internally but only logged that reasoning; it is now data. Written into a copy of the payload so cached responses are not mutated.
+- Populated `ArtworkEvidence.conflicting_edition` / `conflicting_year`, which nothing had ever set. Both are deliberately suppressed for identifier-resolved matches: `ArtworkMatchPolicy` checks conflict flags *before* any score, so raising them would have sent AppID-certain matches to review over edition wording.
+- Set coherence penalises wrong-shape images per slot and provider spread — but only across *name-resolved* assets. Penalising Steam capsules plus a SteamGridDB icon that both answer one AppID put the most common good result one point from failing for no real reason.
+- Removed the placeholder constants from `artwork_bulk_search.py` and gave `validated_artwork_assets_to_search_outcome` an optional `scorer` that runs against the assets actually selected (the only point where the winning candidate per slot is known). Selected assets carry the decoded file's real dimensions, so shape is judged on what was downloaded, not what the provider advertised.
+- The review queue now shows the measured confidence and its top reason, which was previously forbidden because the number was a constant.
+- Added `tests/artwork_scoring_test.py` (22 cases: provenance reading, identity per method, provider ceilings, conflict detection and its suppression, coherence penalties, weakest-link identity, range safety against hostile input, and end-to-end policy outcomes) and wired it into CI. Updated the bulk-search tests to assert real scores.
+- Verified the resulting decisions across ten realistic scenarios: native Steam by AppID → auto-accept; SteamGridDB exact title → auto-accept; unverifiable, RAWG, Wikimedia, edition mismatch, mixed name-resolved sources, and incomplete sets → review; wrong game → reject.
+- Every `tests/*_test.py` passes; the shell smoke render passes.
+
 ## Known Risks
 
 - `ui.py` still contains too many responsibilities (5,600+ lines)
 - Current provider download, auto-selection, and review presentation still run through the legacy UI path
-- **Confidence scores are placeholders.** `artwork_bulk_search.PLACEHOLDER_IDENTITY_SCORE` / `PLACEHOLDER_SET_COHERENCE_SCORE` report a constant 70 / 60 for every real provider result, so `ArtworkMatchPolicy`'s automatic thresholds (92 / 85) are unreachable and no real match ever auto-accepts. Everything routes to the review queue, and any UI that showed "match confidence" today would be showing a constant, not a measurement.
+- Confidence scoring (`artwork_scoring.py`) is real but young. Its provider ceilings and penalties are reasoned rather than measured against a labelled corpus; watch for auto-accepts that should not have been, and prefer tightening a ceiling over loosening the policy.
+- Scoring depends on provenance stamped by `artwork_search_service`. An asset that reaches the scorer without a `sss_match` stamp scores as unverifiable (capped below auto-accept) — safe, but it silently costs auto-accepts. Any new provider path must stamp its assets.
 - The modern shell must not become a second implementation of domain logic; `ModernShell._visible_rows` already duplicates search/filter/sort logic that `modern_library_view.py` owns
 - The Backups screen caps rendering at the 50 most recent transactions; older restore points exist on disk but are not listed
 - Two prototype suites silently broke when the modern shell was rewritten and were only caught by running the suite by hand — the `ui-prototype` CI job was red on `main` from `53c398b` until `2026-08-12`
@@ -580,29 +606,34 @@ submit through `BulkArtworkCoordinator`; `ArtworkReviewQueue` holds the
 and accept/reject/skip/retry. Both UIs share
 `artwork_bulk_search.build_provider_searcher`.
 
-**Next:** real identity and set-coherence scoring.
+**Also done:** real confidence scoring (`artwork_scoring.py`). Identity comes
+from how the match was established — an AppID the library row owns is certain,
+a name match is capped by provider trust and scaled by title similarity, and an
+unverifiable match is capped below auto-accept on purpose. Strong complete
+matches auto-accept; everything else still routes to the review queue.
 
-Why this is now the top item: `artwork_bulk_search` reports a constant 70/60 for
-every provider result, deliberately below `ArtworkMatchPolicy`'s 92/85, so every
-single bulk match needs a human decision. That is honest but expensive — the
-policy's auto-accept path, the `MISSING_ONLY` / `COMPLETE_SET` modes, and the
-"strong complete matches may auto-apply" product decision are all unreachable
-until a real scorer exists. Candidate signals already available: provider
-response fields, `image_validation`'s dimensions and perceptual hash,
-`scanner.similarity` / `is_specific_title_match`, and the edition/year conflict
-flags `ArtworkEvidence` already declares but nothing populates.
+**Next:** validate the scoring against reality, then breadth.
 
-Constraints for this work:
+1. Run bulk Auto-Art across a real library and check the auto-accepted matches
+   are genuinely right. The thresholds in `artwork_scoring.py` are reasoned, not
+   measured — this is the step that turns them from plausible into trusted.
+2. Add the remaining Windows launcher adapters: GOG Galaxy, Playnite, EA app,
+   Ubisoft Connect, Battle.net. All read-only, all through `SourceAdapter`,
+   each independently shippable. Playnite first if you want leverage, since it
+   already aggregates other launchers.
+3. Then reduce `ui.py` as the modern shell covers more of its workflows.
 
-1. Score inside a Tk-free module the coordinator can call; do not score in a UI.
-2. Populate `ArtworkEvidence.conflicting_edition` / `conflicting_year` rather
-   than folding those signals into a single opaque number.
-3. Never present a placeholder as a measured confidence.
-4. Keep the review queue as the destination for anything below threshold.
-5. Never bypass `shortcut_transactions.py` / `artwork_transactions.py` for writes.
+Constraints that still hold:
+
+1. Never present a number as confidence unless it is measured.
+2. Any new provider path must stamp match provenance, or its assets silently
+   score as unverifiable.
+3. Keep the review queue as the destination for anything below threshold.
+4. Never bypass `shortcut_transactions.py` / `artwork_transactions.py` for writes.
+5. New launcher adapters must not lock or modify live launcher data.
 
 ## Next Codex Prompt
 
 ```text
-Read CODEX_START_HERE.md and all linked docs. Already live, do not rebuild: transactional shortcut writes AND artwork copies in the modern shell's Apply Changes; per-slot Auto Match/Replace/Clear; and the bulk artwork review queue (Auto-Art / Find Art -> BulkArtworkCoordinator -> ArtworkReviewQueue -> the Artwork screen's accept/reject/skip/retry). Both UIs share artwork_bulk_search.build_provider_searcher. The next slice is real artwork confidence scoring: replace artwork_bulk_search's constant PLACEHOLDER_IDENTITY_SCORE=70 / PLACEHOLDER_SET_COHERENCE_SCORE=60 with a Tk-free scorer the coordinator calls, so ArtworkMatchPolicy's auto-accept path (92/85) becomes reachable for genuinely strong complete matches and weak ones still route to the review queue. Populate ArtworkEvidence.conflicting_edition / conflicting_year instead of collapsing every signal into one number; reuse scanner.similarity / is_specific_title_match and image_validation's dimensions and perceptual hash rather than inventing new matching logic. Never present a placeholder as a measured confidence. Keep LibraryController and SelectionState as the source of truth. Use stable IDs. Add tests without constructing a Tk window. Run every tests/*_test.py suite and update SPRINT_STATUS with exact evidence. Small reviewable commits.
+Read CODEX_START_HERE.md and all linked docs. Already live, do not rebuild: the modern shell is the shipped default interface (steam_shortcut_studio/modern_shell.py, launched by main.py, --classic for the legacy window); transactional shortcut writes AND artwork copies in Apply Changes; per-slot Auto Match/Replace/Clear; the bulk artwork review queue (Auto-Art -> BulkArtworkCoordinator -> ArtworkReviewQueue -> the Artwork screen); and real confidence scoring in artwork_scoring.py fed by match provenance stamped in artwork_search_service.py. The next slice is breadth: add read-only source adapters for GOG Galaxy, Playnite, EA app, Ubisoft Connect, and Battle.net, one per PR, each through the shared SourceAdapter model, following sources/epic.py as the reference. Never lock or modify live launcher data; a partial or unavailable scan must never mark stored games missing; malformed manifests must be isolated and reported, not fatal. If an adapter can supply a Steam AppID or a canonical title, stamp it so artwork scoring can use it. Use stable IDs. Add tests without constructing a Tk window. Run every tests/*_test.py suite and update SPRINT_STATUS with exact evidence. Small reviewable commits.
 ```

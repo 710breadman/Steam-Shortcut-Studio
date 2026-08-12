@@ -51,10 +51,10 @@ Then inspect the current repository. Documentation describes intent; code and te
 
 ## Active Engineering Goal
 
-Replace the **placeholder artwork confidence scores** with real identity and
-set-coherence scoring, so `ArtworkMatchPolicy`'s auto-accept path becomes
-reachable for genuinely strong complete matches instead of every match needing
-a human decision. See "Exact Next Action" in `docs/SPRINT_STATUS.md`.
+Add the remaining **read-only Windows launcher adapters** — GOG Galaxy,
+Playnite, EA app, Ubisoft Connect, Battle.net — one per PR, each through the
+shared `SourceAdapter` model, using `sources/epic.py` as the reference. See
+"Exact Next Action" in `docs/SPRINT_STATUS.md`.
 
 Already wired — do not rebuild:
 
@@ -82,12 +82,12 @@ Already wired — do not rebuild:
   previews and accept / reject / skip / retry. Accepting locks locally only.
 - **One shared provider searcher** — `artwork_bulk_search.build_provider_searcher`,
   used by both the legacy UI and the modern shell.
-
-The remaining gap is scoring. `ArtworkMatchPolicy` routes anything below 92
-identity / 85 set-coherence to `NEEDS_REVIEW`, and the shared searcher reports a
-constant 70/60 (`artwork_bulk_search.PLACEHOLDER_*`) because no real scorer
-exists. Everything therefore needs review. Build the scorer; keep the review
-queue as the destination for anything genuinely uncertain.
+- **Real confidence scoring** — `artwork_scoring.py` scores identity and set
+  coherence from match provenance stamped by `artwork_search_service.py`.
+  Strong complete matches auto-accept; weak ones go to the review queue; wrong
+  games are rejected. No placeholder scores remain anywhere.
+- **Shipping** — `steam_shortcut_studio/modern_shell.py` is the packaged default
+  interface via `main.py`; `main.py --classic` opens the legacy window.
 
 ## Required Safety Rules
 
@@ -100,7 +100,8 @@ queue as the destination for anything genuinely uncertain.
 - Do not let partial or unavailable source scans mark stored games missing.
 - Do not discard manual overrides, artwork locks, or rejected matches during rescans.
 - Do not enable a modern-shell action merely because the interface exists — only enable it once it is wired to the real, verified service behind it (shortcut writes, artwork copy-to-Steam, and bulk Auto-Art are all wired; the Extensions screen is still an honest placeholder).
-- Do not display a confidence number sourced from the hardcoded 70/60 placeholders as if it were a measurement.
+- Do not display a confidence number unless it is measured by `artwork_scoring.py`.
+- Any new artwork provider path must stamp match provenance (`stamp_match_provenance`), or its assets score as unverifiable and can never auto-accept.
 - Keep risky native Steam fields read-only until their ownership and rollback behavior are proven.
 
 ## Existing Building Blocks

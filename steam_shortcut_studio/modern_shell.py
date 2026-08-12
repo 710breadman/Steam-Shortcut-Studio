@@ -1365,13 +1365,23 @@ class ModernShell(ctk.CTk):
         card.grid_columnconfigure(0, weight=1)
 
         ctk.CTkLabel(card, text=title, anchor="w", font=self._font(12, "bold")).grid(row=0, column=0, padx=12, pady=(10, 2), sticky="ew")
+        summary = f"{len(rows)} candidate slot(s) awaiting a decision"
+        if rows:
+            # These are measured by artwork_scoring, not placeholders, so they
+            # are safe to show as confidence.
+            summary += f"    ·    match {rows[0].identity_score}%, set coherence {rows[0].set_coherence_score}%"
         ctk.CTkLabel(
-            card, text=f"{len(rows)} candidate slot(s) awaiting a decision",
+            card, text=summary,
             anchor="w", text_color=COLORS["muted"], font=self._font(10),
-        ).grid(row=1, column=0, padx=12, pady=(0, 6), sticky="ew")
+        ).grid(row=1, column=0, padx=12, pady=(0, 2), sticky="ew")
+        if rows and rows[0].reasons:
+            ctk.CTkLabel(
+                card, text=rows[0].reasons[0], anchor="w", wraplength=520,
+                text_color=COLORS["muted"], font=self._font(9),
+            ).grid(row=2, column=0, padx=12, pady=(0, 6), sticky="ew")
 
         slots = ctk.CTkFrame(card, fg_color="transparent")
-        slots.grid(row=2, column=0, padx=10, pady=(0, 6), sticky="ew")
+        slots.grid(row=3, column=0, padx=10, pady=(0, 6), sticky="ew")
         slots.grid_columnconfigure(1, weight=1)
         for index, row in enumerate(rows):
             preview = self._preview_widget(slots, row.path, title)
@@ -1393,7 +1403,7 @@ class ModernShell(ctk.CTk):
             ).grid(row=index, column=2, padx=6)
 
         actions = ctk.CTkFrame(card, fg_color="transparent")
-        actions.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="ew")
+        actions.grid(row=4, column=0, padx=10, pady=(0, 10), sticky="ew")
         for label, command, accent, danger in [
             ("Accept", lambda: self._review_decision((item_id,), "accept"), True, False),
             ("Reject", lambda: self._review_decision((item_id,), "reject"), False, True),

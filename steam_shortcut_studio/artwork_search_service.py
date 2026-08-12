@@ -5,6 +5,7 @@ import re
 from dataclasses import replace
 from typing import Any, Callable, Protocol
 
+from .artwork_scoring import MATCH_PROVENANCE_KEY, MatchMethod
 from .artwork_sources import DEFAULT_ARTWORK_SOURCES, rawg_artwork_assets, wikimedia_artwork_assets
 from .models import ArtworkAsset, DetectedGame
 from .scanner import clean_display_title, is_specific_title_match, should_accept_matched_title, similarity
@@ -142,6 +143,39 @@ def artwork_candidate_score(game: DetectedGame, search_term: str, item: dict[str
     return score
 
 
+def stamp_match_provenance(
+    assets: list[ArtworkAsset],
+    *,
+    provider: str,
+    method: str,
+    name: str = "",
+    appid: int | None = None,
+    term: str = "",
+    year: str = "",
+) -> list[ArtworkAsset]:
+    """Record *how* each asset's game was identified, for confidence scoring.
+
+    The service already refuses weak title matches internally, but until now it
+    only logged that reasoning. `artwork_scoring` needs it as data: artwork
+    fetched by a Steam AppID is certain, artwork found by searching a name is
+    only as good as the name. Written into a copy of the provider payload so a
+    cached response is never mutated.
+    """
+    provenance: dict[str, object] = {"provider": provider, "method": method}
+    if name:
+        provenance["name"] = name
+    if appid:
+        provenance["appid"] = str(appid)
+    if term:
+        provenance["term"] = term
+    if year:
+        provenance["year"] = year
+    return [
+        replace(asset, raw={**(asset.raw or {}), MATCH_PROVENANCE_KEY: provenance})
+        for asset in assets
+    ]
+
+
 def add_steamgriddb_assets_to_slots(
     assets_by_kind: dict[str, list[ArtworkAsset]],
     kind: str,
@@ -212,6 +246,10 @@ class ArtworkProviderSearchService:
         release_year = release_year_from_text(game.metadata.release_year)
         year_lookup_term = f"{broad_lookup_term} {release_year}".strip() if release_year and release_year not in broad_lookup_term else broad_lookup_term
         steam_appid = game.steam_appid if game.is_native_steam_game and game.steam_appid else game.metadata.steam_appid
+        # An AppID the library row already owns identifies the game outright; one
+        # resolved by searching a name is only as good as that name match.
+        owned_appid = bool(steam_appid)
+        steam_name = ""
 
         if sources.get("steam", True) and not steam_appid:
             steam_match = self._find_steam_match(game, search_terms)
@@ -223,10 +261,15 @@ class ArtworkProviderSearchService:
                 if allow_metadata_updates and not game.metadata.title_locked and should_accept_matched_title(game.title, game.metadata.clean_title, steam_name):
                     game.metadata.clean_title = steam_name
 
+        steam_method = MatchMethod.STEAM_APPID if owned_appid else MatchMethod.TITLE_SEARCH
+
         if sources.get("steam", True) and steam_appid:
             checkpoint()
             official = self.official_steam_assets_func(int(steam_appid), game.display_title)
-            self._extend_assets(assets_by_kind, official)
+            self._extend_stamped(
+                assets_by_kind, official, provider="Steam", method=steam_method,
+                name=steam_name, appid=steam_appid, term=broad_lookup_term,
+            )
             try:
                 steam_detail = self.get_steam_app_details_func(int(steam_appid))
             except Exception as exc:
@@ -234,7 +277,13 @@ class ArtworkProviderSearchService:
                 steam_detail = {}
             if steam_detail:
                 store_media = self.steam_store_media_assets_func(int(steam_appid), game.display_title, steam_detail)
-                self._extend_assets(assets_by_kind, store_media)
+                self._extend_stamped(
+                    assets_by_kind, store_media, provider="Steam Store", method=steam_method,
+                    name=steam_name or str(steam_detail.get("name") or ""), appid=steam_appid,
+                    term=broad_lookup_term,
+                    year=str(steam_detail.get("release_date", {}).get("date") or "")
+                    if isinstance(steam_detail.get("release_date"), dict) else "",
+                )
 
         sgdb_direct_found = self._collect_direct_sgdb_assets(
             game,
@@ -250,16 +299,22 @@ class ArtworkProviderSearchService:
         if sources.get("wikimedia", True):
             checkpoint()
             try:
-                self._extend_assets(assets_by_kind, self.wikimedia_artwork_assets_func(year_lookup_term))
+                self._extend_stamped(
+                    assets_by_kind, self.wikimedia_artwork_assets_func(year_lookup_term),
+                    provider="Wikipedia/Wikimedia", method=MatchMethod.TITLE_SEARCH,
+                    term=year_lookup_term, year=release_year,
+                )
             except Exception as exc:
                 self.logger.info("Wikipedia/Wikimedia artwork lookup failed for %s: %s", year_lookup_term, exc)
 
         if sources.get("rawg", False):
             checkpoint()
             try:
-                self._extend_assets(
+                self._extend_stamped(
                     assets_by_kind,
                     self.rawg_artwork_assets_func(broad_lookup_term, rawg_api_key, release_year=release_year),
+                    provider="RAWG", method=MatchMethod.TITLE_SEARCH,
+                    term=broad_lookup_term, year=release_year,
                 )
             except Exception as exc:
                 self.logger.info("RAWG artwork lookup failed for %s: %s", broad_lookup_term, exc)
@@ -303,7 +358,14 @@ class ArtworkProviderSearchService:
                     self.logger.info("SteamGridDB %s lookup by selected game ID %s failed: %s", kind, sgdb_game_id, exc)
                     continue
                 direct_count += len(fetched)
-                add_steamgriddb_assets_to_slots(assets_by_kind, kind, fetched)
+                add_steamgriddb_assets_to_slots(
+                    assets_by_kind, kind,
+                    stamp_match_provenance(
+                        fetched, provider="SteamGridDB",
+                        method=MatchMethod.PROVIDER_ID if steam_appid else MatchMethod.TITLE_SEARCH,
+                        appid=steam_appid,
+                    ),
+                )
             if direct_count:
                 sgdb_direct_found = True
                 if allow_metadata_updates:
@@ -320,7 +382,13 @@ class ArtworkProviderSearchService:
                     self.logger.info("SteamGridDB %s lookup by Steam AppID %s failed: %s", kind, steam_appid, exc)
                     continue
                 direct_count += len(fetched)
-                add_steamgriddb_assets_to_slots(assets_by_kind, kind, fetched)
+                add_steamgriddb_assets_to_slots(
+                    assets_by_kind, kind,
+                    stamp_match_provenance(
+                        fetched, provider="SteamGridDB",
+                        method=MatchMethod.STEAM_APPID, appid=steam_appid,
+                    ),
+                )
             if direct_count:
                 sgdb_direct_found = True
                 self.logger.info("SteamGridDB artwork match for %s using Steam AppID %s.", game.display_title, steam_appid)
@@ -399,7 +467,13 @@ class ArtworkProviderSearchService:
             except SteamGridDbError as exc:
                 self.logger.warning("SteamGridDB %s lookup failed for %s: %s", kind, matched_term, exc)
                 continue
-            add_steamgriddb_assets_to_slots(assets_by_kind, kind, fetched)
+            add_steamgriddb_assets_to_slots(
+                assets_by_kind, kind,
+                stamp_match_provenance(
+                    fetched, provider="SteamGridDB", method=MatchMethod.TITLE_SEARCH,
+                    name=best_name, term=matched_term, year=release_year,
+                ),
+            )
 
     @staticmethod
     def _extend_assets(
@@ -409,6 +483,16 @@ class ArtworkProviderSearchService:
         for kind, assets in incoming.items():
             if kind in assets_by_kind:
                 assets_by_kind[kind].extend(assets)
+
+    @staticmethod
+    def _extend_stamped(
+        assets_by_kind: dict[str, list[ArtworkAsset]],
+        incoming: dict[str, list[ArtworkAsset]],
+        **provenance,
+    ) -> None:
+        for kind, assets in incoming.items():
+            if kind in assets_by_kind:
+                assets_by_kind[kind].extend(stamp_match_provenance(assets, **provenance))
 
     @staticmethod
     def _dedupe_assets(

@@ -6,10 +6,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from steam_shortcut_studio.artwork_bulk_search import (  # noqa: E402
-    PLACEHOLDER_IDENTITY_SCORE,
-    PLACEHOLDER_SET_COHERENCE_SCORE,
-)
 from steam_shortcut_studio.artwork_policy import ArtworkEvidence  # noqa: E402
 from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
     ArtworkReviewQueue,
@@ -330,9 +326,11 @@ def test_real_coordinator_results_land_in_the_review_queue() -> None:
     queue = ArtworkReviewQueue()
     item = BulkArtworkItem("item-1", "Example")
     outcome = ArtworkSearchOutcome(
+        # Scored below ArtworkMatchPolicy's automatic thresholds, as a
+        # name-resolved match from a mid-trust provider would be.
         evidence=ArtworkEvidence(
-            identity_score=PLACEHOLDER_IDENTITY_SCORE,
-            set_coherence_score=PLACEHOLDER_SET_COHERENCE_SCORE,
+            identity_score=78,
+            set_coherence_score=90,
             source="real-providers",
         ),
         found_slots=frozenset({"grid"}),

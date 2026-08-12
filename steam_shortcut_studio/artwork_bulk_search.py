@@ -7,23 +7,11 @@ from typing import Callable
 
 from .artwork import download_asset
 from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
+from .artwork_scoring import score_artwork_set
 from .bulk_artwork import ArtworkSearcher, BulkArtworkItem
 from .image_validation import ArtworkFileInfo, validate_artwork_file
 from .models import ArtworkAsset, DetectedGame
 
-
-# The bulk pipeline still has no real identity scorer. These placeholders sit
-# deliberately below ArtworkMatchPolicy's automatic thresholds (92 identity /
-# 85 set coherence) so that no real provider match can auto-accept itself:
-# every result lands in the review queue for a human decision.
-#
-# Do not raise them until a real scorer exists, and never show them to a user
-# as a measured "match confidence" -- they are constants, not measurements.
-PLACEHOLDER_IDENTITY_SCORE = 70
-PLACEHOLDER_SET_COHERENCE_SCORE = 60
-PLACEHOLDER_SCORE_REASON = (
-    "Provider candidates are decoded and cached; identity scoring still requires review."
-)
 
 DEFAULT_MISSING_GAME_REASON = "Stored row is no longer available in the library view."
 
@@ -102,9 +90,13 @@ def build_provider_searcher(
             requested_slots,
             cache_dir=cache_path,
             provider=provider_label,
-            identity_score=PLACEHOLDER_IDENTITY_SCORE,
-            set_coherence_score=PLACEHOLDER_SET_COHERENCE_SCORE,
-            reasons=(PLACEHOLDER_SCORE_REASON,),
+            scorer=lambda selected: score_artwork_set(
+                selected,
+                library_title=item.title,
+                requested_slots=requested_slots,
+                release_year=str(game.metadata.release_year or ""),
+                steam_appid=game.steam_appid or game.metadata.steam_appid,
+            ),
             downloader=downloader,
             validator=validator,
             logger=logger,
