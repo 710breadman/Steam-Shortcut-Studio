@@ -17,6 +17,37 @@ from .base import (
 STEAM_SOURCE = "steam"
 SteamScanFunction = Callable[[Path], list[DetectedGame]]
 
+# Steam installs runtimes and compatibility tools into steamapps alongside real
+# games, so a plain manifest scan picks them up as library entries. They have no
+# launch target a person would ever use and no artwork worth matching -- one of
+# them ("Steamworks Common Redistributables", 228980) was reaching the artwork
+# pipeline and being scored like a game.
+STEAM_RUNTIME_APPIDS: frozenset[int] = frozenset({
+    228980,   # Steamworks Common Redistributables
+    1070560,  # Steam Linux Runtime 1.0 (scout)
+    1391110,  # Steam Linux Runtime 2.0 (soldier)
+    1628350,  # Steam Linux Runtime 3.0 (sniper)
+    1493710,  # Proton Experimental
+    1161040,  # Proton BattlEye Runtime
+    1826330,  # Proton EasyAntiCheat Runtime
+})
+
+# Proton builds are published as a new AppID per release, so an ID list would go
+# stale. Their manifests are consistently named, unlike real games.
+STEAM_RUNTIME_TITLE_PREFIXES: tuple[str, ...] = (
+    "proton ",
+    "steam linux runtime",
+    "steamworks common",
+)
+
+
+def is_steam_runtime_app(appid: int, title: str) -> bool:
+    """True when an installed Steam entry is a runtime or tool, not a game."""
+    if appid in STEAM_RUNTIME_APPIDS:
+        return True
+    name = " ".join(str(title or "").split()).casefold()
+    return any(name.startswith(prefix) for prefix in STEAM_RUNTIME_TITLE_PREFIXES)
+
 
 class SteamLibraryAdapter:
     """Normalize installed native Steam games into persistent library records."""
@@ -78,6 +109,19 @@ class SteamLibraryAdapter:
                         message="Installed Steam game has no valid AppID and was skipped.",
                         record_path=str(game.root_path),
                         severity="error",
+                    )
+                )
+                continue
+            title_text = game.display_title or game.title or ""
+            if is_steam_runtime_app(appid, title_text):
+                issues.append(
+                    SourceIssue(
+                        source=self.source_name,
+                        code="steam_runtime_app_skipped",
+                        message="Installed Steam entry is a runtime or compatibility tool, not a game.",
+                        record_path=str(game.root_path),
+                        item_external_id=str(appid),
+                        severity="info",
                     )
                 )
                 continue

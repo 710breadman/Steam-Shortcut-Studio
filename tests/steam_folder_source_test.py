@@ -8,7 +8,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from steam_shortcut_studio.models import DetectedGame, ExecutableCandidate  # noqa: E402
 from steam_shortcut_studio.sources.local import FolderScannerAdapter  # noqa: E402
-from steam_shortcut_studio.sources.steam import SteamLibraryAdapter  # noqa: E402
+from steam_shortcut_studio.sources.steam import (  # noqa: E402
+    SteamLibraryAdapter,
+    is_steam_runtime_app,
+)
 
 
 class FakeFolderScanner:
@@ -196,7 +199,50 @@ def test_steam_adapter_missing_root_and_scan_failure_are_reported() -> None:
         assert failed.issues[0].severity == "error"
 
 
+def test_steam_runtimes_and_tools_are_not_treated_as_games() -> None:
+    """Steam installs redistributables and Proton builds into steamapps beside
+    real games; they have no launch a person would use and no artwork to match.
+    One of them was reaching the artwork pipeline and being scored like a game.
+    """
+    assert is_steam_runtime_app(228980, "Steamworks Common Redistributables") is True
+    assert is_steam_runtime_app(1493710, "Proton Experimental") is True
+    # Proton ships a new AppID per release, so the title prefix has to carry it.
+    assert is_steam_runtime_app(9999999, "Proton 9.0") is True
+    assert is_steam_runtime_app(9999999, "Steam Linux Runtime 3.0 (sniper)") is True
+    # Real games must not be caught by the prefixes.
+    assert is_steam_runtime_app(620, "Portal 2") is False
+    assert is_steam_runtime_app(413150, "Stardew Valley") is False
+    assert is_steam_runtime_app(0, "") is False
+
+
+def test_steam_adapter_skips_runtime_entries_and_reports_why() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        steam_root = Path(tmp) / "Steam"
+        (steam_root / "steamapps" / "common").mkdir(parents=True)
+        real = DetectedGame(
+            title="Native Example", source_title="Native Example",
+            root_path=steam_root / "steamapps" / "common", source_type="steam", steam_appid=424242,
+        )
+        runtime = DetectedGame(
+            title="Steamworks Common Redistributables",
+            source_title="Steamworks Common Redistributables",
+            root_path=steam_root / "steamapps" / "common", source_type="steam", steam_appid=228980,
+        )
+        adapter = SteamLibraryAdapter(steam_root, scan_function=lambda root: [real, runtime])
+
+        result = adapter.scan()
+
+        assert [item.external_id for item in result.items] == ["424242"]
+        codes = {issue.code for issue in result.issues}
+        assert "steam_runtime_app_skipped" in codes
+        # Skipping a tool is informational, not an error condition.
+        skipped = next(i for i in result.issues if i.code == "steam_runtime_app_skipped")
+        assert skipped.severity == "info"
+
+
 if __name__ == "__main__":
+    test_steam_runtimes_and_tools_are_not_treated_as_games()
+    test_steam_adapter_skips_runtime_entries_and_reports_why()
     test_folder_adapter_normalizes_ranked_launch_target_and_candidates()
     test_folder_adapter_keeps_games_needing_manual_launch_review()
     test_folder_adapter_missing_root_and_scan_failure_are_non_destructive_issues()

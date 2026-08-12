@@ -6,7 +6,10 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from steam_shortcut_studio.artwork_search_service import ArtworkProviderSearchService  # noqa: E402
+from steam_shortcut_studio.artwork_search_service import (  # noqa: E402
+    ArtworkProviderSearchService,
+    add_steamgriddb_assets_to_slots,
+)
 from steam_shortcut_studio.models import ArtworkAsset, DetectedGame  # noqa: E402
 
 
@@ -102,7 +105,71 @@ def test_collect_assets_adds_steam_store_media_and_dedupes_urls() -> None:
     assert client.search_calls == []
 
 
+def _grid(asset_id: str, width: int, height: int) -> ArtworkAsset:
+    return ArtworkAsset(kind="grid", asset_id=asset_id, url=f"https://x.invalid/{asset_id}.png",
+                        width=width, height=height)
+
+
+def _empty_slots() -> dict[str, list[ArtworkAsset]]:
+    return {kind: [] for kind in ("grid", "wide", "hero", "logo", "icon")}
+
+
+def test_capsule_shapes_are_sorted_into_the_slot_they_actually_fit() -> None:
+    """SteamGridDB returns every capsule shape under one "grid" kind."""
+    slots = _empty_slots()
+    add_steamgriddb_assets_to_slots(slots, "grid", [
+        _grid("square", 1024, 1024),
+        _grid("portrait", 600, 900),
+        _grid("capsule", 920, 430),
+    ])
+
+    assert [a.asset_id for a in slots["grid"]] == ["portrait"]
+    assert [a.asset_id for a in slots["wide"]] == ["capsule-wide"]
+
+
+def test_a_square_never_outranks_correctly_shaped_art() -> None:
+    """SteamGridDB sorts by its own popularity score, so a square can arrive
+    first; it must still lose to art that is actually the right shape."""
+    slots = _empty_slots()
+    add_steamgriddb_assets_to_slots(slots, "grid", [
+        _grid("popular-square", 1024, 1024),
+        _grid("portrait", 660, 930),
+        _grid("capsule", 920, 430),
+    ])
+
+    assert slots["grid"][0].asset_id == "portrait"
+    assert slots["wide"][0].asset_id == "capsule-wide"
+
+
+def test_a_square_is_used_only_when_nothing_better_exists() -> None:
+    slots = _empty_slots()
+    add_steamgriddb_assets_to_slots(slots, "grid", [_grid("square", 1024, 1024)])
+
+    assert [a.asset_id for a in slots["grid"]] == ["square"]
+    assert [a.asset_id for a in slots["wide"]] == ["square-wide-fallback"]
+
+
+def test_assets_without_dimensions_still_reach_a_slot() -> None:
+    slots = _empty_slots()
+    add_steamgriddb_assets_to_slots(slots, "grid", [_grid("unknown", 0, 0)])
+
+    assert slots["grid"] or slots["wide"]
+
+
+def test_non_grid_kinds_pass_through_untouched() -> None:
+    slots = _empty_slots()
+    hero = ArtworkAsset(kind="hero", asset_id="h", url="https://x.invalid/h.png", width=1920, height=620)
+    add_steamgriddb_assets_to_slots(slots, "hero", [hero])
+
+    assert slots["hero"] == [hero]
+
+
 if __name__ == "__main__":
     test_collect_assets_uses_selected_sgdb_id_and_updates_metadata()
     test_collect_assets_adds_steam_store_media_and_dedupes_urls()
+    test_capsule_shapes_are_sorted_into_the_slot_they_actually_fit()
+    test_a_square_never_outranks_correctly_shaped_art()
+    test_a_square_is_used_only_when_nothing_better_exists()
+    test_assets_without_dimensions_still_reach_a_slot()
+    test_non_grid_kinds_pass_through_untouched()
     print("Artwork search service tests passed.")

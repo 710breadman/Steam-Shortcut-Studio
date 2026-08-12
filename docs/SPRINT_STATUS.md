@@ -607,6 +607,18 @@ Keyboard navigation, 2026-08-12:
 - Added `tests/shell_shortcuts_test.py` (8 cases including a Definition-of-Done coverage assertion and a duplicate-binding guard) and wired it into CI.
 - Drove the real bindings against a real window: Down moved the inspected row, Space selected it, Ctrl+A selected all three, Esc cleared, Ctrl+R opened the review queue, F5 refreshed, and Space/Down typed into the search box correctly did nothing to the selection.
 
+Scoring validated against a real library, 2026-08-12:
+
+- Ran bulk Auto-Art over a real 25-game library (20 folder, 5 native Steam; SteamGridDB the only enabled source) in a **dry pass that persisted nothing** — checking the auto-accepts by committing them first would have defeated the point.
+- The run exposed three defects, two of them in the app rather than in scoring:
+  - **`wide` capsule slot was receiving square images.** `add_steamgriddb_assets_to_slots` routed anything with `width >= height` to `wide`, so SteamGridDB's very common 1024×1024 "grids" beat real 920×430 capsules on SteamGridDB's own popularity score. Steam letterboxes those. Now sorted into portrait / capsule / awkward tiers, with squares used only when nothing correctly shaped exists — and never allowed to outrank properly shaped art.
+  - **The `logo` shape check was invalid.** Measured logo ratios in this library alone span 1.02 to 6.00; there is no expected logo shape. The check produced false penalties on nearly every game and has been removed. The `wide` expectation was also wrong (616×353 is a *store* capsule; the grid folder uses 920×430).
+  - **`Steamworks Common Redistributables` (AppID 228980) was in the library as a game** and auto-accepted artwork. `SteamLibraryAdapter` now skips Steam runtimes and compatibility tools by AppID and by title prefix (Proton ships a new AppID per release). Existing rows clear on the next Steam scan.
+- Result across the three runs: auto-accept 10 → 14 → 15, review 9 → 5 → 4, with five correct matches (God of War, Minecraft, Split Fiction, The Last of Us Part I, UNCHARTED) promoted out of review once the false shape penalties were gone.
+- **14 of the 15 final auto-accepts are the correct game.** The 15th is the redistributables entry, which is a bad library row rather than a bad match, and is now filtered at the source.
+- The scorer caught the one genuinely wrong match: `Vampire Crawlers` matched `Vampire Hunter D` at 0.62 similarity, scored 59, and went to review rather than being applied.
+- Also fixed a misleading label: the coordinator reports `decision="reject"` when *nothing was found at all*, which reads as though a candidate was found and refused. Nothing is persisted in that case, so the queue now says "Artwork search found no usable candidates."
+
 ### Remaining UX-target gaps
 
 - `Auto-Art` is a single button, not the split menu `UI_UX_TARGET.md` sketches. Worth noting *why*: `ArtworkSearchMode`'s three values currently produce identical plans, because `LibraryController.bulk_artwork_items()` never populates `existing_slots`, so `MISSING_ONLY` has nothing to exclude. Offering three modes that behave the same would be a fake distinction. Populating `existing_slots` from artwork already present in Steam's grid folder would make the menu meaningful.
@@ -617,7 +629,8 @@ Keyboard navigation, 2026-08-12:
 
 - `ui.py` still contains too many responsibilities (5,600+ lines)
 - Current provider download, auto-selection, and review presentation still run through the legacy UI path
-- Confidence scoring (`artwork_scoring.py`) is real but young. Its provider ceilings and penalties are reasoned rather than measured against a labelled corpus; watch for auto-accepts that should not have been, and prefer tightening a ceiling over loosening the policy.
+- Confidence scoring (`artwork_scoring.py`) has been calibrated against one real 25-game library (see the validation entry below), not a labelled corpus. The provider ceilings in particular are still reasoned rather than measured. Prefer tightening a ceiling over loosening the policy.
+- Six folder games returned no artwork at all because their folder-derived titles carry scene tags or stripped punctuation (`Bluey The Videogame TENOKE`, `Ghost of Tsushima DC`, `MOUSE PI For Hire`, `Marvels Spider Man 2 Digital Deluxe Edition`, `Ratchet and Clank Rift Apart`, `SpongeBob SquarePants Titans of the Tide`). Title normalisation for folder sources is the gap, not scoring.
 - Scoring depends on provenance stamped by `artwork_search_service`. An asset that reaches the scorer without a `sss_match` stamp scores as unverifiable (capped below auto-accept) — safe, but it silently costs auto-accepts. Any new provider path must stamp its assets.
 - The modern shell must not become a second implementation of domain logic; `ModernShell._visible_rows` already duplicates search/filter/sort logic that `modern_library_view.py` owns
 - The Backups screen caps rendering at the 50 most recent transactions; older restore points exist on disk but are not listed

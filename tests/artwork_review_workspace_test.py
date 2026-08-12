@@ -261,7 +261,10 @@ def test_review_queue_does_not_hold_decisions_that_persisted_themselves() -> Non
         _event(
             "accepted",
             JobState.SUCCEEDED,
-            result={"item_id": "item-1", "decision": "auto_accept", "requested_slots": ["grid"]},
+            result={
+                "item_id": "item-1", "decision": "auto_accept", "requested_slots": ["grid"],
+                "candidate_ids": {"grid": "grid-1"},
+            },
         ),
         accepted=1,
     )
@@ -269,7 +272,10 @@ def test_review_queue_does_not_hold_decisions_that_persisted_themselves() -> Non
         _event(
             "rejected",
             JobState.SKIPPED,
-            result={"item_id": "item-2", "decision": "reject", "requested_slots": ["grid"]},
+            result={
+                "item_id": "item-2", "decision": "reject", "requested_slots": ["grid"],
+                "candidate_ids": {"grid": "grid-2"},
+            },
         ),
         rejected=1,
     )
@@ -279,6 +285,30 @@ def test_review_queue_does_not_hold_decisions_that_persisted_themselves() -> Non
     assert rejected.needs_review is False
     assert accepted.status == "Artwork auto_accept (grid); saved 1 accepted/0 rejected"
     assert rejected.status == "Artwork reject (grid); saved 0 accepted/1 rejected"
+    assert queue.pending_item_ids == ()
+
+
+def test_finding_nothing_is_not_reported_as_a_rejection() -> None:
+    """The coordinator labels "nothing found" as decision=reject, but there is
+    no candidate to remember and nothing is persisted -- saying "rejected"
+    implies we found something and refused it."""
+    queue = ArtworkReviewQueue()
+    queue.track("job-1", "item-1")
+
+    update = queue.handle_event(
+        _event(
+            "job-1",
+            JobState.SKIPPED,
+            result={
+                "item_id": "item-1", "decision": "reject",
+                "requested_slots": ["grid", "hero"], "found_slots": [], "candidate_ids": {},
+            },
+        )
+    )
+
+    assert update is not None
+    assert update.status == "Artwork search found no usable candidates."
+    assert update.needs_review is False
     assert queue.pending_item_ids == ()
 
 
@@ -461,6 +491,7 @@ if __name__ == "__main__":
     test_review_queue_reports_running_progress_without_finishing_the_job()
     test_review_queue_holds_needs_review_results_for_a_human_decision()
     test_review_queue_does_not_hold_decisions_that_persisted_themselves()
+    test_finding_nothing_is_not_reported_as_a_rejection()
     test_review_queue_surfaces_failures_instead_of_queueing_them_for_review()
     test_review_queue_discard_and_clear_release_pending_items()
     test_artwork_queue_progress_text_distinguishes_running_from_finished()

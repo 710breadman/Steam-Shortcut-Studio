@@ -176,21 +176,54 @@ def stamp_match_provenance(
     ]
 
 
+# SteamGridDB returns every capsule shape under the single "grid" kind, so this
+# is where they get sorted into Steam's two capsule slots.
+#
+#   Steam's wide capsule is 920x430 (2.14); 616x353 (1.75) also appears.
+#   Steam's portrait capsule is 600x900 (0.67); 660x930 (0.71) also appears.
+#
+# The awkward case is the 1024x1024 square, which SteamGridDB returns a lot of
+# and which fits neither. It is usable in either slot but correct in neither, so
+# it is kept as a last-resort tier rather than being allowed to outrank properly
+# shaped art on SteamGridDB's own popularity score.
+WIDE_MIN_RATIO = 1.55
+PORTRAIT_MAX_RATIO = 0.9
+
+
+def _aspect_ratio(asset: ArtworkAsset) -> float:
+    if not asset.width or not asset.height:
+        return 0.0
+    return asset.width / asset.height
+
+
 def add_steamgriddb_assets_to_slots(
     assets_by_kind: dict[str, list[ArtworkAsset]],
     kind: str,
     fetched: list[ArtworkAsset],
 ) -> None:
     if kind == "grid":
+        wide: list[ArtworkAsset] = []
+        portrait: list[ArtworkAsset] = []
+        awkward: list[ArtworkAsset] = []
         for asset in fetched:
-            if asset.width and asset.height and asset.width >= asset.height:
-                assets_by_kind["wide"].append(replace(asset, kind="wide", asset_id=f"{asset.asset_id}-wide"))
+            ratio = _aspect_ratio(asset)
+            if ratio >= WIDE_MIN_RATIO:
+                wide.append(replace(asset, kind="wide", asset_id=f"{asset.asset_id}-wide"))
+            elif ratio and ratio <= PORTRAIT_MAX_RATIO:
+                portrait.append(asset)
             else:
-                assets_by_kind["grid"].append(asset)
+                awkward.append(asset)
+
+        assets_by_kind["wide"].extend(wide)
+        assets_by_kind["grid"].extend(portrait)
+        # Squares fill either slot only once nothing better is available.
         if not assets_by_kind["wide"]:
-            assets_by_kind["wide"].extend(replace(asset, kind="wide", asset_id=f"{asset.asset_id}-wide-fallback") for asset in fetched[:3])
+            assets_by_kind["wide"].extend(
+                replace(asset, kind="wide", asset_id=f"{asset.asset_id}-wide-fallback")
+                for asset in (awkward or fetched)[:3]
+            )
         if not assets_by_kind["grid"]:
-            assets_by_kind["grid"].extend(fetched[:3])
+            assets_by_kind["grid"].extend((awkward or fetched)[:3])
     else:
         assets_by_kind[kind].extend(fetched)
 

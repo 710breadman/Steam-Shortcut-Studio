@@ -293,6 +293,12 @@ class ArtworkReviewQueue:
             self._results[item_id] = result
         if event.state is JobState.FAILED:
             status = f"Artwork search failed: {event.error or event.message}"
+        elif decision in {"reject", "skipped"} and not result.get("candidate_ids"):
+            # The coordinator labels "nothing found at all" as a rejection,
+            # which reads as though something was found and refused. There are
+            # no candidates to remember and nothing is persisted, so say what
+            # actually happened.
+            status = "Artwork search found no usable candidates."
         else:
             requested = result.get("requested_slots") or ()
             status = artwork_job_status_text(

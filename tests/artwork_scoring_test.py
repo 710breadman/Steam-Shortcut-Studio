@@ -267,6 +267,41 @@ def test_missing_requested_slots_reduce_coherence() -> None:
     assert partial.set_coherence_score < whole.set_coherence_score
 
 
+def test_real_provider_shapes_are_accepted() -> None:
+    """Ratios measured from what SteamGridDB actually returned for a real
+    library. A scorer that rejects the providers' normal output is miscalibrated."""
+    real = {
+        "grid": [(600, 900), (660, 930)],
+        "wide": [(920, 430), (616, 353), (460, 215)],
+        "hero": [(3840, 1240), (1920, 620)],
+        "icon": [(512, 512), (1024, 1024)],
+    }
+    for slot, sizes in real.items():
+        for width, height in sizes:
+            selected = {slot: _asset(slot, name="Hollow Knight", width=width, height=height)}
+            score = score_artwork_set(selected, library_title="Hollow Knight")
+            assert score.set_coherence_score == 100, f"{slot} {width}x{height} was penalised"
+
+
+def test_logo_shape_is_never_penalised_because_logos_have_no_shape() -> None:
+    """Real logo ratios in one library spanned 1.02 to 6.00."""
+    for width, height in [(2560, 2499), (4337, 944), (11296, 1882), (1223, 285)]:
+        selected = {"logo": _asset("logo", name="Hollow Knight", width=width, height=height)}
+        score = score_artwork_set(selected, library_title="Hollow Knight")
+        assert score.set_coherence_score == 100, f"logo {width}x{height} was penalised"
+
+
+def test_a_square_image_in_the_wide_capsule_is_still_flagged() -> None:
+    """SteamGridDB returns many 1024x1024 "grids"; Steam letterboxes them in
+    the wide capsule, so the user should get to look before that is applied."""
+    selected = {"wide": _asset("wide", name="Hollow Knight", width=1024, height=1024)}
+
+    score = score_artwork_set(selected, library_title="Hollow Knight")
+
+    assert score.set_coherence_score < 100
+    assert any("shape" in reason for reason in score.reasons)
+
+
 def test_missing_dimensions_are_not_treated_as_a_wrong_shape() -> None:
     unknown = {"hero": _asset("hero", name="Hollow Knight", width=0, height=0)}
 

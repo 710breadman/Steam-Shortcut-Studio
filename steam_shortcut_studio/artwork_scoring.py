@@ -70,13 +70,21 @@ DEFAULT_TITLE_CEILING = 70
 UNVERIFIABLE_IDENTITY = 80
 
 # Expected width/height ratio per slot, with the tolerance band that still
-# counts as correct. Logos are deliberately loose: they are transparent
-# wordmarks with no consistent shape.
+# counts as correct. Measured against what SteamGridDB actually returns rather
+# than against Steam's nominal store sizes:
+#
+#   grid  600x900 and 660x930 are both common  -> 0.67 to 0.71
+#   wide  Steam's wide capsule is 920x430      -> 2.14, and 616x353 (1.75) also occurs
+#   hero  3840x1240 and 1920x620               -> 3.10 exactly
+#   icon  512x512 / 1024x1024                  -> 1.00 exactly
+#
+# `logo` is deliberately absent. Logos are transparent wordmarks whose real
+# ratios span 1.02 to 6.00 in this library alone, so there is no shape to check
+# and any check produces false penalties.
 SLOT_ASPECTS: dict[str, tuple[float, float]] = {
     "grid": (600 / 900, 0.18),
-    "wide": (616 / 353, 0.30),
+    "wide": (920 / 430, 0.55),
     "hero": (1920 / 620, 0.55),
-    "logo": (2.0, 1.60),
     "icon": (1.0, 0.25),
 }
 
