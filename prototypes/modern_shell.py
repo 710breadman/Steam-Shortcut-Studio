@@ -17,9 +17,31 @@ if str(ROOT) not in sys.path:
 import customtkinter as ctk  # noqa: E402
 
 from steam_shortcut_studio.artwork import copy_all_artwork_to_steam, download_asset  # noqa: E402
+from steam_shortcut_studio.artwork_bulk_search import build_provider_searcher  # noqa: E402
+from steam_shortcut_studio.artwork_queue_status import (  # noqa: E402
+    artwork_plan_no_jobs_message,
+    artwork_plan_selection_required_message,
+    artwork_queue_submission_message,
+)
+from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
+    ArtworkReviewQueue,
+    artwork_queue_progress_text,
+    artwork_review_action_message,
+    artwork_review_detail_text,
+    artwork_review_empty_message,
+    artwork_review_header_text,
+    artwork_review_no_pending_message,
+    build_artwork_review_rows,
+    build_artwork_review_summary,
+    review_result_slot_count,
+)
 from steam_shortcut_studio.artwork_search_service import ArtworkProviderSearchService  # noqa: E402
 from steam_shortcut_studio.artwork_sources import (  # noqa: E402
     ARTWORK_SOURCE_LABELS,
+)
+from steam_shortcut_studio.bulk_artwork import (  # noqa: E402
+    ArtworkSearchMode,
+    BulkArtworkCoordinator,
 )
 from steam_shortcut_studio.image_validation import validate_artwork_file  # noqa: E402
 from steam_shortcut_studio.job_queue import JobEvent, JobExecutionResult  # noqa: E402
@@ -34,6 +56,7 @@ from steam_shortcut_studio.library_store import (  # noqa: E402
     default_library_database,
 )
 from steam_shortcut_studio.models import ArtworkAsset, DetectedGame  # noqa: E402
+from steam_shortcut_studio.selection import SelectionState  # noqa: E402
 from steam_shortcut_studio.modern_library_view import (  # noqa: E402
     format_size,
     initial_active_item_id,
@@ -156,6 +179,8 @@ class ModernShell(ctk.CTk):
         self.row_checks: dict[str, ctk.CTkCheckBox] = {}
         self._ordered_ids: list[str] = []
         self._pending_action_jobs: dict[str, Callable[[JobEvent], None]] = {}
+        self.review_queue = ArtworkReviewQueue()
+        self._preview_images: list[ctk.CTkImage] = []
 
         self.controller.refresh(include_missing=self.include_missing)
         self._auto_select_first()
@@ -283,7 +308,7 @@ class ModernShell(ctk.CTk):
         actions = [
             ("\u2315", "Scan", "Folders & libraries", self._open_import_scan),
             ("\u21bb", "Refresh Metadata", "Reload stored library", self._refresh_metadata),
-            ("\u2726", "Auto-Art", "Find & match artwork", self._auto_art_info),
+            ("\u2726", "Auto-Art", "Find & match artwork", self._start_bulk_auto_art),
             ("\u25eb", "Preview", "Preview changes", self._preview_changes),
         ]
         for column, (icon, title, subtitle, command) in enumerate(actions):
@@ -311,15 +336,73 @@ class ModernShell(ctk.CTk):
         self._render_content()
         self._set_status("Reloaded stored library from disk.")
 
-    def _auto_art_info(self) -> None:
-        messagebox.showinfo(
-            "Bulk Auto-Art not yet wired",
-            "Searching and matching artwork across many games at once needs a review "
-            "queue (like the legacy app's) before it can safely auto-lock results "
-            "unattended — that isn't built yet.\n\n"
-            "Per-slot matching already works today: open a game's Artwork tab and use "
-            "Auto Match or Replace on the slot you want.",
+    def _start_bulk_auto_art(self) -> None:
+        """Queue artwork searches for the selected rows through the coordinator.
+
+        Results are never locked automatically: `ArtworkMatchPolicy` sends
+        everything the real providers produce to `NEEDS_REVIEW` (see
+        `artwork_bulk_search`'s placeholder scores), so each finished job lands
+        in the Artwork screen's review queue for an explicit decision.
+        """
+        if not self._artwork_sources_enabled():
+            messagebox.showinfo(
+                "Auto-Art",
+                "No artwork source is enabled. Turn on at least one source (SteamGridDB, "
+                "Official Steam, Wikimedia, or RAWG) on the Settings screen first.",
+            )
+            return
+
+        item_ids = tuple(row.item_id for row in self.controller.selected_rows())
+        if not item_ids:
+            messagebox.showinfo("Auto-Art", artwork_plan_selection_required_message())
+            return
+        if self._submit_artwork_jobs(item_ids) == 0:
+            messagebox.showinfo("Auto-Art", artwork_plan_no_jobs_message())
+            return
+        self._set_nav("Artwork")
+
+    def _submit_artwork_jobs(self, item_ids: tuple[str, ...]) -> int:
+        """Submit `item_ids` through `BulkArtworkCoordinator`; return job count.
+
+        Submission scope is an explicit `SelectionState` built from the passed
+        IDs rather than the live table selection, so a retry of one row cannot
+        widen into whatever happens to be selected at that moment.
+        """
+        client = SteamGridDbClient(self.settings.steamgriddb_api_key, Path(self.settings.cache_dir), LOGGER)
+        provider_service = ArtworkProviderSearchService(LOGGER)
+        row_map = self.controller.row_map()
+
+        def game_lookup(item_id: str) -> DetectedGame | None:
+            row = row_map.get(item_id)
+            return game_from_library_row(row) if row is not None else None
+
+        searcher = build_provider_searcher(
+            game_lookup=game_lookup,
+            collect_assets=provider_service.collect_assets,
+            client=client,
+            cache_dir=Path(self.settings.cache_dir),
+            enabled_sources=self.settings.artwork_sources,
+            rawg_api_key=self.settings.rawg_api_key,
+            missing_game_reason="Stored row is no longer visible in the library.",
+            logger=LOGGER,
         )
+
+        scope = SelectionState()
+        scope.replace(item_ids)
+        submission = BulkArtworkCoordinator(self.controller.job_queue).submit_selected(
+            scope,
+            list(item_ids),
+            self.controller.bulk_artwork_items(),
+            searcher,
+            mode=ArtworkSearchMode.ALL_UNLOCKED,
+        )
+        for job in submission.jobs:
+            self.review_queue.track(job.job_id, job.item_id)
+        if submission.jobs:
+            self._set_status(
+                artwork_queue_submission_message(len(submission.jobs), "artwork search")
+            )
+        return len(submission.jobs)
 
     def _apply_scope_rows(self) -> tuple[LibraryRow, ...]:
         rows = self.controller.selected_rows() or self.controller.snapshot().rows
@@ -681,7 +764,7 @@ class ModernShell(ctk.CTk):
             ctk.CTkLabel(bulk, text=f"{selection.selected_count} selected", font=self._font(11, "bold")).pack(side="left", padx=12, pady=8)
             for label, command in [
                 ("Scan Selected", lambda: self._set_nav("Import / Scan")),
-                ("Find Art", self._auto_art_info),
+                ("Find Art", self._start_bulk_auto_art),
                 ("Refresh Metadata", self._refresh_metadata),
                 ("Preview", self._preview_changes),
             ]:
@@ -1140,10 +1223,211 @@ class ModernShell(ctk.CTk):
 
     def _build_artwork_screen(self) -> None:
         rows = self.controller.snapshot().rows
-        body = self._simple_screen("Artwork", "Locked slots and rejected matches per game.")
+        pending_ids = self.review_queue.pending_item_ids
+        active_jobs = self.review_queue.active_job_count
+        body = self._simple_screen(
+            "Artwork",
+            "Review queue for bulk Auto-Art, plus locked slots and rejected matches per game.",
+        )
+
+        next_row = 0
+        if active_jobs or pending_ids:
+            self._build_review_queue_section(body, next_row, pending_ids, active_jobs)
+            next_row += 1
+
         for index, row in enumerate(rows):
             summary = self.controller.artwork_decision_summary((row.item_id,))
-            self._list_row(body, index, "\u25a7", row.title, f"{summary.locked_slots} locked \u2022 {summary.rejected_matches} rejected", "Open", lambda item=row.item_id: self._activate_and_show_library(item))
+            self._list_row(
+                body,
+                next_row + index,
+                "\u25a7",
+                row.title,
+                f"{summary.locked_slots} locked \u2022 {summary.rejected_matches} rejected",
+                "Open",
+                lambda item=row.item_id: self._activate_and_show_library(item),
+            )
+
+    # ---------- bulk artwork review queue ----------
+
+    def _build_review_queue_section(
+        self, parent, grid_row: int, pending_ids: tuple[str, ...], active_jobs: int
+    ) -> None:
+        self._preview_images.clear()
+        row_map = self.controller.row_map()
+        titles = {item_id: row.title for item_id, row in row_map.items()}
+        decisions = self.controller.artwork_decision_summary(pending_ids or ())
+        summary = build_artwork_review_summary(pending_ids, self.review_queue.results)
+
+        card = ctk.CTkFrame(parent, fg_color=COLORS["panel_alt"], border_width=1, border_color=self.palette["border"], corner_radius=10)
+        card.grid(row=grid_row, column=0, sticky="ew", pady=(0, 10))
+        card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(card, text="ARTWORK REVIEW QUEUE", anchor="w", text_color="#68aefc", font=self._font(11, "bold")).grid(row=0, column=0, padx=14, pady=(12, 2), sticky="ew")
+        ctk.CTkLabel(
+            card, text=artwork_queue_progress_text(active_jobs, len(pending_ids)),
+            anchor="w", text_color=COLORS["muted"], font=self._font(10),
+        ).grid(row=1, column=0, padx=14, sticky="ew")
+        ctk.CTkLabel(
+            card,
+            text=artwork_review_header_text(
+                summary.selected_item_count,
+                decisions.locked_slots,
+                decisions.rejected_matches,
+                summary.pending_slot_count,
+            ),
+            anchor="w", text_color=COLORS["muted"], font=self._font(10),
+        ).grid(row=2, column=0, padx=14, pady=(2, 8), sticky="ew")
+
+        if not pending_ids:
+            ctk.CTkLabel(
+                card, text=artwork_review_empty_message(), anchor="w",
+                text_color=COLORS["muted"], font=self._font(11),
+            ).grid(row=3, column=0, padx=14, pady=(0, 12), sticky="ew")
+            return
+
+        bulk = ctk.CTkFrame(card, fg_color="transparent")
+        bulk.grid(row=3, column=0, padx=10, pady=(0, 6), sticky="ew")
+        for label, command, accent in [
+            ("Accept All", lambda: self._review_decision(pending_ids, "accept"), True),
+            ("Reject All", lambda: self._review_decision(pending_ids, "reject"), False),
+            ("Skip All", lambda: self._review_decision(pending_ids, "skip"), False),
+        ]:
+            ctk.CTkButton(
+                bulk, text=label, height=28, width=110, corner_radius=7, font=self._font(10, "bold"),
+                fg_color=self.palette["accent"] if accent else COLORS["panel"],
+                hover_color=self.palette["hover"] if accent else COLORS["line"],
+                command=command,
+            ).pack(side="left", padx=3, pady=4)
+
+        review_rows = build_artwork_review_rows(pending_ids, titles, self.review_queue.results)
+        by_item: dict[str, list] = {}
+        for review_row in review_rows:
+            by_item.setdefault(review_row.item_id, []).append(review_row)
+
+        container = ctk.CTkFrame(card, fg_color="transparent")
+        container.grid(row=4, column=0, padx=10, pady=(0, 12), sticky="ew")
+        container.grid_columnconfigure(0, weight=1)
+        for index, item_id in enumerate(pending_ids):
+            self._build_review_item_card(
+                container, index, item_id, titles.get(item_id, item_id), by_item.get(item_id, [])
+            )
+
+    def _build_review_item_card(self, parent, grid_row: int, item_id: str, title: str, rows: list) -> None:
+        card = ctk.CTkFrame(parent, fg_color=COLORS["panel"], border_width=1, border_color=COLORS["line"], corner_radius=9)
+        card.grid(row=grid_row, column=0, sticky="ew", pady=4)
+        card.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(card, text=title, anchor="w", font=self._font(12, "bold")).grid(row=0, column=0, padx=12, pady=(10, 2), sticky="ew")
+        ctk.CTkLabel(
+            card, text=f"{len(rows)} candidate slot(s) awaiting a decision",
+            anchor="w", text_color=COLORS["muted"], font=self._font(10),
+        ).grid(row=1, column=0, padx=12, pady=(0, 6), sticky="ew")
+
+        slots = ctk.CTkFrame(card, fg_color="transparent")
+        slots.grid(row=2, column=0, padx=10, pady=(0, 6), sticky="ew")
+        slots.grid_columnconfigure(1, weight=1)
+        for index, row in enumerate(rows):
+            preview = self._preview_widget(slots, row.path, title)
+            preview.grid(row=index, column=0, padx=(2, 10), pady=3)
+            text = ctk.CTkFrame(slots, fg_color="transparent")
+            text.grid(row=index, column=1, sticky="ew", pady=3)
+            heading = f"{row.slot.title()}  \u2022  {row.provider or 'provider'}"
+            if row.dimensions_label:
+                heading += f"  \u2022  {row.dimensions_label}"
+            ctk.CTkLabel(text, text=heading, anchor="w", font=self._font(11, "bold")).pack(fill="x")
+            ctk.CTkLabel(
+                text, text=row.path or "(no validated file)", anchor="w",
+                text_color=COLORS["muted"], font=self._font(9),
+            ).pack(fill="x")
+            ctk.CTkButton(
+                slots, text="Details", height=24, width=70, corner_radius=6, font=self._font(9, "bold"),
+                fg_color="transparent", border_width=1, border_color=COLORS["line"],
+                command=lambda r=row: messagebox.showinfo("Candidate details", artwork_review_detail_text(r)),
+            ).grid(row=index, column=2, padx=6)
+
+        actions = ctk.CTkFrame(card, fg_color="transparent")
+        actions.grid(row=3, column=0, padx=10, pady=(0, 10), sticky="ew")
+        for label, command, accent, danger in [
+            ("Accept", lambda: self._review_decision((item_id,), "accept"), True, False),
+            ("Reject", lambda: self._review_decision((item_id,), "reject"), False, True),
+            ("Skip", lambda: self._review_decision((item_id,), "skip"), False, False),
+            ("Retry", lambda: self._retry_review_item(item_id), False, False),
+        ]:
+            ctk.CTkButton(
+                actions, text=label, height=26, width=90, corner_radius=6, font=self._font(10, "bold"),
+                fg_color=self.palette["accent"] if accent else "transparent",
+                border_width=0 if accent else 1, border_color=COLORS["line"],
+                hover_color=self.palette["hover"] if accent else COLORS["line"],
+                text_color=COLORS["danger"] if danger else COLORS["text"],
+                command=command,
+            ).pack(side="left", padx=3)
+
+    def _preview_widget(self, parent, path: str, title: str):
+        """Real thumbnail for a validated candidate, or a monogram placeholder.
+
+        Never falls back to a *different* game's art or a stock image: if the
+        file cannot be decoded, the slot shows initials so a broken candidate
+        is visibly broken rather than plausibly wrong.
+        """
+        image = self._thumbnail(path)
+        if image is not None:
+            self._preview_images.append(image)
+            return ctk.CTkLabel(parent, image=image, text="")
+        return ctk.CTkLabel(
+            parent, text=_monogram(title), width=64, height=48, fg_color=COLORS["panel_soft"],
+            corner_radius=6, font=self._font(12, "bold"),
+        )
+
+    @staticmethod
+    def _thumbnail(path: str, box: tuple[int, int] = (64, 48)) -> ctk.CTkImage | None:
+        if not path or not Path(path).is_file():
+            return None
+        try:
+            from PIL import Image
+
+            with Image.open(path) as handle:
+                image = handle.convert("RGBA")
+                image.thumbnail(box)
+                return ctk.CTkImage(light_image=image, dark_image=image, size=image.size)
+        except Exception:  # noqa: BLE001 - a bad preview must never break the screen
+            LOGGER.debug("Could not build artwork preview for %s", path, exc_info=True)
+            return None
+
+    def _review_decision(self, item_ids: tuple[str, ...], action: str) -> None:
+        results = self.review_queue.results_for(item_ids)
+        if not results:
+            messagebox.showinfo("Artwork review", artwork_review_no_pending_message())
+            return
+        if action == "reject" and not messagebox.askyesno(
+            "Reject artwork",
+            f"Reject the pending candidates for {len(results)} game(s)?\n\n"
+            "Rejected candidates are remembered so future searches can skip them. "
+            "No Steam file is touched either way.",
+        ):
+            return
+
+        decided = 0
+        for result in results:
+            item_id = str(result.get("item_id") or "")
+            if action == "accept":
+                decided += self.controller.accept_artwork_review_result(result).accepted
+            elif action == "reject":
+                decided += self.controller.reject_artwork_review_result(result).rejected
+            else:
+                decided += review_result_slot_count(result)
+            self.review_queue.discard(item_id)
+
+        if action != "skip":
+            self.controller.refresh(include_missing=self.include_missing)
+        self._set_status(artwork_review_action_message(action, decided))
+        self._render_library_card()
+        self._render_content()
+
+    def _retry_review_item(self, item_id: str) -> None:
+        self.review_queue.discard(item_id)
+        if self._submit_artwork_jobs((item_id,)) == 0:
+            messagebox.showinfo("Artwork review", artwork_plan_no_jobs_message())
+        self._render_content()
 
     def _build_metadata_screen(self) -> None:
         rows = self.controller.snapshot().rows
@@ -1234,11 +1518,37 @@ class ModernShell(ctk.CTk):
                     handler = self._pending_action_jobs.pop(job_event.job_id)
                     handler(job_event)
                 continue
+            if self.review_queue.tracks(job_event.job_id):
+                self._handle_bulk_artwork_event(job_event)
+                continue
             if job_event.state in (JobState.SUCCEEDED, JobState.NEEDS_REVIEW):
                 self._set_status(job_event.message or "Scan finished.")
             elif job_event.state is JobState.FAILED:
                 self._set_status(f"Scan failed: {job_event.error or job_event.message}")
         self.after(200, self._poll_jobs)
+
+    def _handle_bulk_artwork_event(self, event: JobEvent) -> None:
+        accepted = rejected = 0
+        if event.state in TERMINAL_JOB_STATES and event.result:
+            # Auto-accepted and policy-rejected decisions persist themselves;
+            # review results are held in memory until a human decides.
+            persistence = self.controller.persist_artwork_job_result(event.result)
+            accepted, rejected = persistence.accepted, persistence.rejected
+
+        update = self.review_queue.handle_event(event, accepted=accepted, rejected=rejected)
+        if update is None:
+            return
+        self._set_status(update.status)
+        if not update.terminal:
+            return
+        if accepted or rejected:
+            self.controller.refresh(include_missing=self.include_missing)
+        if self.review_queue.active_job_count == 0:
+            self._set_status(
+                artwork_queue_progress_text(0, len(self.review_queue.pending_item_ids))
+            )
+        if self.nav == "Artwork":
+            self._render_content()
 
     def _build_backups_screen(self) -> None:
         body = self._simple_screen("Backups", "Restore points recorded by the transaction system.")

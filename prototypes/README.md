@@ -25,13 +25,13 @@ Per `docs/UI_UX_TARGET.md`'s "No fake safety" principle, Apply Changes only does
 - **Unlike legacy `ui.py`, which silently discards every artwork-copy failure** (`ui.py:5549-5553`), this surfaces real per-game success/failure counts and reasons in the result dialog — nothing is swallowed.
 - Both kinds of transaction now show up on the **Backups screen**: shortcut transactions via the existing `list_transaction_history()`, and artwork transactions via a new `list_artwork_transaction_history()` — artwork transactions were previously invisible everywhere in the app (they write `artwork-manifest.json`, which `list_transaction_history()` never looked for), a real, repo-wide gap fixed alongside this feature since the Apply Changes dialog already promises "see the Backups screen."
 
-## Per-slot Auto Match / Replace are now live (bulk top-bar Auto-Art is still a stub)
+## Artwork matching is live: per-slot, and in bulk behind a review queue
 Both per-slot buttons on the Artwork tab now perform real search → download → validate → lock, using the same providers tested live this session (SteamGridDB with a real API key, Official Steam CDN, Wikimedia, RAWG):
 - **Auto Match**: searches `ArtworkProviderSearchService.collect_assets` for the clicked slot, tries candidates in order until one downloads and passes `image_validation.validate_artwork_file`, then locks it via `LibraryStore.set_artwork_lock` and refreshes the row (the card immediately flips from "Not fetched" to "✓ Locked").
 - **Replace**: same search, but downloads up to 3 validated candidates and shows a numbered picker (dimensions + source) so you choose which one gets locked; cancelling leaves the current artwork untouched.
 - If no artwork source is enabled in Settings, or nothing downloads/validates, you get a clear message — nothing is ever silently faked or partially locked.
-- **Deliberately bypasses `BulkArtworkCoordinator`/`ArtworkMatchPolicy`** (the confidence-gated bulk pipeline legacy `ui.py` uses): that pipeline's real-world thresholds (92/85) are never reached because `ui.py` hardcodes placeholder confidence scores (70/60), so every real bulk match there lands in a manual review queue that doesn't exist in the modern shell yet. A per-slot click is already a single, explicit, human-supervised action, so it locks the result directly instead — same safety model as Clear Slot (local cache + local SQLite lock only; matching/locking itself never touches your real Steam grid folder, fully reversible via Clear Slot). Getting a locked slot's file into Steam's actual grid folder is a separate step — see Apply Changes above.
-- **The top-bar bulk "Auto-Art" button remains a stub** — wiring bulk matching safely needs the same kind of review-queue UI legacy `ui.py` has, which doesn't exist in the modern shell yet.
+- **Per-slot actions deliberately bypass `BulkArtworkCoordinator`/`ArtworkMatchPolicy`** (the confidence-gated bulk pipeline, which the bulk buttons do use). A per-slot click is already a single, explicit, human-supervised action, so it locks the result directly instead — same safety model as Clear Slot (local cache + local SQLite lock only; matching/locking itself never touches your real Steam grid folder, fully reversible via Clear Slot). Getting a locked slot's file into Steam's actual grid folder is a separate step — see Apply Changes above.
+- **Bulk "Auto-Art" is now live too, behind a review queue.** The top-bar tile and the bulk bar's `Find Art` submit the selected rows through `BulkArtworkCoordinator`, and results land in the review queue on the **Artwork** screen — per-item cards with per-slot candidate previews (decoded from the validated cache file; a monogram placeholder if it won't decode, never another game's art), a details view, and Accept / Reject / Skip / Retry per item plus batch actions. Accepting locks the candidate locally, exactly like per-slot Auto Match; Apply Changes remains the only path into Steam's grid folder. In practice *every* bulk result lands in this queue, because the shared searcher reports a constant 70/60 confidence that can never clear `ArtworkMatchPolicy`'s 92/85 auto-accept thresholds — that's deliberate until real scoring exists, and the constants live in one documented place (`artwork_bulk_search.py`) rather than being scattered.
 
 **Clear Slot is live**: it calls `LibraryStore.clear_artwork_lock(item_id, slot)` (already exposed on the store) with a confirm prompt when the slot is actually locked, then refreshes the row so the slot shows "Not fetched" again. Clicking it on an already-unlocked slot just reports "had no lock to clear" — the button itself is always enabled (a customtkinter quirk makes `state="disabled"` collapse a button's width to ~1px inside a 3-up `pack(fill="x", expand=True)` row, so eligibility is checked in the click handler instead).
 
@@ -44,11 +44,12 @@ The file in this bundle (`Steam Shortcut Studio.dc.html`) is a **design referenc
 > **Everything from here down describes the `.dc.html` design reference, not the
 > shipped Python.** It is still the spec for look, layout, and interaction
 > shape, but its "currently toast-only" / "wire this up later" notes are stale:
-> per-slot artwork actions, Apply Changes, scans, Backups, Tools, and Settings
-> are all live in `modern_shell.py` — see the sections above. Where the two
-> disagree about what *works today*, the sections above win. The one behavior
-> note below that is still accurate as pending work is the bulk `Auto-Art` /
-> `Find Art` path, which is gated on a review queue that does not exist yet.
+> per-slot artwork actions, bulk Auto-Art and its review queue, Apply Changes,
+> scans, Backups, Tools, and Settings are all live in `modern_shell.py` — see
+> the sections above. Where the two disagree about what *works today*, the
+> sections above win. The one design element below that is still genuinely
+> unbuilt is the per-game "match confidence" readout, which must stay unbuilt
+> until real scoring exists (today's value is a constant, not a measurement).
 
 ## Screens / Views
 

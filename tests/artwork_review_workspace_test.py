@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from steam_shortcut_studio.artwork_bulk_search import (  # noqa: E402
+    PLACEHOLDER_IDENTITY_SCORE,
+    PLACEHOLDER_SET_COHERENCE_SCORE,
+)
+from steam_shortcut_studio.artwork_policy import ArtworkEvidence  # noqa: E402
 from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
+    ArtworkReviewQueue,
     ArtworkReviewRow,
+    artwork_queue_progress_text,
     artwork_rejection_clear_message,
     artwork_review_action_message,
     artwork_review_detail_text,
@@ -21,6 +29,21 @@ from steam_shortcut_studio.artwork_review_workspace import (  # noqa: E402
     review_result_slot_count,
     selected_artwork_review_results,
     source_review_clear_message,
+)
+from steam_shortcut_studio.bulk_artwork import (  # noqa: E402
+    ArtworkSearchMode,
+    ArtworkSearchOutcome,
+    BulkArtworkCoordinator,
+    BulkArtworkItem,
+)
+from steam_shortcut_studio.job_queue import BackgroundJobQueue, JobEvent  # noqa: E402
+from steam_shortcut_studio.jobs import JobState  # noqa: E402
+from steam_shortcut_studio.library_controller import LibraryController  # noqa: E402
+from steam_shortcut_studio.library_store import LibraryStore  # noqa: E402
+from steam_shortcut_studio.selection import SelectionState  # noqa: E402
+from steam_shortcut_studio.sources.base import (  # noqa: E402
+    SourceLibraryItem,
+    stable_source_item_id,
 )
 
 
@@ -171,6 +194,262 @@ def test_build_artwork_review_summary_counts_items_and_slots() -> None:
     assert summary.pending_slot_count == 3
 
 
+def _event(
+    job_id: str,
+    state: JobState,
+    *,
+    result: dict | None = None,
+    message: str = "",
+    error: str = "",
+) -> JobEvent:
+    return JobEvent(
+        job_id=job_id,
+        item_id="ignored-the-queue-uses-its-own-mapping",
+        state=state,
+        progress=0.0,
+        message=message,
+        error=error,
+        result=result or {},
+    )
+
+
+def test_review_queue_ignores_events_for_jobs_it_does_not_own() -> None:
+    queue = ArtworkReviewQueue()
+    queue.track("job-1", "item-1")
+
+    assert queue.tracks("job-1") is True
+    assert queue.tracks("job-other") is False
+    assert queue.handle_event(_event("job-other", JobState.SUCCEEDED)) is None
+
+
+def test_review_queue_reports_running_progress_without_finishing_the_job() -> None:
+    queue = ArtworkReviewQueue()
+    queue.track("job-1", "item-1")
+
+    update = queue.handle_event(_event("job-1", JobState.RUNNING, message="Searching providers"))
+
+    assert update is not None
+    assert (update.item_id, update.terminal, update.needs_review) == ("item-1", False, False)
+    assert update.status == "Searching providers"
+    assert queue.active_job_count == 1
+
+
+def test_review_queue_holds_needs_review_results_for_a_human_decision() -> None:
+    queue = ArtworkReviewQueue()
+    queue.track("job-1", "item-1")
+    result = {
+        "item_id": "item-1",
+        "decision": "review",
+        "requested_slots": ["grid", "hero"],
+        "candidate_ids": {"grid": "grid-1", "hero": "hero-1"},
+    }
+
+    update = queue.handle_event(_event("job-1", JobState.NEEDS_REVIEW, result=result))
+
+    assert update is not None
+    assert (update.terminal, update.needs_review) == (True, True)
+    assert update.status == "Artwork review (grid, hero)"
+    assert queue.pending_item_ids == ("item-1",)
+    assert queue.pending_slot_count == 2
+    assert queue.result_for("item-1") == result
+    # The job is finished, so it no longer counts as in flight.
+    assert queue.active_job_count == 0
+
+
+def test_review_queue_does_not_hold_decisions_that_persisted_themselves() -> None:
+    queue = ArtworkReviewQueue()
+    queue.track("accepted", "item-1")
+    queue.track("rejected", "item-2")
+
+    accepted = queue.handle_event(
+        _event(
+            "accepted",
+            JobState.SUCCEEDED,
+            result={"item_id": "item-1", "decision": "auto_accept", "requested_slots": ["grid"]},
+        ),
+        accepted=1,
+    )
+    rejected = queue.handle_event(
+        _event(
+            "rejected",
+            JobState.SKIPPED,
+            result={"item_id": "item-2", "decision": "reject", "requested_slots": ["grid"]},
+        ),
+        rejected=1,
+    )
+
+    assert accepted is not None and rejected is not None
+    assert accepted.needs_review is False
+    assert rejected.needs_review is False
+    assert accepted.status == "Artwork auto_accept (grid); saved 1 accepted/0 rejected"
+    assert rejected.status == "Artwork reject (grid); saved 0 accepted/1 rejected"
+    assert queue.pending_item_ids == ()
+
+
+def test_review_queue_surfaces_failures_instead_of_queueing_them_for_review() -> None:
+    queue = ArtworkReviewQueue()
+    queue.track("job-1", "item-1")
+
+    update = queue.handle_event(_event("job-1", JobState.FAILED, error="provider timeout"))
+
+    assert update is not None
+    assert update.terminal is True
+    assert update.needs_review is False
+    assert update.status == "Artwork search failed: provider timeout"
+    assert queue.pending_item_ids == ()
+
+
+def test_review_queue_discard_and_clear_release_pending_items() -> None:
+    queue = ArtworkReviewQueue()
+    for index in (1, 2):
+        queue.track(f"job-{index}", f"item-{index}")
+        queue.handle_event(
+            _event(
+                f"job-{index}",
+                JobState.NEEDS_REVIEW,
+                result={"item_id": f"item-{index}", "decision": "review", "candidate_ids": {"grid": "g"}},
+            )
+        )
+
+    assert len(queue.results_for(("item-1", "item-2"))) == 2
+    assert queue.discard("item-1") is True
+    assert queue.discard("item-1") is False
+    assert queue.pending_item_ids == ("item-2",)
+    assert queue.clear() == 1
+    assert queue.pending_item_ids == ()
+
+
+def test_artwork_queue_progress_text_distinguishes_running_from_finished() -> None:
+    assert artwork_queue_progress_text(2, 1) == "Artwork search: 2 job(s) running, 1 awaiting review."
+    assert artwork_queue_progress_text(0, 3) == "Artwork search finished. 3 game(s) awaiting review."
+    assert artwork_queue_progress_text(0, 0) == "Artwork search finished. Nothing is awaiting review."
+
+
+def test_real_coordinator_results_land_in_the_review_queue() -> None:
+    """End-to-end: the policy routes a plausible match to review, not to disk."""
+    queue = ArtworkReviewQueue()
+    item = BulkArtworkItem("item-1", "Example")
+    outcome = ArtworkSearchOutcome(
+        evidence=ArtworkEvidence(
+            identity_score=PLACEHOLDER_IDENTITY_SCORE,
+            set_coherence_score=PLACEHOLDER_SET_COHERENCE_SCORE,
+            source="real-providers",
+        ),
+        found_slots=frozenset({"grid"}),
+        provider="real-providers",
+        candidate_ids={"grid": "grid-1"},
+    )
+    selection = SelectionState(selected_ids={"item-1"})
+
+    with BackgroundJobQueue(max_workers=1) as jobs:
+        submission = BulkArtworkCoordinator(jobs).submit_selected(
+            selection,
+            ["item-1"],
+            {"item-1": item},
+            lambda *args: outcome,
+            mode=ArtworkSearchMode.ALL_UNLOCKED,
+        )
+        for job in submission.jobs:
+            queue.track(job.job_id, job.item_id)
+        jobs.wait_for_idle(timeout=10)
+        events = jobs.drain_events()
+
+    updates = [update for event in events if (update := queue.handle_event(event)) is not None]
+
+    assert [job.item_id for job in submission.jobs] == ["item-1"]
+    assert any(update.needs_review for update in updates)
+    assert queue.pending_item_ids == ("item-1",)
+    assert queue.result_for("item-1")["decision"] == "review"
+
+
+def _stored_item(external_id: str, title: str) -> SourceLibraryItem:
+    return SourceLibraryItem(
+        stable_id=stable_source_item_id("epic", external_id=external_id),
+        source="epic",
+        external_id=external_id,
+        title=title,
+        install_path=rf"C:\Games\{title}",
+        launch_target=rf"C:\Games\{title}\{title}.exe",
+        platform="windows",
+        size_bytes=1024,
+        launch_target_exists=True,
+    )
+
+
+def test_accepting_a_queued_review_locks_the_slot_and_releases_the_item() -> None:
+    """Accept persists a local lock only — never a write into Steam."""
+    with tempfile.TemporaryDirectory() as tmp:
+        store = LibraryStore(Path(tmp) / "library.sqlite3")
+        stored = _stored_item("one", "Example")
+        store.replace_source_snapshot("epic", [stored])
+        controller = LibraryController(store)
+        try:
+            queue = ArtworkReviewQueue()
+            queue.track("job-1", stored.stable_id)
+            queue.handle_event(
+                _event(
+                    "job-1",
+                    JobState.NEEDS_REVIEW,
+                    result={
+                        "item_id": stored.stable_id,
+                        "decision": "review",
+                        "requested_slots": ["grid"],
+                        "provider": "real-providers",
+                        "candidate_ids": {"grid": "grid-1"},
+                        "details": {"validated_files": {"grid": {"path": r"C:\cache\grid-1.png"}}},
+                    },
+                )
+            )
+
+            result = queue.result_for(stored.stable_id)
+            assert result is not None
+            persistence = controller.accept_artwork_review_result(result)
+            queue.discard(stored.stable_id)
+
+            assert persistence.accepted == 1
+            assert queue.pending_item_ids == ()
+            locks = store.list_artwork_locks(stored.stable_id)
+            assert [(lock.slot, lock.candidate_id) for lock in locks] == [("grid", "grid-1")]
+            assert locks[0].local_path == r"C:\cache\grid-1.png"
+        finally:
+            controller.close(wait=False, cancel_pending=True)
+
+
+def test_rejecting_a_queued_review_records_the_candidate_and_locks_nothing() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        store = LibraryStore(Path(tmp) / "library.sqlite3")
+        stored = _stored_item("one", "Example")
+        store.replace_source_snapshot("epic", [stored])
+        controller = LibraryController(store)
+        try:
+            queue = ArtworkReviewQueue()
+            queue.track("job-1", stored.stable_id)
+            queue.handle_event(
+                _event(
+                    "job-1",
+                    JobState.NEEDS_REVIEW,
+                    result={
+                        "item_id": stored.stable_id,
+                        "decision": "review",
+                        "provider": "real-providers",
+                        "candidate_ids": {"grid": "grid-1"},
+                    },
+                )
+            )
+
+            result = queue.result_for(stored.stable_id)
+            assert result is not None
+            persistence = controller.reject_artwork_review_result(result)
+            queue.discard(stored.stable_id)
+
+            assert persistence.rejected == 1
+            assert store.list_artwork_locks(stored.stable_id) == []
+            rejected = store.list_rejected_matches(stored.stable_id)
+            assert [(match.slot, match.candidate_id) for match in rejected] == [("grid", "grid-1")]
+        finally:
+            controller.close(wait=False, cancel_pending=True)
+
+
 if __name__ == "__main__":
     test_build_artwork_review_rows_preserves_item_order_and_slot_metadata()
     test_review_result_slot_count_only_counts_known_slots()
@@ -180,4 +459,14 @@ if __name__ == "__main__":
     test_pending_review_item_ids_preserves_selected_order()
     test_selected_artwork_review_results_preserves_selected_order()
     test_build_artwork_review_summary_counts_items_and_slots()
+    test_review_queue_ignores_events_for_jobs_it_does_not_own()
+    test_review_queue_reports_running_progress_without_finishing_the_job()
+    test_review_queue_holds_needs_review_results_for_a_human_decision()
+    test_review_queue_does_not_hold_decisions_that_persisted_themselves()
+    test_review_queue_surfaces_failures_instead_of_queueing_them_for_review()
+    test_review_queue_discard_and_clear_release_pending_items()
+    test_artwork_queue_progress_text_distinguishes_running_from_finished()
+    test_real_coordinator_results_land_in_the_review_queue()
+    test_accepting_a_queued_review_locks_the_slot_and_releases_the_item()
+    test_rejecting_a_queued_review_records_the_candidate_and_locks_nothing()
     print("Artwork review workspace tests passed.")

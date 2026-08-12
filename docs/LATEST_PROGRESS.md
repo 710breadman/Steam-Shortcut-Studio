@@ -80,17 +80,14 @@ python prototypes/modern_library.py
 
 ## Remaining High-Priority Work
 
-1. Build the bulk artwork review queue in the modern shell, then wire the
-   top-bar `Auto-Art` tile and bulk `Find Art` button to
-   `BulkArtworkCoordinator` behind it. This is the only functional stub left in
-   the modern shell.
-2. Replace the hardcoded 70/60 confidence placeholders with real identity and
-   set-coherence scoring, so `ArtworkMatchPolicy`'s auto-accept path (92/85)
-   becomes reachable instead of routing every match to review.
-3. Add GOG, Playnite, EA, Ubisoft, and Battle.net adapters.
-4. Reduce `ui.py` (still 5,600+ lines) as the modern shell takes over its
+1. Replace the hardcoded 70/60 confidence placeholders in
+   `artwork_bulk_search.py` with real identity and set-coherence scoring, so
+   `ArtworkMatchPolicy`'s auto-accept path (92/85) becomes reachable instead of
+   routing every single match to the review queue.
+2. Add GOG, Playnite, EA, Ubisoft, and Battle.net adapters.
+3. Reduce `ui.py` (still 5,600+ lines) as the modern shell takes over its
    workflows; retire legacy paths only once the modern equivalent is proven.
-5. Expand safe native Steam controls only after field ownership research and
+4. Expand safe native Steam controls only after field ownership research and
    rollback tests.
 
 ## Completed Since the Last Revision
@@ -102,6 +99,8 @@ python prototypes/modern_library.py
   transactions, which were previously invisible everywhere.
 - The modern shell writes real shortcuts and copies real locked artwork into
   Steam through the existing verified transaction services.
+- Bulk Auto-Art submits selected rows through `BulkArtworkCoordinator` into a
+  real review queue with per-slot previews and accept/reject/skip/retry.
 
 ## Work Boundary
 

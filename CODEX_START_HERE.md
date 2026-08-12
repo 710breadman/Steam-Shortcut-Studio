@@ -51,9 +51,10 @@ Then inspect the current repository. Documentation describes intent; code and te
 
 ## Active Engineering Goal
 
-Build the **bulk artwork review queue** in `prototypes/modern_shell.py`, then
-wire the top-bar `Auto-Art` tile and the bulk bar's `Find Art` button to
-`BulkArtworkCoordinator` behind it.
+Replace the **placeholder artwork confidence scores** with real identity and
+set-coherence scoring, so `ArtworkMatchPolicy`'s auto-accept path becomes
+reachable for genuinely strong complete matches instead of every match needing
+a human decision. See "Exact Next Action" in `docs/SPRINT_STATUS.md`.
 
 Already wired — do not rebuild:
 
@@ -75,12 +76,18 @@ Already wired — do not rebuild:
   not swallowed.
 - **Per-slot Auto Match / Replace / Clear** — real provider search, download,
   and validation, locking to local cache + SQLite only.
+- **Bulk Auto-Art** — the top-bar tile and the bulk bar's `Find Art` submit
+  selected rows through `BulkArtworkCoordinator`; `ArtworkReviewQueue` holds the
+  `NEEDS_REVIEW` results and the Artwork screen renders them with per-slot
+  previews and accept / reject / skip / retry. Accepting locks locally only.
+- **One shared provider searcher** — `artwork_bulk_search.build_provider_searcher`,
+  used by both the legacy UI and the modern shell.
 
-The remaining gap is bulk matching. `ArtworkMatchPolicy` routes anything below
-92 identity / 85 set-coherence to `NEEDS_REVIEW`, and the only real provider
-searcher reports hardcoded 70/60 (`ui.py:3377`) — so every real bulk match needs
-review, and the modern shell has nowhere to show it yet. Build that surface
-before wiring the bulk buttons.
+The remaining gap is scoring. `ArtworkMatchPolicy` routes anything below 92
+identity / 85 set-coherence to `NEEDS_REVIEW`, and the shared searcher reports a
+constant 70/60 (`artwork_bulk_search.PLACEHOLDER_*`) because no real scorer
+exists. Everything therefore needs review. Build the scorer; keep the review
+queue as the destination for anything genuinely uncertain.
 
 ## Required Safety Rules
 
@@ -92,7 +99,7 @@ before wiring the bulk buttons.
 - Do not let worker threads touch UI widgets.
 - Do not let partial or unavailable source scans mark stored games missing.
 - Do not discard manual overrides, artwork locks, or rejected matches during rescans.
-- Do not enable a modern-shell action merely because the interface exists — only enable it once it is wired to the real, verified service behind it (shortcut writes: done; artwork copy-to-Steam: done; bulk Auto-Art: still gated on the review queue).
+- Do not enable a modern-shell action merely because the interface exists — only enable it once it is wired to the real, verified service behind it (shortcut writes, artwork copy-to-Steam, and bulk Auto-Art are all wired; the Extensions screen is still an honest placeholder).
 - Do not display a confidence number sourced from the hardcoded 70/60 placeholders as if it were a measurement.
 - Keep risky native Steam fields read-only until their ownership and rollback behavior are proven.
 

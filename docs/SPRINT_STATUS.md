@@ -25,8 +25,9 @@ Before changing code:
 - **Current controller foundation:** Tk-free persistent `LibraryController`
 - **Additional sources complete:** read-only native Steam and loose-folder adapters
 - **Write loop complete:** modern shell Apply Changes writes real shortcuts *and* copies locked artwork into Steam's grid folder
-- **Current active engineering track:** Bulk artwork review queue in the modern shell
-- **Next visible milestone:** Top-bar Auto-Art / bulk `Find Art` backed by `BulkArtworkCoordinator` and a real review surface
+- **Bulk artwork complete:** `Auto-Art` / `Find Art` submit through `BulkArtworkCoordinator` into a real review queue on the Artwork screen
+- **Current active engineering track:** Real artwork identity and set-coherence scoring
+- **Next visible milestone:** Genuinely strong complete matches auto-accept instead of every match needing review
 - **Launcher fix:** `run.ps1` and `run.bat` now require a Python with `customtkinter`, so repo launch helpers open the modern shell instead of the bundled legacy fallback.
 - **Priority feature after that:** Remaining Windows launcher adapters (GOG, Playnite, EA, Ubisoft, Battle.net)
 - **Latest UI slice:** `prototypes/modern_shell.py` is the real production shell (launched by `run.bat` / `run.ps1` via `prototypes/modern_library.py`). It reads the real persistent library through `LibraryController` / `LibraryStore`, runs every long operation on `BackgroundJobQueue` with Tk-thread polling, and has no mock game data left. Apply Changes performs real transactional shortcut writes *and* real locked-artwork copies into Steam's grid folder in one pass; per-slot Auto Match / Replace / Clear perform real provider search, download, validation, and lock/unlock against local cache + SQLite only.
@@ -166,15 +167,17 @@ Remaining:
 - [x] Convert provider responses into validated coordinator outcomes
 - [x] Persist accepted/rejected candidate decisions through the library store
 - [x] Connect progress, review, retry, and apply controls to the legacy production UI
-- [ ] Connect bulk `Find Artwork for Selected` to the modern shell behind a real review queue
+- [x] Connect bulk `Find Artwork for Selected` to the modern shell behind a real review queue
 
-The legacy `ui.py` path is fully wired (`queue_persistent_artwork_searches`,
-artwork decisions dialog, accept/reject/skip/retry). The modern shell is **not**:
-its top-bar `Auto-Art` tile and the bulk bar's `Find Art` button both open an
-explanatory dialog (`ModernShell._auto_art_info`) instead of queueing work,
-because unattended bulk matching needs a review surface the modern shell does
-not have yet. Per-slot Auto Match / Replace are fully live and deliberately
-bypass the coordinator (a per-slot click is one supervised action).
+Both UIs are now wired. The legacy path uses `queue_persistent_artwork_searches`
+plus the artwork decisions dialog; the modern shell's top-bar `Auto-Art` tile and
+bulk `Find Art` button submit selected rows through `BulkArtworkCoordinator` and
+land the results in the Artwork screen's review queue. Both share one real
+provider searcher (`artwork_bulk_search.build_provider_searcher`) rather than
+keeping a closure each.
+
+Per-slot Auto Match / Replace deliberately bypass the coordinator: a per-slot
+click is already one supervised action.
 
 ## Modern UI
 
@@ -216,10 +219,22 @@ Write path (all through the existing, unmodified transaction services):
 - [x] Per-game artwork failures are surfaced, not swallowed as legacy `ui.py` does
 - [x] Per-slot Auto Match / Replace / Clear operate on local cache + SQLite only
 
+Bulk artwork review queue (live):
+
+- [x] Top-bar `Auto-Art` and bulk `Find Art` submit selected rows through `BulkArtworkCoordinator`
+- [x] Submission scope is an explicit `SelectionState` built from the passed IDs, so a retry cannot widen into the live table selection
+- [x] Both UIs share one real provider searcher, `artwork_bulk_search.build_provider_searcher`
+- [x] `ArtworkReviewQueue` holds `NEEDS_REVIEW` results Tk-free; auto-accepted and policy-rejected decisions persist themselves through `LibraryController`
+- [x] Artwork screen shows pending items with per-slot candidate previews decoded from the validated cache file
+- [x] Accept / Reject / Skip / Retry per item, plus Accept All / Reject All / Skip All
+- [x] Accept locks locally only — Apply Changes stays the single path into Steam
+- [x] Failed jobs surface their error instead of being queued as reviewable
+
 Not yet done:
 
-- [ ] Bulk Auto-Art / bulk `Find Art` (gated behind the missing review queue)
 - [ ] Real identity/set-coherence scoring to replace hardcoded confidence values
+- [ ] Per-slot candidate alternatives in the review queue (it shows the one validated candidate per slot the searcher selected)
+- [ ] Cancel control for in-flight bulk artwork jobs in the modern shell
 - [ ] Extensions screen (placeholder text only)
 - [ ] `_visible_rows` search/filter/sort still duplicates `modern_library_view.py` logic instead of reusing it
 
@@ -501,11 +516,21 @@ Suite repair and full-suite evidence, 2026-08-12:
 - Corrected the `ui-prototype` import assertion in `.github/workflows/ci.yml`
 - Re-ran the whole suite: every `tests/*_test.py` passes, plus `python -m compileall -q steam_shortcut_studio tests main.py` and the CI import check
 
+Bulk artwork review queue, 2026-08-12:
+
+- Added `steam_shortcut_studio/artwork_bulk_search.py` — one real provider searcher for bulk work, with the placeholder confidence constants named and documented in one place — and replaced legacy `ui.py`'s inline closure with it so there is a single implementation rather than one per UI
+- Added `ArtworkReviewQueue`, `ArtworkQueueUpdate`, `artwork_job_status_text`, and `artwork_queue_progress_text` to `artwork_review_workspace.py`; the queue folds job events Tk-free and holds only `NEEDS_REVIEW` results
+- Wired `ModernShell._start_bulk_auto_art` / `_submit_artwork_jobs` to `BulkArtworkCoordinator` and replaced the explanatory stub on the top-bar `Auto-Art` tile and the bulk bar's `Find Art` button
+- Built the review queue section on the Artwork screen: per-item cards, per-slot candidate rows with real decoded thumbnails (monogram fallback when a file will not decode, never another game's art), a details dialog, and accept/reject/skip/retry plus batch actions
+- Added `tests/artwork_bulk_search_test.py` (7 assertions incl. a regression guard that the placeholder scores can never clear `ArtworkMatchPolicy`'s auto thresholds) and 10 new cases in `tests/artwork_review_workspace_test.py`, covering the coordinator → queue → accept/reject chain against a real `LibraryStore`
+- Added the new suite to `.github/workflows/ci.yml`
+- Ran every `tests/*_test.py` on Windows / Python 3.11: all pass. Also constructed a real `ModernShell` against a temporary library and rendered all ten screens, including the review queue with one decodable and one missing candidate file, without error
+
 ## Known Risks
 
 - `ui.py` still contains too many responsibilities (5,600+ lines)
 - Current provider download, auto-selection, and review presentation still run through the legacy UI path
-- **Confidence scores are placeholders.** `ui.py:3377` hardcodes `identity_score=70` / `set_coherence_score=60` for every real provider result, so `ArtworkMatchPolicy`'s automatic thresholds (92 / 85) are unreachable and no real match ever auto-accepts. Any UI that shows "match confidence" today would be showing a constant, not a measurement.
+- **Confidence scores are placeholders.** `artwork_bulk_search.PLACEHOLDER_IDENTITY_SCORE` / `PLACEHOLDER_SET_COHERENCE_SCORE` report a constant 70 / 60 for every real provider result, so `ArtworkMatchPolicy`'s automatic thresholds (92 / 85) are unreachable and no real match ever auto-accepts. Everything routes to the review queue, and any UI that showed "match confidence" today would be showing a constant, not a measurement.
 - The modern shell must not become a second implementation of domain logic; `ModernShell._visible_rows` already duplicates search/filter/sort logic that `modern_library_view.py` owns
 - The Backups screen caps rendering at the 50 most recent transactions; older restore points exist on disk but are not listed
 - Two prototype suites silently broke when the modern shell was rewritten and were only caught by running the suite by hand — the `ui-prototype` CI job was red on `main` from `53c398b` until `2026-08-12`
@@ -524,31 +549,35 @@ Steam-closed window. Per-slot Auto Match / Replace / Clear are live. Artwork
 transactions are visible on the Backups screen via
 `transaction_history.list_artwork_transaction_history`.
 
-**Next:** build the bulk artwork review queue in the modern shell, then wire
-the top-bar `Auto-Art` tile and the bulk bar's `Find Art` button to
-`BulkArtworkCoordinator` behind it.
+**Also done:** the bulk artwork review queue. `Auto-Art` and bulk `Find Art`
+submit through `BulkArtworkCoordinator`; `ArtworkReviewQueue` holds the
+`NEEDS_REVIEW` results; the Artwork screen renders them with per-slot previews
+and accept/reject/skip/retry. Both UIs share
+`artwork_bulk_search.build_provider_searcher`.
 
-Why this is the gate: `ArtworkMatchPolicy` sends anything below 92 identity /
-85 set-coherence to `JobState.NEEDS_REVIEW`, and the only real provider
-searcher in the repo (`ui.py:3372`) reports hardcoded 70/60 — so in practice
-*every* bulk match lands in review. Without a review surface the modern shell
-has nowhere to put those results, which is why the bulk buttons are gated
-rather than wired.
+**Next:** real identity and set-coherence scoring.
+
+Why this is now the top item: `artwork_bulk_search` reports a constant 70/60 for
+every provider result, deliberately below `ArtworkMatchPolicy`'s 92/85, so every
+single bulk match needs a human decision. That is honest but expensive — the
+policy's auto-accept path, the `MISSING_ONLY` / `COMPLETE_SET` modes, and the
+"strong complete matches may auto-apply" product decision are all unreachable
+until a real scorer exists. Candidate signals already available: provider
+response fields, `image_validation`'s dimensions and perceptual hash,
+`scanner.similarity` / `is_specific_title_match`, and the edition/year conflict
+flags `ArtworkEvidence` already declares but nothing populates.
 
 Constraints for this work:
 
-1. Consume the existing Tk-free pieces — `BulkArtworkCoordinator`,
-   `ArtworkMatchPolicy`, `artwork_review_workspace.py`,
-   `LibraryController.accept_artwork_review_result` /
-   `reject_artwork_review_result` — do not reimplement them in the shell.
-2. Do not mirror legacy `ui.py`'s review logic into a third implementation.
-3. Keep the legacy scan/write workflows working during migration.
-4. Never bypass `shortcut_transactions.py` / `artwork_transactions.py` for writes.
-5. Accepting a candidate must only lock it locally; getting it into Steam stays
-   an explicit Apply Changes step.
+1. Score inside a Tk-free module the coordinator can call; do not score in a UI.
+2. Populate `ArtworkEvidence.conflicting_edition` / `conflicting_year` rather
+   than folding those signals into a single opaque number.
+3. Never present a placeholder as a measured confidence.
+4. Keep the review queue as the destination for anything below threshold.
+5. Never bypass `shortcut_transactions.py` / `artwork_transactions.py` for writes.
 
 ## Next Codex Prompt
 
 ```text
-Read CODEX_START_HERE.md and all linked docs. The shortcut AND artwork write paths are transactional, verified, and live in the modern shell's Apply Changes (see ui_library_adapter.writable_game_from_library_row / artwork_copy_skip_reason / apply_locked_artwork and modern_shell.py's _apply_changes/_apply_changes_job). Per-slot Auto Match/Replace/Clear are live too. Do not rebuild any of this. The next slice is the bulk artwork review queue in prototypes/modern_shell.py: a screen that shows NEEDS_REVIEW results from BulkArtworkCoordinator with per-slot candidate previews and accept/reject/skip/retry, then wiring the top-bar Auto-Art tile and the bulk bar's Find Art button to submit selected rows through the coordinator. Reuse artwork_review_workspace.py, LibraryController.accept_artwork_review_result/reject_artwork_review_result, and ArtworkProviderSearchService — do not write a third copy of legacy ui.py's review logic. Accepting a candidate locks it locally only; Apply Changes stays the single path into Steam. Keep LibraryController and SelectionState as the source of truth. Use stable IDs. Add tests without constructing a Tk window. Run every tests/*_test.py suite and update SPRINT_STATUS with exact evidence. Small reviewable commits.
+Read CODEX_START_HERE.md and all linked docs. Already live, do not rebuild: transactional shortcut writes AND artwork copies in the modern shell's Apply Changes; per-slot Auto Match/Replace/Clear; and the bulk artwork review queue (Auto-Art / Find Art -> BulkArtworkCoordinator -> ArtworkReviewQueue -> the Artwork screen's accept/reject/skip/retry). Both UIs share artwork_bulk_search.build_provider_searcher. The next slice is real artwork confidence scoring: replace artwork_bulk_search's constant PLACEHOLDER_IDENTITY_SCORE=70 / PLACEHOLDER_SET_COHERENCE_SCORE=60 with a Tk-free scorer the coordinator calls, so ArtworkMatchPolicy's auto-accept path (92/85) becomes reachable for genuinely strong complete matches and weak ones still route to the review queue. Populate ArtworkEvidence.conflicting_edition / conflicting_year instead of collapsing every signal into one number; reuse scanner.similarity / is_specific_title_match and image_validation's dimensions and perceptual hash rather than inventing new matching logic. Never present a placeholder as a measured confidence. Keep LibraryController and SelectionState as the source of truth. Use stable IDs. Add tests without constructing a Tk window. Run every tests/*_test.py suite and update SPRINT_STATUS with exact evidence. Small reviewable commits.
 ```

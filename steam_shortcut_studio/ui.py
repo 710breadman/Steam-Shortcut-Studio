@@ -30,7 +30,7 @@ except ImportError:  # pragma: no cover - Windows-only system theme lookup
 
 from . import __app_name__, __version__
 from .artwork import asset_download_cache_path, copy_all_artwork_to_steam, download_asset, load_existing_artwork_for_games
-from .artwork_provider_adapter import validated_artwork_assets_to_search_outcome
+from .artwork_bulk_search import build_provider_searcher
 from .artwork_queue_status import (
     artwork_cleared_message,
     artwork_editor_opened_message,
@@ -3341,44 +3341,16 @@ class MainWindow(tk.Tk):
         provider_service = ArtworkProviderSearchService(self.logger)
         game_by_item_id = library_games_by_item_id(self.games)
 
-        def provider_searcher(item, requested_slots, token, report_progress):
-            token.raise_if_cancelled()
-            game = game_by_item_id.get(item.item_id)
-            if game is None:
-                return validated_artwork_assets_to_search_outcome(
-                    {},
-                    requested_slots,
-                    cache_dir=cache_dir,
-                    provider="real-providers",
-                    identity_score=0,
-                    set_coherence_score=0,
-                    reasons=("Stored row is no longer visible in the production table.",),
-                    logger=self.logger,
-                )
-            report_progress(0.15, f"Searching providers for {item.title}")
-            term = game.source_title or game.title or game.display_title
-            assets_by_kind = provider_service.collect_assets(
-                game,
-                term,
-                client,
-                use_sgdb_cache=True,
-                enabled_sources=enabled_sources,
-                rawg_api_key=rawg_api_key,
-                allow_metadata_updates=False,
-                cancellation_checkpoint=token.raise_if_cancelled,
-            )
-            token.raise_if_cancelled()
-            report_progress(0.65, f"Validating artwork candidates for {item.title}")
-            return validated_artwork_assets_to_search_outcome(
-                assets_by_kind,
-                requested_slots,
-                cache_dir=cache_dir,
-                provider="real-providers",
-                identity_score=70,
-                set_coherence_score=60,
-                reasons=("Provider candidates are decoded and cached; identity scoring still requires review.",),
-                logger=self.logger,
-            )
+        provider_searcher = build_provider_searcher(
+            game_lookup=game_by_item_id.get,
+            collect_assets=provider_service.collect_assets,
+            client=client,
+            cache_dir=cache_dir,
+            enabled_sources=enabled_sources,
+            rawg_api_key=rawg_api_key,
+            missing_game_reason="Stored row is no longer visible in the production table.",
+            logger=self.logger,
+        )
 
         submission = BulkArtworkCoordinator(self.library_controller.job_queue).submit_selected(
             self.library_controller.selection,
