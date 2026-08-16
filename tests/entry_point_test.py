@@ -20,69 +20,68 @@ class _Recorder:
         return 0
 
 
-def _run(argv, *, modern: _Recorder, classic: _Recorder) -> int:
+def _run(argv, *, modern: _Recorder) -> int:
     original_modern = entry_point.run_modern
-    original_classic = entry_point.run_classic
     entry_point.run_modern = modern
-    entry_point.run_classic = classic
     try:
         return entry_point.main(argv)
     finally:
         entry_point.run_modern = original_modern
-        entry_point.run_classic = original_classic
 
 
 def test_default_launch_opens_the_modern_shell() -> None:
-    modern, classic = _Recorder(), _Recorder()
+    modern = _Recorder()
 
-    assert _run([], modern=modern, classic=classic) == 0
+    assert _run([], modern=modern) == 0
     assert modern.calls == [(None, False)]
-    assert classic.calls == []
 
 
-def test_classic_flag_opens_the_classic_window_without_touching_the_shell() -> None:
-    modern, classic = _Recorder(), _Recorder()
+def test_the_classic_flag_no_longer_exists() -> None:
+    """The modern shell is the only interface; --classic must be rejected."""
+    modern = _Recorder()
 
-    assert _run(["--classic"], modern=modern, classic=classic) == 0
-    assert classic.calls == [()]
+    try:
+        _run(["--classic"], modern=modern)
+    except SystemExit as exit_error:
+        assert exit_error.code != 0
+    else:  # pragma: no cover - guarded by the assertion below
+        raise AssertionError("--classic must not be accepted any more.")
     assert modern.calls == []
 
 
 def test_database_and_include_missing_reach_the_modern_shell() -> None:
-    modern, classic = _Recorder(), _Recorder()
+    modern = _Recorder()
 
-    _run(["--database", r"C:\tmp\library.sqlite3", "--include-missing"], modern=modern, classic=classic)
+    _run(["--database", r"C:\tmp\library.sqlite3", "--include-missing"], modern=modern)
 
     (database, include_missing), = modern.calls
     assert Path(database) == Path(r"C:\tmp\library.sqlite3")
     assert include_missing is True
 
 
-def test_a_missing_gui_dependency_degrades_to_the_classic_window() -> None:
-    """A packaging mistake must not leave a user with no app at all."""
-    modern, classic = _Recorder(fail_with=ImportError), _Recorder()
+def test_a_missing_gui_dependency_fails_loudly() -> None:
+    """A packaging mistake must be obvious, not a silent downgrade."""
+    modern = _Recorder(fail_with=ImportError)
 
-    assert _run([], modern=modern, classic=classic) == 0
+    assert _run([], modern=modern) == 1
     assert len(modern.calls) == 1
-    assert classic.calls == [()]
 
 
 def test_unexpected_shell_errors_are_not_silently_swallowed() -> None:
-    modern, classic = _Recorder(fail_with=RuntimeError), _Recorder()
+    modern = _Recorder(fail_with=RuntimeError)
 
     try:
-        _run([], modern=modern, classic=classic)
+        _run([], modern=modern)
     except RuntimeError:
         pass
     else:  # pragma: no cover - guarded by the assertion below
-        raise AssertionError("A real shell failure must surface, not fall back silently.")
-    assert classic.calls == []
+        raise AssertionError("A real shell failure must surface, not be swallowed.")
 
 
 if __name__ == "__main__":
     test_default_launch_opens_the_modern_shell()
-    test_classic_flag_opens_the_classic_window_without_touching_the_shell()
+    test_the_classic_flag_no_longer_exists()
     test_database_and_include_missing_reach_the_modern_shell()
-    test_a_missing_gui_dependency_degrades_to_the_classic_window()
+    test_a_missing_gui_dependency_fails_loudly()
     test_unexpected_shell_errors_are_not_silently_swallowed()
     print("Entry point tests passed.")

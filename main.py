@@ -1,37 +1,30 @@
 """Steam Shortcut Studio entry point.
 
-Launches the modern shell by default. The classic window remains available:
-
-    SteamShortcutStudio --classic
-
-If the modern shell cannot start because its GUI dependency is unavailable in
-this build, the classic window is used instead rather than failing outright --
-a packaging mistake should degrade the interface, never leave a user with no
-app at all.
+The modern shell is the only interface. If its GUI dependency is missing the
+app fails loudly with an actionable message rather than quietly opening a
+different, older window -- a silent downgrade is harder to diagnose than a
+clear error.
 """
 from __future__ import annotations
 
 import argparse
-import logging
 import sys
 from pathlib import Path
 from typing import Sequence
 
-LOGGER = logging.getLogger(__name__)
+MISSING_GUI_MESSAGE = (
+    "Steam Shortcut Studio needs the 'customtkinter' package to draw its "
+    "interface.\nInstall it with:\n\n    python -m pip install -r requirements.txt\n"
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="SteamShortcutStudio")
     parser.add_argument(
-        "--classic",
-        action="store_true",
-        help="Open the original window instead of the modern shell.",
-    )
-    parser.add_argument(
         "--database",
         type=Path,
         default=None,
-        help="Persistent library database to open (modern shell only).",
+        help="Persistent library database to open.",
     )
     parser.add_argument(
         "--include-missing",
@@ -39,13 +32,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show games that disappeared in the latest authoritative scan.",
     )
     return parser
-
-
-def run_classic() -> int:
-    from steam_shortcut_studio.app import main as classic_main
-
-    classic_main()
-    return 0
 
 
 def run_modern(database: Path | None, include_missing: bool) -> int:
@@ -61,17 +47,11 @@ def run_modern(database: Path | None, include_missing: bool) -> int:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.classic:
-        return run_classic()
     try:
         return run_modern(args.database, args.include_missing)
     except ImportError:
-        LOGGER.warning(
-            "The modern shell is unavailable in this build; opening the classic "
-            "interface instead.",
-            exc_info=True,
-        )
-        return run_classic()
+        print(MISSING_GUI_MESSAGE, file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
